@@ -22,19 +22,43 @@ export class ApiError extends Error {
   }
 }
 
-export function getToken(): string | null {
+/* وصول آمن للتخزين — بعض المتصفحات تحظر localStorage (تصفح خاص/سياسات) فترمي SecurityError */
+function storageGet(key: string): string | null {
   if (typeof window === "undefined") return null;
-  return window.localStorage.getItem(TOKEN_KEY);
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function storageSet(key: string, value: string): void {
+  try {
+    window.localStorage.setItem(key, value);
+  } catch {
+    /* جلسة بلا تخزين — سيُطلب الدخول عند كل تحديث */
+  }
+}
+
+function storageRemove(key: string): void {
+  try {
+    window.localStorage.removeItem(key);
+  } catch {
+    /* تجاهل */
+  }
+}
+
+export function getToken(): string | null {
+  return storageGet(TOKEN_KEY);
 }
 
 export function setSession(token: string, user: SessionUser): void {
-  window.localStorage.setItem(TOKEN_KEY, token);
-  window.localStorage.setItem(USER_KEY, JSON.stringify(user));
+  storageSet(TOKEN_KEY, token);
+  storageSet(USER_KEY, JSON.stringify(user));
 }
 
 export function getSessionUser(): SessionUser | null {
-  if (typeof window === "undefined") return null;
-  const raw = window.localStorage.getItem(USER_KEY);
+  const raw = storageGet(USER_KEY);
   if (!raw) return null;
   try {
     return JSON.parse(raw) as SessionUser;
@@ -44,8 +68,8 @@ export function getSessionUser(): SessionUser | null {
 }
 
 export function clearSession(): void {
-  window.localStorage.removeItem(TOKEN_KEY);
-  window.localStorage.removeItem(USER_KEY);
+  storageRemove(TOKEN_KEY);
+  storageRemove(USER_KEY);
 }
 
 async function tryRefresh(): Promise<boolean> {
@@ -53,7 +77,7 @@ async function tryRefresh(): Promise<boolean> {
     const response = await fetch("/api/v1/auth/refresh", { method: "POST", credentials: "include" });
     if (!response.ok) return false;
     const body = (await response.json()) as Envelope<{ access_token: string }>;
-    window.localStorage.setItem(TOKEN_KEY, body.data.access_token);
+    storageSet(TOKEN_KEY, body.data.access_token);
     return true;
   } catch {
     return false;

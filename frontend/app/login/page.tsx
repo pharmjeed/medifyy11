@@ -6,7 +6,7 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
-import { ApiError, api, setSession } from "@/lib/api";
+import { ApiError, api, getSessionUser, setSession } from "@/lib/api";
 import type { SessionUser } from "@/lib/types";
 import { Logo } from "@/components/Shell";
 import { Field, SpecBadge, ToastProvider, useToast } from "@/components/ui";
@@ -90,10 +90,9 @@ function LoginInner() {
   const tryRefreshSession = async () => {
     try {
       const body = await api<{ access_token: string }>("/auth/refresh", { method: "POST" });
-      const raw = window.localStorage.getItem("medify_user");
-      if (raw !== null) {
-        window.localStorage.setItem("medify_token", body.data.access_token);
-        const user = JSON.parse(raw) as SessionUser;
+      const user = getSessionUser();
+      if (user !== null) {
+        setSession(body.data.access_token, user);
         toast("جُدّدت الجلسة بصمت دون فقدان العمل (MDF-4012)");
         router.push(user.role === "admin" ? "/admin" : "/doctor");
         return;
