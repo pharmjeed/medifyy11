@@ -1,0 +1,44 @@
+[project]
+name = "medify-backend"
+version = "0.1.0"
+description = "Medify — Saudi ambient AI medical scribe (backend, FastAPI)"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "pydantic>=2.8",
+    "pydantic-settings>=2.4",
+    "sqlalchemy>=2.0.30",
+    "alembic>=1.13",
+    "psycopg[binary]>=3.2",
+    "argon2-cffi>=23.1",
+    "pyjwt>=2.9",
+    "cryptography>=43.0",
+    "uuid6>=2024.1.12",
+    "httpx>=0.27",
+    "python-multipart>=0.0.9",
+    "anthropic>=0.40",
+    "redis>=5.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.2",
+    "pytest-timeout>=2.3",
+    "httpx>=0.27",
+]
+whisper = [
+    "faster-whisper>=1.0",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+timeout = 120
+filterwarnings = ["ignore::DeprecationWarning"]

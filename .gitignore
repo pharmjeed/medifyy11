@@ -1,0 +1,38 @@
+# secrets & env — never commit
+.env
+.env.*
+!.env.example
+!deploy.env.example
+deploy.env
+docs/SECRETS-GENERATED.md
+*.key
+*.pem
+
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+*.egg-info/
+backend/var/
+
+# node / next
+node_modules/
+frontend/.next/
+frontend/out/
+frontend/next-env.d.ts
+frontend/test-results/
+frontend/playwright-report/
+
+# ai models & media
+models/
+*.onnx
+*.bin
+
+# os / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
