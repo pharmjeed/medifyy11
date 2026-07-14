@@ -12,6 +12,7 @@ dependencies = [
     "alembic>=1.13",
     "psycopg[binary]>=3.2",
     "argon2-cffi>=23.1",
+    "email-validator>=2.0",
     "pyjwt>=2.9",
     "cryptography>=43.0",
     "uuid6>=2024.1.12",
