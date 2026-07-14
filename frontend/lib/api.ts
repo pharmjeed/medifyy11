@@ -121,11 +121,16 @@ export async function apiWithHeaders<T>(
 }
 
 export function wsUrl(visitId: string): string {
-  const base =
-    process.env.NEXT_PUBLIC_WS_BASE ??
-    (typeof window !== "undefined" && window.location.protocol === "https:"
-      ? `wss://${window.location.host}`
-      : "ws://localhost:8000");
+  // الأولوية: متغير البيئة الصريح → اشتقاق من عنوان الصفحة (Caddy يمرر /ws للباك اند) → افتراضي التطوير
+  const fromEnv = process.env.NEXT_PUBLIC_WS_BASE;
+  let base: string;
+  if (fromEnv !== undefined && fromEnv !== "") {
+    base = fromEnv;
+  } else if (typeof window !== "undefined") {
+    base = `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}`;
+  } else {
+    base = "ws://localhost:8000";
+  }
   return `${base}/ws/visits/${visitId}/transcribe?token=${getToken() ?? ""}`;
 }
 

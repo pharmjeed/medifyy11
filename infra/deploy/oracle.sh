@@ -132,7 +132,8 @@ deploy_env() {
     run_remote "
         cd /opt/medify/src/infra
         sed 's/REPLACED_BY_ORACLE_SH/$PG_APP_PW/' postgres-init-prod.sql > postgres-init.generated.sql
-        chmod 600 postgres-init.generated.sql
+        # قارئه مستخدم postgres داخل الحاوية (uid 999) — لا chmod 600 لمالك ubuntu
+        sudo chown 999:999 postgres-init.generated.sql && sudo chmod 400 postgres-init.generated.sql
         set -a; source /opt/medify/.env; set +a
         export COMPOSE_PROJECT_NAME=$NAME HTTP_PORT=$HTTP_PORT HTTPS_PORT=$HTTPS_PORT \
                ENVIRONMENT=$ENVIRONMENT SITE_ADDRESS='$SITE_ADDRESS' PUBLIC_ORIGIN='$PUBLIC_ORIGIN' \
@@ -161,6 +162,10 @@ done
 curl -fsS "${HEALTH_URL%/api/v1/health}/" | head -c 200 | grep -qi "<" && echo ">> الصفحة الرئيسية ترجع HTML ✓"
 
 echo ">> [7/7] الاختبار الدخاني"
+# كلمات مرور البذر المولدة على الخادم — يلزمها الدخاني
+SEED_ADMIN_PASSWORD="$(echo "$SECRETS" | grep '^SEED_ADMIN_PASSWORD=' | cut -d= -f2)"
+SEED_DOCTOR_PASSWORD="$(echo "$SECRETS" | grep '^SEED_DOCTOR_PASSWORD=' | cut -d= -f2)"
+export SEED_ADMIN_PASSWORD SEED_DOCTOR_PASSWORD
 bash "$REPO_ROOT/scripts/smoke.sh" "${HEALTH_URL%/api/v1/health}"
 
 echo ">> اكتمل النشر — production على $PROD_HTTP_PORT/$PROD_HTTPS_PORT و staging على $STAGING_HTTP_PORT"

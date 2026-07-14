@@ -15,5 +15,10 @@ export default defineConfig({
     url: "http://localhost:3000",
     reuseExistingServer: true,
     timeout: 120_000,
+    env: {
+      // dev server لا يمرر WS عبر rewrites — الاتصال المباشر بالباك اند
+      NEXT_PUBLIC_WS_BASE: "ws://localhost:8000",
+      NEXT_PUBLIC_SHOW_SPEC_IDS: process.env.NEXT_PUBLIC_SHOW_SPEC_IDS ?? "false",
+    },
   },
 });
