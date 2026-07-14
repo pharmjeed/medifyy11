@@ -186,7 +186,25 @@ def pay_invoice(invoice_id: uuid.UUID, ctx: AdminAuth, db: DB):
         raise MedifyError("MDF-4228") from exc
     invoice.provider_ref = session["provider_ref"]
     audit(db, ctx.facility_id, "invoice.payment_started", "invoice", invoice.id, ctx.user_id)
-    return ok({"checkout_url": session["checkout_url"], "provider_ref": session["provider_ref"]})
+
+    from ...config import get_settings
+    if get_settings().payment_engine == "mock":
+        # D-26: المزود الوهمي يسوّي فوراً (يحاكي redirect+webhook متزامنين) — المزود الحقيقي عبر webhook
+        invoice.status = "paid"
+        invoice.paid_at = dt.datetime.now(dt.timezone.utc)
+        facility = db.execute(select(Facility).where(Facility.id == ctx.facility_id)).scalar_one()
+        remaining_overdue = db.execute(
+            select(func.count(Invoice.id)).where(
+                Invoice.facility_id == ctx.facility_id, Invoice.status == "overdue", Invoice.id != invoice.id
+            )
+        ).scalar_one()
+        if facility.status == "suspended" and remaining_overdue == 0:
+            facility.status = "active"
+            audit(db, ctx.facility_id, "facility.suspension_lifted", "facility", facility.id, ctx.user_id,
+                  {"invoice": invoice.number})
+        audit(db, ctx.facility_id, "invoice.paid", "invoice", invoice.id, ctx.user_id, {"number": invoice.number})
+        return ok({"status": "paid", "provider_ref": session["provider_ref"], "receipt": f"PAY-{invoice.number}"})
+    return ok({"status": "pending", "checkout_url": session["checkout_url"], "provider_ref": session["provider_ref"]})
 
 
 class PaymentWebhookIn(BaseModel):

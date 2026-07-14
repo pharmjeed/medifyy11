@@ -90,6 +90,18 @@ def get_summary(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB, response: Response
         })
     etag = summary_etag(db, visit)
     response.headers["ETag"] = f'"{etag}"'
+    # سجل الاعتماد الإلحاقي — يلزم عرض W-221 (قراءة فقط بعد الاعتماد)
+    approval = db.execute(select(Approval).where(Approval.visit_id == visit.id)).scalar_one_or_none()
+    approval_out = None
+    if approval is not None:
+        from ...models import User
+        approver = db.execute(select(User).where(User.id == approval.approved_by)).scalar_one_or_none()
+        approval_out = {
+            "approved_by": approver.full_name if approver else "—",
+            "approved_at": approval.approved_at.isoformat(),
+            "summary_hash": approval.summary_hash,
+            "codes_hash": approval.codes_hash,
+        }
     return ok({
         "visit_id": str(visit.id),
         "state": visit.state,
@@ -98,6 +110,7 @@ def get_summary(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB, response: Response
         "sections": out_sections,
         "pending_guidance_count": pending_total,
         "etag": etag,
+        "approval": approval_out,
     })
 
 

@@ -1,0 +1,90 @@
+# Medify — بيئة التطوير: postgres16 + redis + backend + frontend (CLAUDE-CODE-PROMPT §٢)
+name: medify-dev
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: medify_owner
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-medify_dev_pw}
+      POSTGRES_DB: medify
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./postgres-init.sql:/docker-entrypoint-initdb.d/10-roles.sql:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U medify_owner -d medify"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  backend:
+    build: ../backend
+    environment:
+      DATABASE_URL: postgresql+psycopg://medify_app:${MEDIFY_APP_PASSWORD:-medify_app_dev}@postgres:5432/medify
+      MIGRATIONS_DATABASE_URL: postgresql+psycopg://medify_owner:${POSTGRES_PASSWORD:-medify_dev_pw}@postgres:5432/medify
+      JWT_SECRET: ${JWT_SECRET:-dev-only-change-me}
+      COLUMN_ENCRYPTION_KEY: ${COLUMN_ENCRYPTION_KEY:-dev-only-column-key}
+      PAYMENT_WEBHOOK_SECRET: ${PAYMENT_WEBHOOK_SECRET:-dev-webhook-secret}
+      REDIS_URL: redis://redis:6379/0
+      STT_ENGINE: ${STT_ENGINE:-mock}
+      LLM_ENGINE: ${LLM_ENGINE:-mock}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      INTEGRATION_ENGINE: ${INTEGRATION_ENGINE:-mock}
+      EMAIL_ENGINE: mock
+      ENVIRONMENT: dev
+      FRONTEND_ORIGIN: http://localhost:3000
+      RECORDINGS_DIR: /data/recordings
+      OUTBOX_DIR: /data/outbox
+    volumes:
+      - appdata:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    command: >
+      sh -c "alembic upgrade head &&
+             python -c 'import urllib.request' &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000"
+
+  seed:
+    build: ../backend
+    profiles: ["seed"]
+    environment:
+      MIGRATIONS_DATABASE_URL: postgresql+psycopg://medify_owner:${POSTGRES_PASSWORD:-medify_dev_pw}@postgres:5432/medify
+      COLUMN_ENCRYPTION_KEY: ${COLUMN_ENCRYPTION_KEY:-dev-only-column-key}
+    volumes:
+      - ../scripts:/scripts:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["python", "/scripts/seed.py"]
+
+  frontend:
+    build:
+      context: ../frontend
+      args:
+        NEXT_PUBLIC_SHOW_SPEC_IDS: "${NEXT_PUBLIC_SHOW_SPEC_IDS:-true}"
+        NEXT_PUBLIC_WS_BASE: "${NEXT_PUBLIC_WS_BASE:-ws://localhost:8000}"
+    environment:
+      API_INTERNAL_URL: http://backend:8000
+    depends_on:
+      - backend
+    ports:
+      - "3000:3000"
+
+volumes:
+  pgdata:
+  appdata:

@@ -1,0 +1,63 @@
+# CI — lint/typecheck/tests على كل push (CLAUDE-CODE-PROMPT §٢ / DOC-17 §١)
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: medify_owner
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: postgres
+        ports: ["5544:5432"]
+        options: >-
+          --health-cmd "pg_isready -U medify_owner"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      TEST_PG_HOST: localhost
+      TEST_PG_PORT: "5544"
+      PGPASSWORD: ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Create RLS app role
+        run: |
+          psql -h localhost -p 5544 -U medify_owner -d postgres \
+            -c "CREATE ROLE medify_app LOGIN PASSWORD 'medify_app';"
+      - name: Install
+        working-directory: backend
+        run: pip install -e ".[dev]"
+      - name: Pytest (isolation + constraints + E2E vs real PostgreSQL 16)
+        working-directory: backend
+        env:
+          TEST_PG_OWNER_PASSWORD: ci
+        run: pytest -q
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install
+        working-directory: frontend
+        run: npm ci --no-audit --no-fund
+      - name: Typecheck (tsc --noEmit — strict)
+        working-directory: frontend
+        run: npm run typecheck
+      - name: Build (next build)
+        working-directory: frontend
+        run: npm run build

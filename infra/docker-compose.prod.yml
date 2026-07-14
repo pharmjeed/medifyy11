@@ -1,0 +1,114 @@
+# Medify — الإنتاج/staging: + caddy بTLS تلقائي (CLAUDE-CODE-PROMPT §٢/§٩)
+# بيئتان على نفس الخادم بقاعدتي بيانات منفصلتين:
+#   production: COMPOSE_PROJECT_NAME=medify-prod  HTTP_PORT=80  HTTPS_PORT=443
+#   staging:    COMPOSE_PROJECT_NAME=medify-staging  HTTP_PORT=8080 HTTPS_PORT=8443
+name: ${COMPOSE_PROJECT_NAME:-medify-prod}
+
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: medify_owner
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in /opt/medify/.env}
+      POSTGRES_DB: medify
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./postgres-init-prod.sql:/docker-entrypoint-initdb.d/10-roles.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U medify_owner -d medify"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  backend:
+    build:
+      context: ../backend
+      args:
+        INSTALL_WHISPER: "${INSTALL_WHISPER:-false}"
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+psycopg://medify_app:${MEDIFY_APP_PASSWORD:?}@postgres:5432/medify
+      MIGRATIONS_DATABASE_URL: postgresql+psycopg://medify_owner:${POSTGRES_PASSWORD}@postgres:5432/medify
+      JWT_SECRET: ${JWT_SECRET:?}
+      COLUMN_ENCRYPTION_KEY: ${COLUMN_ENCRYPTION_KEY:?}
+      PAYMENT_WEBHOOK_SECRET: ${PAYMENT_WEBHOOK_SECRET:?}
+      REDIS_URL: redis://redis:6379/0
+      STT_ENGINE: ${STT_ENGINE:-mock}
+      LLM_ENGINE: ${LLM_ENGINE:-mock}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-4-5}
+      INTEGRATION_ENGINE: ${INTEGRATION_ENGINE:-mock}
+      EMAIL_ENGINE: ${EMAIL_ENGINE:-mock}
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      FRONTEND_ORIGIN: ${PUBLIC_ORIGIN:-http://localhost}
+      RECORDINGS_DIR: /data/recordings
+      OUTBOX_DIR: /data/outbox
+    volumes:
+      - appdata:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: >
+      sh -c "alembic upgrade head &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2"
+
+  seed:
+    build: ../backend
+    profiles: ["seed"]
+    environment:
+      MIGRATIONS_DATABASE_URL: postgresql+psycopg://medify_owner:${POSTGRES_PASSWORD}@postgres:5432/medify
+      COLUMN_ENCRYPTION_KEY: ${COLUMN_ENCRYPTION_KEY:?}
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-}
+      SEED_DOCTOR_PASSWORD: ${SEED_DOCTOR_PASSWORD:-}
+    volumes:
+      - ../scripts:/scripts:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["python", "/scripts/seed.py"]
+
+  frontend:
+    build:
+      context: ../frontend
+      args:
+        NEXT_PUBLIC_SHOW_SPEC_IDS: "${NEXT_PUBLIC_SHOW_SPEC_IDS:-false}"
+        NEXT_PUBLIC_WS_BASE: ""
+        API_INTERNAL_URL: http://backend:8000
+    restart: unless-stopped
+    depends_on:
+      - backend
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      # DOMAIN موجود → TLS تلقائي؛ وإلا HTTP على المنفذ المحدد
+      SITE_ADDRESS: ${SITE_ADDRESS:-:80}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+      - caddyconfig:/config
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    depends_on:
+      - backend
+      - frontend
+
+volumes:
+  pgdata:
+  appdata:
+  caddydata:
+  caddyconfig:

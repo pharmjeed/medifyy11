@@ -1,0 +1,24 @@
+# Medify — Caddy: TLS تلقائي عند وجود DOMAIN وإلا HTTP مباشر (CLAUDE-CODE-PROMPT §٩)
+{$SITE_ADDRESS}
+
+encode gzip
+
+# الباك اند: REST + WebSocket + الوثائق
+handle /api/v1/* {
+	reverse_proxy backend:8000
+}
+handle /ws/* {
+	reverse_proxy backend:8000
+}
+
+# الواجهة
+handle {
+	reverse_proxy frontend:3000
+}
+
+header {
+	Strict-Transport-Security "max-age=31536000; includeSubDomains"
+	X-Content-Type-Options "nosniff"
+	X-Frame-Options "DENY"
+	Referrer-Policy "strict-origin-when-cross-origin"
+}

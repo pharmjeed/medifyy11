@@ -1,0 +1,374 @@
+/* نظام تصميم Medify — متغيرات DOC-11 حصراً + مكونات النموذج التفاعلي (حرفياً).
+   لا إطار CSS خارجي (محظورات DOC-07 §٢). */
+
+/* اللاتينية (subset latin) */
+@font-face {
+  font-family: "IBM Plex Sans Arabic";
+  src: url("/fonts/ibm-plex-sans-arabic-latin-400.woff2") format("woff2");
+  font-weight: 400;
+  font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "IBM Plex Sans Arabic";
+  src: url("/fonts/ibm-plex-sans-arabic-latin-500.woff2") format("woff2");
+  font-weight: 500;
+  font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "IBM Plex Sans Arabic";
+  src: url("/fonts/ibm-plex-sans-arabic-latin-700.woff2") format("woff2");
+  font-weight: 700;
+  font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+/* العربية (subset arabic) */
+@font-face {
+  font-family: "IBM Plex Sans Arabic";
+  src: url("/fonts/ibm-plex-sans-arabic-400.woff2") format("woff2");
+  font-weight: 400;
+  font-display: swap;
+  unicode-range: U+0600-06FF, U+0750-077F, U+0870-088E, U+0890-0891, U+0898-08E1, U+08E3-08FF, U+200C-200E, U+2010-2011, U+204F, U+2E41, U+FB50-FDFF, U+FE70-FE74, U+FE76-FEFC;
+}
+@font-face {
+  font-family: "IBM Plex Sans Arabic";
+  src: url("/fonts/ibm-plex-sans-arabic-500.woff2") format("woff2");
+  font-weight: 500;
+  font-display: swap;
+  unicode-range: U+0600-06FF, U+0750-077F, U+0870-088E, U+0890-0891, U+0898-08E1, U+08E3-08FF, U+200C-200E, U+2010-2011, U+204F, U+2E41, U+FB50-FDFF, U+FE70-FE74, U+FE76-FEFC;
+}
+@font-face {
+  font-family: "IBM Plex Sans Arabic";
+  src: url("/fonts/ibm-plex-sans-arabic-700.woff2") format("woff2");
+  font-weight: 700;
+  font-display: swap;
+  unicode-range: U+0600-06FF, U+0750-077F, U+0870-088E, U+0890-0891, U+0898-08E1, U+08E3-08FF, U+200C-200E, U+2010-2011, U+204F, U+2E41, U+FB50-FDFF, U+FE70-FE74, U+FE76-FEFC;
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  src: url("/fonts/ibm-plex-mono-400.woff2") format("woff2");
+  font-weight: 400;
+  font-display: swap;
+}
+
+:root {
+  /* DOC-11 §١ — اللوحة المقفولة */
+  --m-primary: #0e7c86;
+  --m-primary-dark: #0a5c64;
+  --m-primary-light: #eaf6f7;
+  --m-accent: #c9a227;
+  --m-success: #2e9e5b;
+  --m-success-bg: #e8f6ee;
+  --m-danger: #c0392b;
+  --m-danger-bg: #fdeeee;
+  --m-warn: #b07d10;
+  --m-warn-bg: #fdf3e3;
+  --m-info: #2a6f97;
+  --m-info-bg: rgba(42, 111, 151, 0.12);
+  --m-ink: #0f2233;
+  --m-muted: #5b7280;
+  --m-line: #d7e3e8;
+  --m-bg: #f7fafb;
+  --m-white: #ffffff;
+  /* الخطوط: IBM Plex Sans Arabic self-hosted — Segoe UI بديل (DOC-11 §٢) */
+  --m-font: "IBM Plex Sans Arabic", "Segoe UI", Tahoma, Arial, sans-serif;
+  --m-mono: "IBM Plex Mono", Consolas, "Courier New", monospace;
+  --m-shadow-modal: 0 24px 60px rgba(15, 34, 51, 0.3);
+  --m-focus: 0 0 0 3px rgba(14, 124, 134, 0.35);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--m-bg);
+  color: var(--m-ink);
+  direction: rtl;
+  font-family: var(--m-font);
+  -webkit-font-smoothing: antialiased;
+  font-size: 14px;
+  line-height: 1.8;
+}
+
+a { color: var(--m-primary); text-decoration: none; }
+a:hover { color: var(--m-primary-dark); text-decoration: underline; }
+
+bdi, .ltr {
+  direction: ltr;
+  unicode-bidi: isolate;
+  font-family: var(--m-mono);
+}
+bdi.ui { font-family: var(--m-font); }
+
+input, textarea, select, button { font-family: inherit; }
+input::placeholder, textarea::placeholder { color: var(--m-muted); opacity: 0.72; }
+
+@keyframes mWave { 0%, 100% { transform: scaleY(0.22); } 50% { transform: scaleY(1); } }
+@keyframes mPulse { 0% { box-shadow: 0 0 0 0 rgba(14,124,134,.38); } 70% { box-shadow: 0 0 0 10px rgba(14,124,134,0); } 100% { box-shadow: 0 0 0 0 rgba(14,124,134,0); } }
+@keyframes mPulseW { 0% { box-shadow: 0 0 0 0 rgba(176,125,16,.38); } 70% { box-shadow: 0 0 0 10px rgba(176,125,16,0); } 100% { box-shadow: 0 0 0 0 rgba(176,125,16,0); } }
+@keyframes mSpin { to { transform: rotate(360deg); } }
+@keyframes mBlink { 0%, 100% { opacity: 1; } 50% { opacity: 0.15; } }
+@keyframes mIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+/* ===== الأزرار — نصف قطر 10px، الحالات الأربع (DOC-11 §٣/٤) ===== */
+.btn {
+  height: 44px; padding: 0 24px; border: none; border-radius: 10px;
+  background: var(--m-primary); color: #fff; font-size: 14px; font-weight: 700;
+  cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+}
+.btn:hover { background: var(--m-primary-dark); }
+.btn:focus-visible { outline: 3px solid rgba(14,124,134,.35); outline-offset: 2px; }
+.btn.h40 { height: 40px; }
+.btn.big { height: 46px; font-size: 16px; }
+.btn.hero { height: 52px; padding: 0 28px; font-size: 16px; box-shadow: 0 6px 16px rgba(14,124,134,.25); }
+
+.btn-secondary {
+  height: 44px; padding: 0 24px; border: 1.5px solid var(--m-primary); border-radius: 10px;
+  background: #fff; color: var(--m-primary-dark); font-size: 14px; font-weight: 700;
+  cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+}
+.btn-secondary:hover { background: var(--m-primary-light); }
+.btn-secondary:focus-visible { outline: 3px solid rgba(14,124,134,.3); outline-offset: 2px; }
+
+.btn-neutral {
+  height: 44px; padding: 0 24px; border: 1.5px solid var(--m-line); border-radius: 10px;
+  background: #fff; color: var(--m-muted); font-size: 14px; font-weight: 700;
+  cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+}
+.btn-neutral:hover { background: var(--m-bg); }
+
+.btn-danger {
+  height: 46px; padding: 0 24px; border: none; border-radius: 10px;
+  background: var(--m-danger); color: #fff; font-size: 14px; font-weight: 700; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+}
+.btn-danger:hover { opacity: 0.9; }
+.btn-danger:focus-visible { outline: 3px solid rgba(192,57,43,.35); outline-offset: 2px; }
+.btn-danger-outline {
+  height: 44px; padding: 0 24px; border: 1.5px solid var(--m-danger); border-radius: 10px;
+  background: #fff; color: var(--m-danger); font-size: 14px; font-weight: 700; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+}
+.btn-danger-outline:hover { background: var(--m-danger-bg); }
+
+.btn-success {
+  height: 44px; padding: 0 24px; border: none; border-radius: 10px;
+  background: var(--m-success); color: #fff; font-size: 14px; font-weight: 700; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+}
+.btn-success:hover { opacity: 0.9; }
+.btn-success:focus-visible { outline: 3px solid rgba(46,158,91,.35); outline-offset: 2px; }
+/* زر «اعتمد وارفع» — الأكبر في النظام (DOC-11 §٣) */
+.btn-approve {
+  height: 58px; padding: 0 38px; font-size: 18px; font-weight: 800;
+  box-shadow: 0 8px 20px rgba(46,158,91,.3);
+}
+.btn:disabled, .btn-success:disabled, .btn-secondary:disabled, .btn-danger:disabled {
+  background: var(--m-line); color: var(--m-muted); cursor: not-allowed; box-shadow: none; border: none;
+}
+
+.btn-ghost {
+  border: none; background: none; color: var(--m-primary); font-size: 12.5px; font-weight: 700; cursor: pointer;
+  padding: 4px 6px;
+}
+.btn-ghost:hover { color: var(--m-primary-dark); text-decoration: underline; }
+
+.btn-row {
+  min-height: 32px; padding: 2px 14px; border: 1.5px solid var(--m-primary); border-radius: 8px;
+  background: #fff; color: var(--m-primary-dark); font-size: 12.5px; font-weight: 700; cursor: pointer;
+}
+.btn-row:hover { background: var(--m-primary-light); }
+.btn-row.neutral { border-color: var(--m-line); color: var(--m-muted); }
+.btn-row.neutral:hover { border-color: var(--m-danger); color: var(--m-danger); background: var(--m-danger-bg); }
+
+.btn-icon {
+  width: 40px; height: 40px; border: 1px solid var(--m-line); border-radius: 10px; background: #fff;
+  cursor: pointer; display: inline-flex; align-items: center; justify-content: center; position: relative;
+}
+.btn-icon:hover { background: var(--m-primary-light); }
+.btn-icon.logout:hover { border-color: var(--m-danger); background: var(--m-danger-bg); }
+
+.pill {
+  min-height: 30px; padding: 2px 12px; border-radius: 999px; font-size: 12.5px; font-weight: 700;
+  cursor: pointer; border: 1.5px solid var(--m-line); background: #fff; color: var(--m-muted);
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.pill.active { border-color: var(--m-primary); background: var(--m-primary); color: #fff; }
+
+.spinner {
+  width: 14px; height: 14px; border: 2px solid rgba(255,255,255,.4); border-top-color: #fff;
+  border-radius: 999px; display: inline-block; animation: mSpin .8s linear infinite;
+}
+.spinner.dark { border-color: rgba(14,124,134,.25); border-top-color: var(--m-primary); }
+
+/* ===== الحقول ===== */
+.field-label { display: block; font-size: 14px; font-weight: 700; margin: 14px 0 6px; }
+.field-label:first-of-type { margin-top: 0; }
+.field {
+  width: 100%; height: 44px; border: 1.5px solid var(--m-line); border-radius: 10px; padding: 0 12px;
+  font-size: 14px; color: var(--m-ink); background: #fff;
+}
+.field:focus { border-color: var(--m-primary); outline: 3px solid rgba(14,124,134,.2); }
+.field.mono { direction: ltr; font-family: var(--m-mono); }
+.field.search { height: 48px; padding: 0 14px; font-size: 16px; }
+.field[readonly] { background: var(--m-bg); color: var(--m-muted); }
+textarea.field { height: auto; min-height: 110px; padding: 12px; line-height: 1.9; resize: vertical; }
+select.field { padding: 0 10px; }
+
+/* ===== البطاقات ===== */
+.card { background: #fff; border: 1px solid var(--m-line); border-radius: 12px; padding: 18px; }
+.card.pad24 { padding: 24px; }
+.stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; }
+.stat-label { font-size: 12.5px; color: var(--m-muted); margin-bottom: 4px; }
+.stat-value { font-size: 28px; font-weight: 800; color: var(--m-primary-dark); }
+.info-box {
+  background: var(--m-primary-light); border-radius: 10px; padding: 10px 14px;
+  font-size: 12.5px; color: var(--m-muted);
+}
+.sub-box { background: var(--m-bg); border: 1px solid var(--m-line); border-radius: 10px; padding: 10px 14px; }
+.select-card {
+  display: block; width: 100%; text-align: right; background: #fff; border: 2px solid var(--m-line);
+  border-radius: 12px; cursor: pointer; padding: 14px 16px; font-family: inherit; font-size: 14px;
+}
+.select-card:hover { border-color: var(--m-primary); }
+.select-card.selected { border-color: var(--m-primary); }
+
+/* ===== الجداول (CSS Grid — رأس sky وصفوف مخططة) ===== */
+.grid-table { background: #fff; border: 1px solid var(--m-line); border-radius: 12px; overflow: hidden; }
+.grid-head {
+  display: grid; background: var(--m-primary-light); color: var(--m-primary-dark);
+  font-size: 12.5px; font-weight: 700;
+}
+.grid-head > div { padding: 9px 14px; }
+.grid-row { display: grid; align-items: center; border-top: 1px solid var(--m-primary-light); }
+.grid-row > div { padding: 10px 14px; font-size: 14px; }
+.grid-row .sub { font-size: 12.5px; color: var(--m-muted); }
+.grid-row.odd { background: var(--m-bg); }
+.grid-empty { padding: 26px; text-align: center; font-size: 14px; color: var(--m-muted); }
+.num { direction: ltr; unicode-bidi: isolate; font-family: var(--m-mono); } /* أرقام لاتينية في الخلايا الرقمية */
+
+/* ===== الشارات ===== */
+.badge {
+  font-size: 12.5px; border-radius: 999px; padding: 2px 10px; font-weight: 700;
+  display: inline-flex; align-items: center; gap: 5px; white-space: nowrap;
+}
+.badge.success { background: var(--m-success-bg); color: var(--m-success); }
+.badge.warn { background: var(--m-warn-bg); color: var(--m-warn); }
+.badge.danger { background: var(--m-danger-bg); color: var(--m-danger); }
+.badge.info { background: var(--m-info-bg); color: var(--m-info); }
+.badge.neutral { background: var(--m-bg); color: var(--m-muted); }
+.badge.safety { background: var(--m-warn); color: #fff; animation: mPulseW 2.2s ease infinite; }
+.code-badge {
+  font-size: 12.5px; font-weight: 700; color: var(--m-info); background: rgba(42,111,151,.1);
+  border: 1px solid rgba(42,111,151,.35); border-radius: 8px; padding: 2px 10px;
+  direction: ltr; unicode-bidi: isolate; font-family: var(--m-mono); white-space: nowrap;
+}
+.tech-badge {
+  font-size: 12.5px; background: var(--m-bg); border: 1px solid var(--m-line); border-radius: 6px;
+  padding: 0 8px; color: var(--m-muted); direction: ltr; unicode-bidi: isolate; font-family: var(--m-mono);
+}
+.spec-badge {
+  border: 1px solid var(--m-accent); color: var(--m-warn); background: rgba(201,162,39,.1);
+  font-size: 12.5px; font-weight: 700; border-radius: 6px; padding: 0 7px;
+  direction: ltr; unicode-bidi: isolate; font-family: var(--m-mono); white-space: nowrap;
+}
+.spec-bar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  border: 1.5px dashed var(--m-accent); background: rgba(201,162,39,.08);
+  border-radius: 10px; padding: 6px 12px; margin-bottom: 16px;
+  font-size: 12.5px; color: var(--m-warn); font-weight: 700;
+}
+
+/* ===== التبويبات ===== */
+.tabs { display: flex; gap: 8px; margin-bottom: 18px; border-bottom: 2px solid var(--m-primary-light); }
+.tab {
+  min-height: 44px; padding: 0 18px; border: none; border-radius: 10px 10px 0 0;
+  font-size: 14px; font-weight: 700; cursor: pointer;
+  background: #fff; color: var(--m-muted); border-bottom: 3px solid #fff;
+}
+.tab.active { background: var(--m-primary-light); color: var(--m-primary-dark); border-bottom: 3px solid var(--m-primary); }
+
+/* ===== المودالات والتوست واللوح ===== */
+.modal-overlay { position: fixed; inset: 0; z-index: 50; background: rgba(15,34,51,.45); }
+.modal {
+  position: fixed; z-index: 51; top: 50%; right: 50%; transform: translate(50%, -50%);
+  width: min(460px, 94vw); max-height: 88vh; overflow: auto; background: #fff; border-radius: 12px;
+  padding: 24px; box-shadow: var(--m-shadow-modal); animation: mIn .18s ease;
+}
+.modal.wide { width: min(620px, 94vw); }
+.modal-head { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+.modal-title { font-size: 18px; font-weight: 700; color: var(--m-primary-dark); flex: 1; }
+.modal-close { border: none; background: none; color: var(--m-muted); font-size: 16px; cursor: pointer; }
+.modal-actions { display: flex; gap: 10px; margin-top: 20px; }
+
+.drawer-overlay { position: fixed; inset: 0; z-index: 55; background: rgba(15,34,51,.35); }
+.drawer {
+  position: fixed; top: 0; bottom: 0; left: 0; z-index: 56; width: min(440px, 94vw); background: #fff;
+  border-inline-end: 1px solid var(--m-line); box-shadow: 12px 0 40px rgba(15,34,51,.2);
+  display: flex; flex-direction: column; animation: mIn .2s ease;
+}
+
+.toast {
+  position: fixed; bottom: 26px; right: 50%; transform: translateX(50%); z-index: 80;
+  background: var(--m-ink); color: #fff; font-size: 14px; border-radius: 10px; padding: 11px 20px;
+  box-shadow: 0 10px 26px rgba(15,34,51,.3); animation: mIn .2s ease; max-width: 90vw;
+}
+
+/* ===== الهيكل ===== */
+.topbar { position: sticky; top: 0; z-index: 40; background: #fff; border-bottom: 1px solid var(--m-line); }
+.topbar-inner {
+  max-width: 1160px; margin: 0 auto; padding: 0 20px; height: 58px;
+  display: flex; align-items: center; gap: 12px;
+}
+.topbar-divider { width: 1px; height: 24px; background: var(--m-line); }
+.page-wrap { max-width: 1160px; margin: 0 auto; padding: 22px 20px 60px; }
+.page-wrap.narrow { max-width: 980px; }
+.page-wrap.journey { max-width: 960px; }
+.page-wrap.slim { max-width: 760px; }
+.page-title { font-size: 22px; font-weight: 800; margin: 0 0 6px; }
+.page-desc { font-size: 14px; color: var(--m-muted); margin: 0 0 18px; }
+
+.avatar {
+  width: 30px; height: 30px; border-radius: 999px; background: var(--m-primary-light);
+  color: var(--m-primary-dark); display: inline-flex; align-items: center; justify-content: center;
+  font-size: 12.5px; font-weight: 700; flex-shrink: 0;
+}
+.user-chip {
+  border: 1px solid var(--m-line); border-radius: 999px; padding: 3px 12px 3px 5px;
+  display: inline-flex; align-items: center; gap: 8px;
+}
+
+.bell-count {
+  position: absolute; top: 6px; left: 7px; min-width: 15px; height: 15px; border-radius: 999px;
+  background: var(--m-danger); color: #fff; font-size: 12.5px; transform: scale(.8);
+  display: inline-flex; align-items: center; justify-content: center; padding: 0 3px; font-weight: 700;
+}
+
+/* سويتش التبديل */
+.switch { width: 46px; height: 26px; border-radius: 999px; border: none; position: relative; cursor: pointer; background: var(--m-line); flex-shrink: 0; }
+.switch.on { background: var(--m-primary); }
+.switch .knob {
+  position: absolute; top: 3px; right: 3px; width: 20px; height: 20px; border-radius: 999px;
+  background: #fff; box-shadow: 0 1px 3px rgba(15,34,51,.25); transition: right .15s ease;
+}
+.switch.on .knob { right: 23px; }
+
+/* موجة التسجيل */
+.wave { display: flex; align-items: center; gap: 3px; height: 44px; }
+.wave span {
+  width: 5px; border-radius: 3px; background: var(--m-primary); height: 100%;
+  animation: mWave 1s ease-in-out infinite; transform-origin: center;
+}
+
+/* شرائح الإرشاد */
+.guidance-card { border: 1px solid var(--m-line); border-radius: 10px; padding: 12px 14px; background: #fff; margin-top: 10px; }
+.guidance-card.pending { border-color: rgba(176,125,16,.55); background: rgba(176,125,16,.05); }
+
+/* محادثة AI */
+.chat-msg { max-width: 88%; border-radius: 12px; padding: 10px 14px; font-size: 14px; margin-bottom: 10px; }
+.chat-msg.doctor { background: var(--m-primary); color: #fff; margin-inline-start: auto; }
+.chat-msg.ai { background: var(--m-bg); color: var(--m-ink); border: 1px solid var(--m-line); }
+
+/* نص سريري LTR */
+.clinical { direction: ltr; text-align: left; font-family: var(--m-font); line-height: 2; font-size: 14px; }

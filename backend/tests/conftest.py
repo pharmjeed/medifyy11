@@ -16,7 +16,9 @@ REPO = BACKEND.parent
 PG_HOST = os.environ.get("TEST_PG_HOST", "localhost")
 PG_PORT = os.environ.get("TEST_PG_PORT", "5544")
 TEST_DB = os.environ.get("TEST_PG_DB", "medify_pytest")
-OWNER_URL = f"postgresql+psycopg://medify_owner@{PG_HOST}:{PG_PORT}"
+_OWNER_PW = os.environ.get("TEST_PG_OWNER_PASSWORD", "")
+_OWNER_AUTH = f"medify_owner:{_OWNER_PW}" if _OWNER_PW else "medify_owner"
+OWNER_URL = f"postgresql+psycopg://{_OWNER_AUTH}@{PG_HOST}:{PG_PORT}"
 APP_URL = f"postgresql+psycopg://medify_app:medify_app@{PG_HOST}:{PG_PORT}"
 
 # تُضبط قبل استيراد app.config (lru_cache)
