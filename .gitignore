@@ -7,6 +7,7 @@ deploy.env
 docs/SECRETS-GENERATED.md
 *.key
 *.pem
+infra/postgres-init.generated.sql
 
 # python
 __pycache__/

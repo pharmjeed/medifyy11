@@ -25,6 +25,11 @@ DOMAIN="${DOMAIN:-}"
 REPO_URL="${REPO_URL:-https://github.com/pharmjeed/medifyy11.git}"
 GIT_REF="${GIT_REF:-main}"
 ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}"
+# منافذ قابلة للتخصيص — لخوادم مشتركة تشغل 80/443 لمشروع آخر
+PROD_HTTP_PORT="${PROD_HTTP_PORT:-80}"
+PROD_HTTPS_PORT="${PROD_HTTPS_PORT:-443}"
+STAGING_HTTP_PORT="${STAGING_HTTP_PORT:-8080}"
+STAGING_HTTPS_PORT="${STAGING_HTTPS_PORT:-8443}"
 
 SSH_OPTS=(-i "$ORACLE_SSH_KEY" -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15)
 
@@ -47,17 +52,18 @@ echo ">> [1/7] تثبيت Docker + Compose plugin إن غابا"
 run_remote 'command -v docker >/dev/null 2>&1 || { curl -fsSL https://get.docker.com | sudo sh; sudo usermod -aG docker $USER; }'
 run_remote 'docker compose version >/dev/null 2>&1 || sudo apt-get install -y docker-compose-plugin || sudo dnf install -y docker-compose-plugin || true'
 
-echo ">> [2/7] فتح المنافذ 80/443/8080 على الخادم (iptables/ufw)"
-run_remote '
+PORTS_TO_OPEN="$PROD_HTTP_PORT $PROD_HTTPS_PORT $STAGING_HTTP_PORT $STAGING_HTTPS_PORT"
+echo ">> [2/7] فتح المنافذ ($PORTS_TO_OPEN) على الخادم (iptables/ufw)"
+run_remote "
     if command -v ufw >/dev/null 2>&1 && sudo ufw status | grep -q active; then
-        sudo ufw allow 80/tcp; sudo ufw allow 443/tcp; sudo ufw allow 8080/tcp
+        for p in $PORTS_TO_OPEN; do sudo ufw allow \$p/tcp; done
     fi
     # صور Oracle تشحن بقواعد iptables تحجب كل شيء عدا 22
-    for p in 80 443 8080 8443; do
-        sudo iptables -C INPUT -p tcp --dport $p -j ACCEPT 2>/dev/null || sudo iptables -I INPUT 5 -p tcp --dport $p -j ACCEPT
+    for p in $PORTS_TO_OPEN; do
+        sudo iptables -C INPUT -p tcp --dport \$p -j ACCEPT 2>/dev/null || sudo iptables -I INPUT 5 -p tcp --dport \$p -j ACCEPT
     done
     command -v netfilter-persistent >/dev/null 2>&1 && sudo netfilter-persistent save || true
-'
+"
 if run_remote 'command -v oci >/dev/null 2>&1 && [ -f ~/.oci/config ]'; then
     echo ">> oci CLI مهيأ — ملاحظة: أضف قواعد Ingress للـ Security List عبر oci يدوياً إن لزم (يتطلب OCIDs)"
 else
@@ -121,11 +127,12 @@ deploy_env() {
         SITE_ADDRESS=":80"
         PUBLIC_ORIGIN="http://$ORACLE_HOST$([[ "$HTTP_PORT" != "80" ]] && echo ":$HTTP_PORT")"
     fi
-    echo ">> [5/7] ($NAME) بناء وتشغيل compose"
+    echo ">> [5/7] ($NAME) بناء وتشغيل compose على $HTTP_PORT/$HTTPS_PORT"
+    # ملف أدوار postgres بكلمة المرور الحقيقية — من القالب، خارج git (postgres-init.generated.sql)
     run_remote "
         cd /opt/medify/src/infra
-        # ملف أدوار postgres بكلمة المرور الحقيقية
-        printf 'DO \$\$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = %s) THEN CREATE ROLE medify_app LOGIN PASSWORD %s; END IF; END \$\$;' \"'medify_app'\" \"'$PG_APP_PW'\" > postgres-init-prod.sql
+        sed 's/REPLACED_BY_ORACLE_SH/$PG_APP_PW/' postgres-init-prod.sql > postgres-init.generated.sql
+        chmod 600 postgres-init.generated.sql
         set -a; source /opt/medify/.env; set +a
         export COMPOSE_PROJECT_NAME=$NAME HTTP_PORT=$HTTP_PORT HTTPS_PORT=$HTTPS_PORT \
                ENVIRONMENT=$ENVIRONMENT SITE_ADDRESS='$SITE_ADDRESS' PUBLIC_ORIGIN='$PUBLIC_ORIGIN' \
@@ -137,11 +144,11 @@ deploy_env() {
     "
 }
 
-deploy_env "medify-prod" "80" "443" "production"
-deploy_env "medify-staging" "8080" "8443" "staging"
+deploy_env "medify-prod" "$PROD_HTTP_PORT" "$PROD_HTTPS_PORT" "production"
+deploy_env "medify-staging" "$STAGING_HTTP_PORT" "$STAGING_HTTPS_PORT" "staging"
 
 echo ">> [6/7] الفحص الصحي"
-HEALTH_URL="http://$ORACLE_HOST/api/v1/health"
+HEALTH_URL="http://$ORACLE_HOST$([[ "$PROD_HTTP_PORT" != "80" ]] && echo ":$PROD_HTTP_PORT")/api/v1/health"
 [[ -n "$DOMAIN" ]] && HEALTH_URL="https://$DOMAIN/api/v1/health"
 for attempt in $(seq 1 20); do
     if curl -fsS "$HEALTH_URL" | grep -q '"ok"'; then
@@ -156,4 +163,4 @@ curl -fsS "${HEALTH_URL%/api/v1/health}/" | head -c 200 | grep -qi "<" && echo "
 echo ">> [7/7] الاختبار الدخاني"
 bash "$REPO_ROOT/scripts/smoke.sh" "${HEALTH_URL%/api/v1/health}"
 
-echo ">> اكتمل النشر — production على 80/443 و staging على 8080"
+echo ">> اكتمل النشر — production على $PROD_HTTP_PORT/$PROD_HTTPS_PORT و staging على $STAGING_HTTP_PORT"
