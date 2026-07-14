@@ -26,8 +26,8 @@ frontend/next-env.d.ts
 frontend/test-results/
 frontend/playwright-report/
 
-# ai models & media
-models/
+# ai models & media (ملفات أوزان فقط — لا يشمل حزم الكود مثل app/models)
+/models/
 *.onnx
 *.bin
 
