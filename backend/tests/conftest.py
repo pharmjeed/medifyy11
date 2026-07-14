@@ -53,10 +53,16 @@ def _bootstrap_database() -> None:
 
     env = os.environ.copy()
     python = sys.executable
-    subprocess.run([python, "-m", "alembic", "upgrade", "head"], cwd=BACKEND, env=env, check=True,
-                   capture_output=True)
-    subprocess.run([python, str(REPO / "scripts" / "seed.py")], cwd=BACKEND, env=env, check=True,
-                   capture_output=True)
+
+    def _run(args: list[str]) -> None:
+        result = subprocess.run(args, cwd=BACKEND, env=env, capture_output=True, text=True)
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"bootstrap فشل: {' '.join(args)}\n--- stdout ---\n{result.stdout}\n--- stderr ---\n{result.stderr}"
+            )
+
+    _run([python, "-m", "alembic", "upgrade", "head"])
+    _run([python, str(REPO / "scripts" / "seed.py")])
 
 
 _bootstrap_database()
