@@ -27,7 +27,7 @@
 | **next build** | ✅ | 17 مساراً (15 صفحة منتج + الجذر + not-found) |
 | **Playwright e2e** | ✅ **1/1** | الرحلة الكاملة بالمتصفح: دخول → مريض → قالب → تسجيل حي بتفريغ متدفق عبر WS → توليد → مراجعة → زر معطل مع معلق → حسم → اعتماد → «رفع ناجح ✓» → السجل «مرفوعة ✓» |
 | **scripts/smoke.sh** | ✅ **15/15** | عبر curl ضد خادم يعمل — نفس السكربت يعمل ضد Oracle بعد النشر |
-| **CI (GitHub Actions)** | مُفعَّل | يعمل على كل push: pytest ضد postgres:16 + tsc + next build |
+| **CI (GitHub Actions)** | ✅ **أخضر** | آخر تشغيل على `main`: backend (pytest 62/62 ضد postgres:16) وfrontend (tsc + next build) كلاهما success — بعد 3 إصلاحات CI موثقة (D-27، email-validator، حزمة tests) |
 
 ---
 
