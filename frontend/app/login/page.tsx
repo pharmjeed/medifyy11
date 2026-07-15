@@ -14,6 +14,16 @@ import { Field, SpecBadge, ToastProvider, useToast } from "@/components/ui";
 
 type Mode = "login" | "expired" | "forgot" | "forgot_sent" | "reset";
 
+const REMEMBER_FACILITY = "medify_login_facility";
+const REMEMBER_USERNAME = "medify_login_username";
+
+function remember(key: string, value: string): void {
+  try { window.localStorage.setItem(key, value); } catch { /* جلسة بلا تخزين */ }
+}
+function recall(key: string): string {
+  try { return window.localStorage.getItem(key) ?? ""; } catch { return ""; }
+}
+
 function LoginInner() {
   const router = useRouter();
   const params = useSearchParams();
@@ -37,6 +47,12 @@ function LoginInner() {
     if (params.get("reset_token") !== null) setMode("reset");
   }, [params]);
 
+  // تعبئة مسبقة تلقائية لآخر منشأة ومستخدم ناجحين (طلب مالك 2026-07-15)
+  useEffect(() => {
+    setFacility((current) => current || recall(REMEMBER_FACILITY));
+    setUsername((current) => current || recall(REMEMBER_USERNAME));
+  }, []);
+
   const doLogin = async () => {
     setBusy(true);
     setError(null);
@@ -46,6 +62,8 @@ function LoginInner() {
         body: { facility, username, password },
       });
       setSession(body.data.access_token, body.data.user);
+      remember(REMEMBER_FACILITY, facility);
+      remember(REMEMBER_USERNAME, username);
       const roleLabel = body.data.user.role === "admin" ? L("أدمن المنشأة", "facility admin") : L("دكتور", "doctor");
       toast(L(`مرحباً ${body.data.user.full_name} — دخلت بدور ${roleLabel}`,
               `Welcome ${body.data.user.full_name} — signed in as ${roleLabel}`));
@@ -128,10 +146,13 @@ function LoginInner() {
             </div>
             <form onSubmit={(event) => { event.preventDefault(); void doLogin(); }}>
               <Field label={L("المنشأة", "Facility")} placeholder={L("اسم المنشأة أو السجل التجاري", "Facility name or commercial registration")}
+                name="facility" autoComplete="organization"
                 value={facility} onChange={(event) => setFacility(event.target.value)} required />
               <Field label={L("اسم المستخدم", "Username")} ltr placeholder="dr.username" value={username}
+                name="username" autoComplete="username"
                 onChange={(event) => setUsername(event.target.value)} required />
               <Field label={L("كلمة المرور", "Password")} ltr type="password" placeholder="••••••••" value={password}
+                name="password" autoComplete="current-password"
                 onChange={(event) => setPassword(event.target.value)} required />
               {error !== null ? (
                 <p style={{ color: "#C0392B", fontSize: 12.5, fontWeight: 700, margin: "10px 0 0" }}>{error}</p>
