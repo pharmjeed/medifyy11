@@ -5,6 +5,7 @@ import { expect, test } from "@playwright/test";
  *  ملخص → إرشادات مضمّنة → حسم → اعتماد → رفع (وهمي) → السجل. */
 
 test("الرحلة الكاملة: من الدخول إلى الرفع", async ({ page }) => {
+  await page.addInitScript(() => window.localStorage.setItem("medify_lang", "ar")); // النصوص المؤكدة عربية
   // 1) الدخول (W-001)
   await page.goto("/login");
   await expect(page.getByRole("heading", { name: "تسجيل الدخول" })).toBeVisible();

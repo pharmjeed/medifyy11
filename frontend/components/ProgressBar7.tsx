@@ -3,7 +3,17 @@
 /** شريط التقدم الدائم بسبع مراحل — موتيف المنحنى الصاعد (DOC-11 §٣، حرفي من النموذج).
  *  current: 1..7 (المرحلة الحالية) · 8 = اكتمل الكل (رفع ناجح) · failStage: مرحلة فاشلة (7 عند فشل الرفع). */
 
-const STAGES = ["المريض والقالب", "تسجيل", "تفريغ", "ملخص", "إرشاد", "تحرير واعتماد", "رفع"] as const;
+import { useLang } from "@/lib/i18n";
+
+const STAGES = [
+  { ar: "المريض والقالب", en: "Patient & template" },
+  { ar: "تسجيل", en: "Recording" },
+  { ar: "تفريغ", en: "Transcript" },
+  { ar: "ملخص", en: "Summary" },
+  { ar: "إرشاد", en: "Guidance" },
+  { ar: "تحرير واعتماد", en: "Edit & approve" },
+  { ar: "رفع", en: "Upload" },
+] as const;
 const DASH = [0, 16.7, 33.3, 50, 66.7, 83.3, 100] as const;
 const POS = [
   { left: 98.5, top: 78 }, { left: 83, top: 74 }, { left: 67, top: 67 }, { left: 50.2, top: 58 },
@@ -11,20 +21,24 @@ const POS = [
 ] as const;
 
 export function ProgressBar7({ current, failStage }: { current: number; failStage?: number }) {
+  const { L, lang } = useLang();
   const done = current >= 8;
   const dash = done ? 100 : DASH[Math.max(0, Math.min(6, current - 1))] ?? 0;
+  const rtl = lang === "ar"; // المنحنى يصعد باتجاه القراءة: RTL يمين→يسار، LTR يسار→يمين
   return (
     <div style={{ background: "#fff", borderBottom: "1px solid #D7E3E8" }}>
       <div style={{ maxWidth: 960, margin: "0 auto", position: "relative", height: 128, padding: "0 10px" }}>
         <svg viewBox="0 0 1000 90" preserveAspectRatio="none"
-          style={{ position: "absolute", top: 14, right: 0, left: 0, width: "100%", height: 90 }}>
+          style={{ position: "absolute", top: 14, right: 0, left: 0, width: "100%", height: 90, transform: rtl ? undefined : "scaleX(-1)" }}>
           <path d="M985,78 C700,72 300,55 15,8" fill="none" stroke="#D7E3E8" strokeWidth="3" />
           <path d="M985,78 C700,72 300,55 15,8" fill="none" stroke="#2E9E5B" strokeWidth="3.5"
             pathLength={100} strokeDasharray={`${dash} 100`} strokeLinecap="round" />
         </svg>
-        {STAGES.map((label, index) => {
+        {STAGES.map((stageDef, index) => {
+          const label = L(stageDef.ar, stageDef.en);
           const stage = index + 1;
-          const position = POS[index]!;
+          const rawPosition = POS[index]!;
+          const position = { left: rtl ? rawPosition.left : 100 - rawPosition.left, top: rawPosition.top };
           const failed = failStage === stage;
           const completed = done || stage < current;
           const isCurrent = !done && stage === current && !failed;

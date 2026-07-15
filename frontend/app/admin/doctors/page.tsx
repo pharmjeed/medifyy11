@@ -1,20 +1,27 @@
 "use client";
 
-/** الصفحة 6 — الدكاترة W-103 + نموذج الإنشاء W-104 (FR-202/203/204): مقاعد، تعطيل/تفعيل، إعادة كلمة المرور. */
+/** الصفحة 6 — الدكاترة W-103 + نموذج الإنشاء W-104 (FR-202/203/204): مقاعد، تعطيل/تفعيل، إعادة كلمة المرور — ثنائية اللغة (D-30). */
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { Shell } from "@/components/Shell";
 import { Field, Modal, SpecBar, useErrorScreen, useToast } from "@/components/ui";
 import { ApiError, api } from "@/lib/api";
+import { useLang } from "@/lib/i18n";
 import type { Clinic, Doctor, SubscriptionInfo } from "@/lib/types";
 
 const COLS = "1.6fr 1fr 1fr 1.2fr 1fr .8fr 1.6fr";
-const SPECIALTIES = ["باطنة", "أطفال", "جلدية", "طب أسرة"];
+const SPECIALTIES: { ar: string; en: string }[] = [
+  { ar: "باطنة", en: "Internal medicine" },
+  { ar: "أطفال", en: "Pediatrics" },
+  { ar: "جلدية", en: "Dermatology" },
+  { ar: "طب أسرة", en: "Family medicine" },
+];
 
 function DoctorsInner() {
   const toast = useToast();
   const showError = useErrorScreen();
+  const { L, lang } = useLang();
 
   const [doctors, setDoctors] = useState<Doctor[]>([]);
   const [sub, setSub] = useState<SubscriptionInfo | null>(null);
@@ -65,15 +72,16 @@ function DoctorsInner() {
 
   const submit = async () => {
     if (fullName.trim().length < 2) {
-      toast("أدخل اسم الدكتور");
+      toast(L("أدخل اسم الدكتور", "Enter the doctor's name"));
       return;
     }
     if (username.trim().length < 3 || password.length < 8) {
-      toast("أكمل الحقول — اسم المستخدم 3 أحرف فأكثر وكلمة المرور 8 فأكثر");
+      toast(L("أكمل الحقول — اسم المستخدم 3 أحرف فأكثر وكلمة المرور 8 فأكثر",
+              "Complete the fields — username at least 3 characters and password at least 8"));
       return;
     }
     if (clinicId === "") {
-      toast("أنشئ عيادة أولاً ثم أضف الدكتور");
+      toast(L("أنشئ عيادة أولاً ثم أضف الدكتور", "Create a clinic first, then add the doctor"));
       return;
     }
     setBusy(true);
@@ -89,15 +97,15 @@ function DoctorsInner() {
           clinic_id: clinicId,
         },
       });
-      toast("أُنشئ حساب الدكتور واستُهلك مقعد");
+      toast(L("أُنشئ حساب الدكتور واستُهلك مقعد", "Doctor account created — one seat consumed"));
       setModalOpen(false);
       await load();
     } catch (err) {
       if (err instanceof ApiError) {
         if (err.code === "MDF-4221") setSeatError(true);
-        else toast(`${err.messageAr} (${err.code})`);
+        else toast(`${err.text(lang)} (${err.code})`);
       } else {
-        toast("تعذر الاتصال بالخادم");
+        toast(L("تعذر الاتصال بالخادم", "Could not reach the server"));
       }
     } finally {
       setBusy(false);
@@ -108,12 +116,12 @@ function DoctorsInner() {
     try {
       await api(`/doctors/${doctor.id}`, { method: "PATCH", body: { is_active: !doctor.is_active } });
       toast(doctor.is_active
-        ? "عُطّل الحساب — تحرر المقعد فوراً (FR-203)"
-        : "فُعّل الحساب — استُهلك مقعد");
+        ? L("عُطّل الحساب — تحرر المقعد فوراً (FR-203)", "Account disabled — seat freed immediately (FR-203)")
+        : L("فُعّل الحساب — استُهلك مقعد", "Account enabled — one seat consumed"));
       await load();
     } catch (err) {
-      if (err instanceof ApiError) toast(`${err.messageAr} (${err.code})`);
-      else toast("تعذر الاتصال بالخادم");
+      if (err instanceof ApiError) toast(`${err.text(lang)} (${err.code})`);
+      else toast(L("تعذر الاتصال بالخادم", "Could not reach the server"));
     }
   };
 
@@ -121,38 +129,40 @@ function DoctorsInner() {
     try {
       const body = await api<{ temporary_password: string }>(`/doctors/${doctor.id}/reset-password`, { method: "POST" });
       setTempPw({ doctor: doctor.full_name, password: body.data.temporary_password });
-      toast("أُعيد تعيين كلمة المرور — أُرسل إشعار dr.password_reset (FR-204)");
+      toast(L("أُعيد تعيين كلمة المرور — أُرسل إشعار dr.password_reset (FR-204)",
+              "Password has been reset — dr.password_reset notification sent (FR-204)"));
     } catch (err) {
-      if (err instanceof ApiError) toast(`${err.messageAr} (${err.code})`);
-      else toast("تعذر الاتصال بالخادم");
+      if (err instanceof ApiError) toast(`${err.text(lang)} (${err.code})`);
+      else toast(L("تعذر الاتصال بالخادم", "Could not reach the server"));
     }
   };
 
   return (
     <main className="page-wrap">
-      <SpecBar ids="W-103 · W-104" desc="الصفحة 6 — قائمة الدكاترة وحالة المقاعد + نموذج الإنشاء/التعديل (FR-202/204)" />
+      <SpecBar ids="W-103 · W-104" desc={L("الصفحة 6 — قائمة الدكاترة وحالة المقاعد + نموذج الإنشاء/التعديل (FR-202/204)",
+                                           "Page 6 — doctor list and seat status + create/edit form (FR-202/204)")} />
 
       <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
-        <h1 className="page-title" style={{ margin: 0 }}>الدكاترة</h1>
+        <h1 className="page-title" style={{ margin: 0 }}>{L("الدكاترة", "Doctors")}</h1>
         {sub !== null ? (
           <span className={sub.seats_available > 0 ? "badge success" : "badge warn"}>
-            المقاعد: <span className="num">{sub.seats_used}/{sub.seats_total}</span> مستهلكة
-            · متاح <span className="num">{sub.seats_available}</span>
+            {L("المقاعد:", "Seats:")} <span className="num">{sub.seats_used}/{sub.seats_total}</span> {L("مستهلكة", "used")}
+            {" "}· {L("متاح", "available:")} <span className="num">{sub.seats_available}</span>
           </span>
         ) : null}
         <span style={{ flex: 1 }} />
-        <button className="btn" onClick={openCreate}>+ دكتور جديد</button>
+        <button className="btn" onClick={openCreate}>{L("+ دكتور جديد", "+ New doctor")}</button>
       </div>
 
       <div className="grid-table">
         <div className="grid-head" style={{ gridTemplateColumns: COLS }}>
-          <div>الدكتور</div><div>المستخدم</div><div>التخصص</div><div>العيادة</div>
-          <div>حالة المقعد</div><div>الزيارات</div><div>إجراءات</div>
+          <div>{L("الدكتور", "Doctor")}</div><div>{L("المستخدم", "Username")}</div><div>{L("التخصص", "Specialty")}</div><div>{L("العيادة", "Clinic")}</div>
+          <div>{L("حالة المقعد", "Seat status")}</div><div>{L("الزيارات", "Visits")}</div><div>{L("إجراءات", "Actions")}</div>
         </div>
         {loading ? (
-          <div className="grid-empty">جارٍ التحميل…</div>
+          <div className="grid-empty">{L("جارٍ التحميل…", "Loading…")}</div>
         ) : doctors.length === 0 ? (
-          <div className="grid-empty">لا دكاترة بعد — أضف أول دكتور (يستهلك مقعداً)</div>
+          <div className="grid-empty">{L("لا دكاترة بعد — أضف أول دكتور (يستهلك مقعداً)", "No doctors yet — add the first doctor (consumes a seat)")}</div>
         ) : (
           doctors.map((doctor, index) => (
             <div key={doctor.id} className={index % 2 ? "grid-row odd" : "grid-row"} style={{ gridTemplateColumns: COLS }}>
@@ -162,15 +172,15 @@ function DoctorsInner() {
               <div>{doctor.clinic_name ?? "—"}</div>
               <div>
                 {doctor.is_active
-                  ? <span className="badge success">نشط · مستهلك</span>
-                  : <span className="badge neutral">معطّل · محرر</span>}
+                  ? <span className="badge success">{L("نشط · مستهلك", "Active · seat used")}</span>
+                  : <span className="badge neutral">{L("معطّل · محرر", "Disabled · seat freed")}</span>}
               </div>
               <div><span className="num">{doctor.visits_count}</span></div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 <button className="btn-row neutral" onClick={() => void toggleActive(doctor)}>
-                  {doctor.is_active ? "تعطيل" : "تفعيل"}
+                  {doctor.is_active ? L("تعطيل", "Disable") : L("تفعيل", "Enable")}
                 </button>
-                <button className="btn-row" onClick={() => void resetPassword(doctor)}>إعادة كلمة المرور</button>
+                <button className="btn-row" onClick={() => void resetPassword(doctor)}>{L("إعادة كلمة المرور", "Reset password")}</button>
               </div>
             </div>
           ))
@@ -178,81 +188,83 @@ function DoctorsInner() {
       </div>
 
       <p style={{ fontSize: 12.5, color: "#5B7280", marginTop: 10 }}>
-        التعطيل يحرر المقعد فوراً لدكتور آخر — المقعد مملوك للمنشأة لا للشخص (DOC-09 §٢).
+        {L("التعطيل يحرر المقعد فوراً لدكتور آخر — المقعد مملوك للمنشأة لا للشخص (DOC-09 §٢).",
+           "Disabling frees the seat immediately for another doctor — the seat belongs to the facility, not the person (DOC-09 §2).")}
       </p>
 
       {/* نافذة الإنشاء W-104 */}
       {modalOpen ? (
-        <Modal title="دكتور جديد" spec="W-104" onClose={() => setModalOpen(false)}>
+        <Modal title={L("دكتور جديد", "New doctor")} spec="W-104" onClose={() => setModalOpen(false)}>
           <p style={{ fontSize: 12.5, color: "#5B7280", margin: "0 0 12px" }}>
-            كل دكتور نشط يستهلك مقعداً — المتاح الآن: <span className="num">{sub?.seats_available ?? 0}</span>
+            {L("كل دكتور نشط يستهلك مقعداً — المتاح الآن:", "Each active doctor consumes a seat — available now:")} <span className="num">{sub?.seats_available ?? 0}</span>
           </p>
 
           {seatError ? (
             <div style={{ background: "#FDEEEE", border: "1.5px solid #C0392B", borderRadius: 10, padding: "10px 14px", marginBottom: 12 }}>
               <div style={{ color: "#C0392B", fontWeight: 700 }}>
-                لا مقاعد متاحة (<bdi>MDF-4221</bdi>) — لا يمكن إنشاء الدكتور
+                {L("لا مقاعد متاحة (", "No seats available (")}<bdi>MDF-4221</bdi>{L(") — لا يمكن إنشاء الدكتور", ") — the doctor cannot be created")}
               </div>
               <div style={{ marginTop: 8 }}>
                 <Link href="/admin/subscription" className="btn-danger" style={{ textDecoration: "none", height: 40 }}>
-                  توسعة المقاعد
+                  {L("توسعة المقاعد", "Expand seats")}
                 </Link>
               </div>
             </div>
           ) : null}
 
           <Field
-            label="الاسم الكامل"
-            placeholder="مثال: د. سارة العمري"
+            label={L("الاسم الكامل", "Full name")}
+            placeholder={L("مثال: د. سارة العمري", "e.g. Dr. Sarah Al-Amri")}
             value={fullName}
             onChange={(event) => setFullName(event.target.value)}
           />
           <Field
-            label="اسم المستخدم"
+            label={L("اسم المستخدم", "Username")}
             ltr
             placeholder="dr.username"
             value={username}
             onChange={(event) => setUsername(event.target.value)}
           />
           <Field
-            label="كلمة مرور مؤقتة"
+            label={L("كلمة مرور مؤقتة", "Temporary password")}
             ltr
             type="password"
             placeholder="••••••••"
             value={password}
             onChange={(event) => setPassword(event.target.value)}
           />
-          <label className="field-label">التخصص</label>
+          <label className="field-label">{L("التخصص", "Specialty")}</label>
           <select className="field" value={specialty} onChange={(event) => setSpecialty(event.target.value)}>
-            {SPECIALTIES.map((option) => <option key={option} value={option}>{option}</option>)}
+            {SPECIALTIES.map((option) => <option key={option.ar} value={option.ar}>{L(option.ar, option.en)}</option>)}
           </select>
-          <label className="field-label">العيادة</label>
+          <label className="field-label">{L("العيادة", "Clinic")}</label>
           <select className="field" value={clinicId} onChange={(event) => setClinicId(event.target.value)}>
-            {clinics.length === 0 ? <option value="">لا عيادات — أنشئ عيادة أولاً</option> : null}
+            {clinics.length === 0 ? <option value="">{L("لا عيادات — أنشئ عيادة أولاً", "No clinics — create a clinic first")}</option> : null}
             {clinics.map((clinic) => <option key={clinic.id} value={clinic.id}>{clinic.name}</option>)}
           </select>
 
           <div className="modal-actions">
             <button className="btn" onClick={() => void submit()} disabled={busy}>
-              {busy ? <span className="spinner" /> : null} إنشاء الحساب (يستهلك مقعداً)
+              {busy ? <span className="spinner" /> : null} {L("إنشاء الحساب (يستهلك مقعداً)", "Create account (consumes a seat)")}
             </button>
-            <button className="btn-neutral" onClick={() => setModalOpen(false)}>إلغاء</button>
+            <button className="btn-neutral" onClick={() => setModalOpen(false)}>{L("إلغاء", "Cancel")}</button>
           </div>
         </Modal>
       ) : null}
 
       {/* نافذة كلمة المرور المؤقتة */}
       {tempPw !== null ? (
-        <Modal title="كلمة المرور المؤقتة" spec="W-104" onClose={() => setTempPw(null)}>
+        <Modal title={L("كلمة المرور المؤقتة", "Temporary password")} spec="W-104" onClose={() => setTempPw(null)}>
           <p style={{ fontSize: 14, margin: "0 0 10px" }}>{tempPw.doctor}</p>
           <div className="sub-box" style={{ textAlign: "center", fontSize: 22, fontWeight: 700 }}>
             <bdi>{tempPw.password}</bdi>
           </div>
           <p style={{ fontSize: 12.5, color: "#B07D10", fontWeight: 700, margin: "10px 0 0" }}>
-            تُعرض مرة واحدة فقط — انسخها وسلّمها للدكتور الآن، ولن تظهر مجدداً.
+            {L("تُعرض مرة واحدة فقط — انسخها وسلّمها للدكتور الآن، ولن تظهر مجدداً.",
+               "Shown only once — copy it and hand it to the doctor now; it will not appear again.")}
           </p>
           <div className="modal-actions">
-            <button className="btn" onClick={() => setTempPw(null)}>إغلاق</button>
+            <button className="btn" onClick={() => setTempPw(null)}>{L("إغلاق", "Close")}</button>
           </div>
         </Modal>
       ) : null}
@@ -261,8 +273,9 @@ function DoctorsInner() {
 }
 
 export default function DoctorsPage() {
+  const { L } = useLang();
   return (
-    <Shell title="الدكاترة">
+    <Shell title={L("الدكاترة", "Doctors")}>
       <DoctorsInner />
     </Shell>
   );

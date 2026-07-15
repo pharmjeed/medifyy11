@@ -3,6 +3,8 @@
 /** حاجز أخطاء المسارات — يعرض بنمط W-004 (رمز MDF + إجراء مقترح) بدل رسالة Next الخام. */
 
 export default function RouteError({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
+  const arabic = typeof document !== "undefined" && document.documentElement.lang === "ar";
+  const L = (ar: string, en: string) => (arabic ? ar : en);
   return (
     <main style={{ minHeight: "60vh", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
       <div style={{ width: "min(470px,94vw)", background: "#fff", border: "1px solid #D7E3E8", borderRadius: 12, padding: 28, textAlign: "center" }}>
@@ -14,19 +16,20 @@ export default function RouteError({ error, reset }: { error: Error & { digest?:
         <div style={{ marginTop: 10 }}>
           <bdi style={{ fontSize: 22, fontWeight: 700, color: "#C0392B", fontFamily: "var(--m-mono)" }}>MDF-5001</bdi>
         </div>
-        <h1 style={{ fontSize: 18, fontWeight: 700, color: "#0A5C64", margin: "6px 0" }}>حدث خطأ غير متوقع</h1>
+        <h1 style={{ fontSize: 18, fontWeight: 700, color: "#0A5C64", margin: "6px 0" }}>{L("حدث خطأ غير متوقع", "An unexpected error occurred")}</h1>
         <p style={{ fontSize: 14, color: "#5B7280", margin: "8px 0 4px" }}>
-          خطأ في واجهة المتصفح — غالباً بسبب نسخة قديمة محفوظة بعد تحديث للمنصة.
+          {L("خطأ في واجهة المتصفح — غالباً بسبب نسخة قديمة محفوظة بعد تحديث للمنصة.",
+             "A browser-side error — usually a stale cached version after a platform update.")}
         </p>
         <p style={{ fontSize: 12.5, color: "#5B7280", margin: "0 0 16px" }}>
-          أعد المحاولة، وإن تكرر فحدّث الصفحة تحديثاً قسرياً (<bdi>Ctrl+Shift+R</bdi>).
+          {L("أعد المحاولة، وإن تكرر فحدّث الصفحة تحديثاً قسرياً", "Retry; if it persists, force-refresh the page")} (<bdi>Ctrl+Shift+R</bdi>).
         </p>
         {error.digest !== undefined ? (
           <p style={{ marginBottom: 14 }}><span className="tech-badge">trace_{error.digest}</span></p>
         ) : null}
         <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
-          <button className="btn" onClick={() => reset()}>إعادة المحاولة</button>
-          <button className="btn-secondary" onClick={() => window.location.reload()}>تحديث الصفحة</button>
+          <button className="btn" onClick={() => reset()}>{L("إعادة المحاولة", "Retry")}</button>
+          <button className="btn-secondary" onClick={() => window.location.reload()}>{L("تحديث الصفحة", "Refresh page")}</button>
         </div>
       </div>
     </main>

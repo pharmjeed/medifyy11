@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
+import { useLang } from "@/lib/i18n";
 import type { GuidanceItem, UploadStatus, VisitRow, VisitState, VisitSummary } from "@/lib/types";
 import { Shell } from "@/components/Shell";
 import { SpecBar, VisitStateBadge, fmtDateTime, useErrorScreen, useToast, visitStateLabel } from "@/components/ui";
@@ -18,22 +19,22 @@ const STATE_ORDER: VisitState[] = [
 ];
 
 /** عناوين الأقسام المعروفة (الأقسام ديناميكية من القالب — fallback بحرف المفتاح). */
-const SECTION_TITLES: Record<string, string> = {
-  S: "الذاتي — Subjective",
-  O: "الموضوعي — Objective",
-  A: "التقييم — Assessment",
-  P: "الخطة — Plan",
-  E: "تثقيف المريض — Patient education",
+const SECTION_TITLES: Record<string, { ar: string; en: string }> = {
+  S: { ar: "الذاتي — Subjective", en: "Subjective" },
+  O: { ar: "الموضوعي — Objective", en: "Objective" },
+  A: { ar: "التقييم — Assessment", en: "Assessment" },
+  P: { ar: "الخطة — Plan", en: "Plan" },
+  E: { ar: "تثقيف المريض — Patient education", en: "Patient education" },
 };
 
 /** زر الإجراء حسب الحالة (نفس قاعدة رئيسة الدكتور). */
-function actionFor(row: VisitRow): { label: string; href: string } | null {
+function actionFor(row: VisitRow): { label: { ar: string; en: string }; href: string } | null {
   switch (row.state) {
-    case "in_review": return { label: "فتح المراجعة", href: `/doctor/visits/${row.id}/review` };
-    case "uploaded": return { label: "عرض للقراءة", href: `/doctor/visits?open=${row.id}` };
-    case "upload_failed": return { label: "إعادة المحاولة", href: `/doctor/visits/${row.id}/review` };
-    case "draft": return { label: "استئناف", href: `/doctor/visits/new?resume=${row.id}` };
-    case "summarized": return { label: "بدء المراجعة", href: `/doctor/visits/${row.id}/review` };
+    case "in_review": return { label: { ar: "فتح المراجعة", en: "Open review" }, href: `/doctor/visits/${row.id}/review` };
+    case "uploaded": return { label: { ar: "عرض للقراءة", en: "View read-only" }, href: `/doctor/visits?open=${row.id}` };
+    case "upload_failed": return { label: { ar: "إعادة المحاولة", en: "Retry" }, href: `/doctor/visits/${row.id}/review` };
+    case "draft": return { label: { ar: "استئناف", en: "Resume" }, href: `/doctor/visits/new?resume=${row.id}` };
+    case "summarized": return { label: { ar: "بدء المراجعة", en: "Start review" }, href: `/doctor/visits/${row.id}/review` };
     default: return null;
   }
 }
@@ -50,15 +51,17 @@ function SectionKeyBox({ sectionKey }: { sectionKey: string }) {
 }
 
 function GuidanceStatusBadge({ status }: { status: GuidanceItem["status"] }) {
-  if (status === "accepted") return <span className="badge success">مقبول ✓</span>;
-  if (status === "modified") return <span className="badge success">مقبول — معدّل</span>;
-  if (status === "rejected") return <span className="badge danger">مرفوض</span>;
-  return <span className="badge warn">معلق</span>;
+  const { L } = useLang();
+  if (status === "accepted") return <span className="badge success">{L("مقبول ✓", "Accepted ✓")}</span>;
+  if (status === "modified") return <span className="badge success">{L("مقبول — معدّل", "Accepted — modified")}</span>;
+  if (status === "rejected") return <span className="badge danger">{L("مرفوض", "Rejected")}</span>;
+  return <span className="badge warn">{L("معلق", "Pending")}</span>;
 }
 
 /* ===== W-221 — عرض التفاصيل للقراءة فقط ===== */
 function VisitDetail({ visitId, row }: { visitId: string; row: VisitRow | undefined }) {
   const showError = useErrorScreen();
+  const { L } = useLang();
   const [summary, setSummary] = useState<VisitSummary | null>(null);
   const [upload, setUpload] = useState<UploadStatus | null>(null);
 
@@ -80,13 +83,13 @@ function VisitDetail({ visitId, row }: { visitId: string; row: VisitRow | undefi
   return (
     <>
       <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-        <Link href="/doctor/visits" className="btn-secondary h40" style={{ textDecoration: "none" }}>→ رجوع للسجل</Link>
-        <h1 style={{ fontSize: 18, fontWeight: 800, margin: 0, flex: 1 }}>تفاصيل زيارة سابقة</h1>
+        <Link href="/doctor/visits" className="btn-secondary h40" style={{ textDecoration: "none" }}>{L("→ رجوع للسجل", "← Back to log")}</Link>
+        <h1 style={{ fontSize: 18, fontWeight: 800, margin: 0, flex: 1 }}>{L("تفاصيل زيارة سابقة", "Past visit details")}</h1>
         <span className="badge neutral">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <rect x="3" y="11" width="18" height="11" rx="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" />
           </svg>
-          قراءة فقط — معتمدة ومرفوعة (<bdi>MDF-4226</bdi>)
+          {L("قراءة فقط — معتمدة ومرفوعة", "Read-only — approved and uploaded")} (<bdi>MDF-4226</bdi>)
         </span>
       </div>
 
@@ -95,31 +98,34 @@ function VisitDetail({ visitId, row }: { visitId: string; row: VisitRow | undefi
         <div style={{ flex: 1, minWidth: 220 }}>
           <div style={{ fontSize: 16, fontWeight: 800 }}>{row !== undefined ? row.patient_name : "—"}</div>
           <div style={{ fontSize: 12.5, color: "#5B7280" }}>
-            ملف {row !== undefined ? <bdi>{row.patient_mrn}</bdi> : "—"}
+            {L("ملف", "MRN")} {row !== undefined ? <bdi>{row.patient_mrn}</bdi> : "—"}
           </div>
         </div>
         <div style={{ fontSize: 14 }}>
-          <span style={{ color: "#5B7280" }}>القالب: </span>
+          <span style={{ color: "#5B7280" }}>{L("القالب: ", "Template: ")}</span>
           {row !== undefined ? row.template_name : "—"}
         </div>
         <div style={{ fontSize: 14 }}>
-          <span style={{ color: "#5B7280" }}>الوقت: </span>
+          <span style={{ color: "#5B7280" }}>{L("الوقت: ", "Time: ")}</span>
           {row !== undefined ? fmtDateTime(row.created_at) : "—"}
         </div>
       </div>
 
       {summary === null ? (
-        <div className="card" style={{ marginTop: 12, textAlign: "center", color: "#5B7280" }}>جارٍ التحميل…</div>
+        <div className="card" style={{ marginTop: 12, textAlign: "center", color: "#5B7280" }}>{L("جارٍ التحميل…", "Loading…")}</div>
       ) : (
         <>
           {/* بطاقات الأقسام */}
           {summary.sections.slice().sort((a, b) => a.position - b.position).map((section) => {
             const resolved = section.guidance.filter((item) => item.status !== "pending");
+            const title = SECTION_TITLES[section.section_key];
             return (
               <div key={section.id} className="card" style={{ marginTop: 12 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                   <SectionKeyBox sectionKey={section.section_key} />
-                  <strong style={{ fontSize: 15 }}>{SECTION_TITLES[section.section_key] ?? `قسم ${section.section_key}`}</strong>
+                  <strong style={{ fontSize: 15 }}>
+                    {title !== undefined ? L(title.ar, title.en) : L(`قسم ${section.section_key}`, `Section ${section.section_key}`)}
+                  </strong>
                 </div>
                 <div className="clinical" style={{ marginTop: 8 }}>{section.content_current}</div>
                 {resolved.length > 0 ? (
@@ -141,15 +147,15 @@ function VisitDetail({ visitId, row }: { visitId: string; row: VisitRow | undefi
           {/* سجل الاعتماد — إلحاقي غير قابل للتعديل */}
           {summary.approval !== null ? (
             <div className="card" style={{ marginTop: 12, border: "1px solid #2E9E5B" }}>
-              <strong style={{ color: "#2E9E5B", fontSize: 14 }}>سجل الاعتماد — إلحاقي غير قابل للتعديل</strong>
+              <strong style={{ color: "#2E9E5B", fontSize: 14 }}>{L("سجل الاعتماد — إلحاقي غير قابل للتعديل", "Approval record — append-only, immutable")}</strong>
               <div style={{ fontSize: 14, marginTop: 6 }}>
-                اعتمدها: {summary.approval.approved_by} · {fmtDateTime(summary.approval.approved_at)}
+                {L("اعتمدها:", "Approved by:")} {summary.approval.approved_by} · {fmtDateTime(summary.approval.approved_at)}
               </div>
               <div style={{ fontSize: 12.5, color: "#5B7280", marginTop: 2 }}>
-                بصمة الملخص: <bdi>sha256:{summary.approval.summary_hash.slice(0, 8)}…</bdi>
+                {L("بصمة الملخص:", "Summary hash:")} <bdi>sha256:{summary.approval.summary_hash.slice(0, 8)}…</bdi>
               </div>
               <div style={{ fontSize: 12.5, color: "#5B7280", marginTop: 2 }}>
-                بصمة الرموز: <bdi>sha256:{summary.approval.codes_hash.slice(0, 8)}…</bdi>
+                {L("بصمة الرموز:", "Codes hash:")} <bdi>sha256:{summary.approval.codes_hash.slice(0, 8)}…</bdi>
               </div>
             </div>
           ) : null}
@@ -157,9 +163,9 @@ function VisitDetail({ visitId, row }: { visitId: string; row: VisitRow | undefi
           {/* إيصال الرفع */}
           {upload !== null ? (
             <div className="card" style={{ marginTop: 12 }}>
-              <strong style={{ fontSize: 14 }}>إيصال الرفع</strong>
+              <strong style={{ fontSize: 14 }}>{L("إيصال الرفع", "Upload receipt")}</strong>
               <div style={{ fontSize: 14, marginTop: 6 }}>
-                الحالة: <bdi>{upload.status}</bdi> · المحاولات: <span className="num">{upload.attempts_count}</span>
+                {L("الحالة:", "Status:")} <bdi>{upload.status}</bdi> · {L("المحاولات:", "Attempts:")} <span className="num">{upload.attempts_count}</span>
               </div>
             </div>
           ) : null}
@@ -174,6 +180,7 @@ function VisitsInner() {
   const params = useSearchParams();
   const showError = useErrorScreen();
   const toast = useToast();
+  const { L, lang } = useLang();
   const openId = params.get("open");
 
   const [query, setQuery] = useState("");
@@ -203,7 +210,7 @@ function VisitsInner() {
   if (openId !== null) {
     return (
       <>
-        <SpecBar ids="W-202 · W-221" desc="الصفحة 12 — السجل + التفاصيل عرض فرعي للقراءة فقط" />
+        <SpecBar ids="W-202 · W-221" desc={L("الصفحة 12 — السجل + التفاصيل عرض فرعي للقراءة فقط", "Page 12 — log + read-only detail subview")} />
         <VisitDetail visitId={openId} row={all.find((row) => row.id === openId)} />
       </>
     );
@@ -211,38 +218,38 @@ function VisitsInner() {
 
   return (
     <>
-      <SpecBar ids="W-202 · W-221" desc="الصفحة 12 — السجل + التفاصيل عرض فرعي للقراءة فقط" />
-      <h1 className="page-title">سجل الزيارات</h1>
-      <p className="page-desc">زياراتك أنت فقط (<bdi>doctor_id = self</bdi>)</p>
+      <SpecBar ids="W-202 · W-221" desc={L("الصفحة 12 — السجل + التفاصيل عرض فرعي للقراءة فقط", "Page 12 — log + read-only detail subview")} />
+      <h1 className="page-title">{L("سجل الزيارات", "Visit log")}</h1>
+      <p className="page-desc">{L("زياراتك أنت فقط", "Your own visits only")} (<bdi>doctor_id = self</bdi>)</p>
 
       <input
         className="field search"
-        placeholder="بحث باسم المريض أو رقم الملف…"
+        placeholder={L("بحث باسم المريض أو رقم الملف…", "Search by patient name or MRN…")}
         value={query}
         onChange={(event) => setQuery(event.target.value)}
-        aria-label="بحث باسم المريض أو رقم الملف"
+        aria-label={L("بحث باسم المريض أو رقم الملف", "Search by patient name or MRN")}
       />
 
       {/* حبوب فلتر الحالة — العدادات من النتيجة غير المفلترة بالحالة */}
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "12px 0 16px" }}>
         <button className={filter === "all" ? "pill active" : "pill"} onClick={() => setFilter("all")}>
-          الكل <span className="num">{all.length}</span>
+          {L("الكل", "All")} <span className="num">{all.length}</span>
         </button>
         {STATE_ORDER.filter((state) => (counts.get(state) ?? 0) > 0).map((state) => (
           <button key={state} className={filter === state ? "pill active" : "pill"} onClick={() => setFilter(state)}>
-            {visitStateLabel(state)} <span className="num">{counts.get(state) ?? 0}</span>
+            {visitStateLabel(state, lang)} <span className="num">{counts.get(state) ?? 0}</span>
           </button>
         ))}
       </div>
 
       <div className="grid-table">
         <div className="grid-head" style={{ gridTemplateColumns: LIST_GRID }}>
-          <div>الوقت</div><div>الزيارة</div><div>المريض</div><div>الملف</div><div>العيادة</div><div>الحالة</div><div>إجراء</div>
+          <div>{L("الوقت", "Time")}</div><div>{L("الزيارة", "Visit")}</div><div>{L("المريض", "Patient")}</div><div>{L("الملف", "MRN")}</div><div>{L("العيادة", "Clinic")}</div><div>{L("الحالة", "Status")}</div><div>{L("إجراء", "Action")}</div>
         </div>
         {rows === null ? (
-          <div className="grid-empty">جارٍ التحميل…</div>
+          <div className="grid-empty">{L("جارٍ التحميل…", "Loading…")}</div>
         ) : filtered.length === 0 ? (
-          <div className="grid-empty">لا زيارات مطابقة للبحث</div>
+          <div className="grid-empty">{L("لا زيارات مطابقة للبحث", "No visits match your search")}</div>
         ) : (
           filtered.map((row, index) => {
             const action = actionFor(row);
@@ -252,16 +259,16 @@ function VisitsInner() {
                 <div><bdi>{row.id.slice(0, 8)}</bdi></div>
                 <div>{row.patient_name}</div>
                 <div><bdi>{row.patient_mrn}</bdi></div>
-                <div>الباطنة</div>
+                <div>{L("الباطنة", "Internal medicine")}</div>
                 <div><VisitStateBadge state={row.state} /></div>
                 <div>
                   {row.state === "cancelled" ? (
-                    <button className="btn-row neutral" onClick={() => toast("زيارة ملغاة بقرار الدكتور — لا اعتماد ولا رفع")}>
-                      ملغاة — عرض
+                    <button className="btn-row neutral" onClick={() => toast(L("زيارة ملغاة بقرار الدكتور — لا اعتماد ولا رفع", "Visit cancelled by the doctor — no approval, no upload"))}>
+                      {L("ملغاة — عرض", "Cancelled — view")}
                     </button>
                   ) : action !== null ? (
                     <Link href={action.href} className="btn-row" style={{ textDecoration: "none", display: "inline-flex", alignItems: "center" }}>
-                      {action.label}
+                      {L(action.label.ar, action.label.en)}
                     </Link>
                   ) : (
                     <span style={{ color: "#5B7280" }}>—</span>
@@ -274,15 +281,16 @@ function VisitsInner() {
       </div>
 
       <p style={{ fontSize: 12.5, color: "#5B7280", marginTop: 12 }}>
-        آلة الحالات أحادية الاتجاه: <bdi>draft → recording → transcribed → summarized → in_review → approved → uploaded | upload_failed</bdi> · الإلغاء حالة نهائية <bdi>cancelled</bdi> متاحة قبل الاعتماد فقط
+        {L("آلة الحالات أحادية الاتجاه:", "One-way state machine:")} <bdi>draft → recording → transcribed → summarized → in_review → approved → uploaded | upload_failed</bdi> · {L("الإلغاء حالة نهائية", "Cancellation is a terminal state")} <bdi>cancelled</bdi> {L("متاحة قبل الاعتماد فقط", "available only before approval")}
       </p>
     </>
   );
 }
 
 export default function DoctorVisitsPage() {
+  const { L } = useLang();
   return (
-    <Shell title="سجل الزيارات">
+    <Shell title={L("سجل الزيارات", "Visit log")}>
       <main className="page-wrap">
         <Suspense>
           <VisitsInner />

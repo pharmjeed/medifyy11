@@ -6,6 +6,7 @@ test.skip(process.env.E2E_SNAPSHOTS !== "1", "snapshots only on demand");
 const OUT = process.env.SNAP_DIR ?? "test-results/snaps";
 
 test("review page snapshot", async ({ page }) => {
+  await page.addInitScript(() => window.localStorage.setItem("medify_lang", "ar"));
   await page.setViewportSize({ width: 1440, height: 1200 });
   await page.goto("/login");
   await page.getByPlaceholder("اسم المنشأة أو السجل التجاري").fill("1010456789");

@@ -4,6 +4,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { ApiError, api } from "@/lib/api";
+import { useLang } from "@/lib/i18n";
 import type { Template, TemplateSection } from "@/lib/types";
 import { Shell } from "@/components/Shell";
 import { Modal, SpecBadge, SpecBar, useErrorScreen, useToast } from "@/components/ui";
@@ -36,6 +37,7 @@ function SectionKeyBox({ sectionKey }: { sectionKey: string }) {
 function TemplatesInner() {
   const toast = useToast();
   const showError = useErrorScreen();
+  const { L, lang } = useLang();
 
   const [view, setView] = useState<View>("list");
   const [templates, setTemplates] = useState<Template[] | null>(null);
@@ -70,12 +72,12 @@ function TemplatesInner() {
 
   const setDefault = async (tpl: Template) => {
     if (!tpl.is_personal) {
-      toast("التعيين الافتراضي متاح لقوالبك الشخصية");
+      toast(L("التعيين الافتراضي متاح لقوالبك الشخصية", "Default assignment is available for your personal templates only"));
       return;
     }
     try {
       await api(`/templates/${tpl.id}/default`, { method: "PATCH" });
-      toast("عُيّن قالباً افتراضياً (FR-505)");
+      toast(L("عُيّن قالباً افتراضياً (FR-505)", "Set as default template (FR-505)"));
       void load();
     } catch (err) {
       showError(err);
@@ -85,7 +87,7 @@ function TemplatesInner() {
   const removeTpl = async (tpl: Template) => {
     try {
       await api(`/templates/${tpl.id}`, { method: "DELETE" });
-      toast("حُذف القالب الشخصي (FR-504)");
+      toast(L("حُذف القالب الشخصي (FR-504)", "Personal template deleted (FR-504)"));
       void load();
     } catch (err) {
       showError(err);
@@ -94,7 +96,7 @@ function TemplatesInner() {
 
   const generate = async () => {
     if (sampleText.trim() === "" || styleText.trim() === "") {
-      toast("أدخل نص المثال وطريقة التلخيص أولاً (FR-502)");
+      toast(L("أدخل نص المثال وطريقة التلخيص أولاً (FR-502)", "Enter the sample text and summarization style first (FR-502)"));
       return;
     }
     setBuilding(true);
@@ -104,13 +106,13 @@ function TemplatesInner() {
         body: { sample_text: sampleText, summarization_style: styleText },
       });
       setGenerated(body.data);
-      setTplName(body.data.name.trim() !== "" ? body.data.name : "قالب عكسي جديد");
+      setTplName(body.data.name.trim() !== "" ? body.data.name : L("قالب عكسي جديد", "New reverse-built template"));
       setRunSections(null);
       setSaveError(null);
       setView("preview");
     } catch (err) {
       if (err instanceof ApiError && err.code === "MDF-5034") {
-        toast(`${err.messageAr} — أعد المحاولة (MDF-5034)`);
+        toast(`${err.text(lang)} — ${L("أعد المحاولة", "please retry")} (MDF-5034)`);
       } else {
         showError(err);
       }
@@ -130,7 +132,7 @@ function TemplatesInner() {
       setRunSections(body.data.sections);
     } catch (err) {
       if (err instanceof ApiError && err.code === "MDF-4225") {
-        setSaveError(`بنية ناقصة — حدد النقص: ${err.messageAr}`);
+        setSaveError(`${L("بنية ناقصة — حدد النقص:", "Incomplete structure — missing:")} ${err.text(lang)}`);
       } else {
         showError(err);
       }
@@ -142,7 +144,7 @@ function TemplatesInner() {
   const save = async () => {
     if (generated === null) return;
     if (tplName.trim() === "") {
-      toast("أدخل اسم القالب");
+      toast(L("أدخل اسم القالب", "Enter a template name"));
       return;
     }
     setSaving(true);
@@ -157,7 +159,8 @@ function TemplatesInner() {
           source_sample_text: sampleText,
         },
       });
-      toast("حُفظ القالب — origin: reverse_built، جاهز لأي زيارة قادمة (FR-504)");
+      toast(L("حُفظ القالب — origin: reverse_built، جاهز لأي زيارة قادمة (FR-504)",
+              "Template saved — origin: reverse_built, ready for any upcoming visit (FR-504)"));
       setView("list");
       setGenerated(null);
       setRunSections(null);
@@ -166,7 +169,7 @@ function TemplatesInner() {
       void load();
     } catch (err) {
       if (err instanceof ApiError && err.code === "MDF-4225") {
-        setSaveError(`بنية ناقصة — حدد النقص: ${err.messageAr}`);
+        setSaveError(`${L("بنية ناقصة — حدد النقص:", "Incomplete structure — missing:")} ${err.text(lang)}`);
       } else {
         showError(err);
       }
@@ -188,8 +191,8 @@ function TemplatesInner() {
         <strong style={{ flex: 1, fontSize: 15, lineHeight: 1.6 }}>{tpl.name}</strong>
         <button
           type="button"
-          title="تعيين افتراضي (FR-505)"
-          aria-label="تعيين افتراضي (FR-505)"
+          title={L("تعيين افتراضي (FR-505)", "Set as default (FR-505)")}
+          aria-label={L("تعيين افتراضي (FR-505)", "Set as default (FR-505)")}
           onClick={() => void setDefault(tpl)}
           style={{
             border: "none", background: "none", cursor: "pointer", padding: 0,
@@ -202,14 +205,14 @@ function TemplatesInner() {
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
         {tpl.specialty !== null ? <span className="badge neutral">{tpl.specialty}</span> : null}
         {tpl.visit_type !== null ? <span className="badge neutral">{tpl.visit_type}</span> : null}
-        <span className="badge neutral"><span className="num">{tpl.structure.sections.length}</span> أقسام</span>
-        {tpl.origin === "reverse_built" ? <span className="badge" style={GOLD_BADGE}>بناء عكسي</span> : null}
-        {tpl.is_default ? <span className="badge" style={GOLD_BADGE}>الافتراضي</span> : null}
+        <span className="badge neutral"><span className="num">{tpl.structure.sections.length}</span> {L("أقسام", "sections")}</span>
+        {tpl.origin === "reverse_built" ? <span className="badge" style={GOLD_BADGE}>{L("بناء عكسي", "Reverse build")}</span> : null}
+        {tpl.is_default ? <span className="badge" style={GOLD_BADGE}>{L("الافتراضي", "Default")}</span> : null}
       </div>
       <div style={{ display: "flex", gap: 8, marginTop: "auto" }}>
-        <button className="btn-row" onClick={() => setStructureTpl(tpl)}>معاينة البنية</button>
+        <button className="btn-row" onClick={() => setStructureTpl(tpl)}>{L("معاينة البنية", "Preview structure")}</button>
         {tpl.is_personal ? (
-          <button className="btn-row neutral" onClick={() => void removeTpl(tpl)}>حذف</button>
+          <button className="btn-row neutral" onClick={() => void removeTpl(tpl)}>{L("حذف", "Delete")}</button>
         ) : null}
       </div>
     </div>
@@ -219,30 +222,30 @@ function TemplatesInner() {
   if (view === "list") {
     return (
       <>
-        <SpecBar ids="W-203 · W-204 · W-205" desc="الصفحة 13 — القائمة + المنشئ العكسي (إدخال ← معاينة/حفظ)" />
+        <SpecBar ids="W-203 · W-204 · W-205" desc={L("الصفحة 13 — القائمة + المنشئ العكسي (إدخال ← معاينة/حفظ)", "Page 13 — list + reverse builder (input → preview/save)")} />
         <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 18 }}>
           <div style={{ flex: 1, minWidth: 240 }}>
-            <h1 className="page-title" style={{ marginBottom: 2 }}>قوالب التلخيص</h1>
-            <p className="page-desc" style={{ margin: 0 }}>الاختيار إلزامي قبل بدء أي تسجيل (FR-501)</p>
+            <h1 className="page-title" style={{ marginBottom: 2 }}>{L("قوالب التلخيص", "Summary templates")}</h1>
+            <p className="page-desc" style={{ margin: 0 }}>{L("الاختيار إلزامي قبل بدء أي تسجيل (FR-501)", "Selecting a template is required before starting any recording (FR-501)")}</p>
           </div>
-          <button className="btn" onClick={() => setView("builder")}>+ قالب جديد عكسي</button>
+          <button className="btn" onClick={() => setView("builder")}>{L("+ قالب جديد عكسي", "+ New reverse-built template")}</button>
         </div>
 
-        <h2 style={{ fontSize: 16, fontWeight: 800, margin: "0 0 10px" }}>قوالب المنشأة الجاهزة</h2>
+        <h2 style={{ fontSize: 16, fontWeight: 800, margin: "0 0 10px" }}>{L("قوالب المنشأة الجاهزة", "Facility preset templates")}</h2>
         {templates === null ? (
-          <div className="card" style={{ textAlign: "center", color: "#5B7280" }}>جارٍ التحميل…</div>
+          <div className="card" style={{ textAlign: "center", color: "#5B7280" }}>{L("جارٍ التحميل…", "Loading…")}</div>
         ) : systemTemplates.length === 0 ? (
-          <div className="card" style={{ textAlign: "center", color: "#5B7280" }}>لا قوالب جاهزة</div>
+          <div className="card" style={{ textAlign: "center", color: "#5B7280" }}>{L("لا قوالب جاهزة", "No preset templates")}</div>
         ) : (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 14 }}>
             {systemTemplates.map(renderCard)}
           </div>
         )}
 
-        <h2 style={{ fontSize: 16, fontWeight: 800, margin: "22px 0 10px" }}>قوالبي الشخصية</h2>
+        <h2 style={{ fontSize: 16, fontWeight: 800, margin: "22px 0 10px" }}>{L("قوالبي الشخصية", "My personal templates")}</h2>
         {templates === null ? null : personalTemplates.length === 0 ? (
           <div className="card" style={{ textAlign: "center", color: "#5B7280" }}>
-            لا قوالب شخصية بعد — أنشئ أول قالب بالمنشئ العكسي
+            {L("لا قوالب شخصية بعد — أنشئ أول قالب بالمنشئ العكسي", "No personal templates yet — create your first with the reverse builder")}
           </div>
         ) : (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 14 }}>
@@ -251,7 +254,7 @@ function TemplatesInner() {
         )}
 
         {structureTpl !== null ? (
-          <Modal title={`معاينة البنية — ${structureTpl.name}`} spec="W-203" onClose={() => setStructureTpl(null)} wide>
+          <Modal title={`${L("معاينة البنية", "Structure preview")} — ${structureTpl.name}`} spec="W-203" onClose={() => setStructureTpl(null)} wide>
             {structureTpl.structure.sections.map((section) => (
               <div key={section.section_key} style={{ display: "flex", gap: 10, alignItems: "flex-start", padding: "10px 0", borderBottom: "1px solid #EAF6F7" }}>
                 <SectionKeyBox sectionKey={section.section_key} />
@@ -271,19 +274,20 @@ function TemplatesInner() {
   if (view === "builder") {
     return (
       <>
-        <SpecBar ids="W-203 · W-204 · W-205" desc="الصفحة 13 — القائمة + المنشئ العكسي (إدخال ← معاينة/حفظ)" />
+        <SpecBar ids="W-203 · W-204 · W-205" desc={L("الصفحة 13 — القائمة + المنشئ العكسي (إدخال ← معاينة/حفظ)", "Page 13 — list + reverse builder (input → preview/save)")} />
         <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 6 }}>
-          <button className="btn-secondary h40" onClick={() => setView("list")}>→ رجوع للقائمة</button>
+          <button className="btn-secondary h40" onClick={() => setView("list")}>{L("→ رجوع للقائمة", "← Back to list")}</button>
           <h1 style={{ fontSize: 18, fontWeight: 800, margin: 0, flex: 1, display: "inline-flex", alignItems: "center", gap: 8 }}>
-            منشئ القالب العكسي <SpecBadge id="W-204" />
+            {L("منشئ القالب العكسي", "Reverse template builder")} <SpecBadge id="W-204" />
           </h1>
         </div>
         <p className="page-desc">
-          اكتب النص الذي تريده وطريقة تلخيصه، فيولّد الذكاء الاصطناعي بنية قالب قابلة للحفظ وإعادة الاستخدام (FR-502).
+          {L("اكتب النص الذي تريده وطريقة تلخيصه، فيولّد الذكاء الاصطناعي بنية قالب قابلة للحفظ وإعادة الاستخدام (FR-502).",
+             "Write the text you want and how it should be summarized — the AI generates a template structure you can save and reuse (FR-502).")}
         </p>
 
         <div className="card pad24">
-          <label className="field-label">نص المثال — كما تحب أن تبدو ملاحظتك</label>
+          <label className="field-label">{L("نص المثال — كما تحب أن تبدو ملاحظتك", "Sample text — how you want your note to look")}</label>
           <textarea
             className="field clinical"
             dir="ltr"
@@ -292,20 +296,21 @@ function TemplatesInner() {
             value={sampleText}
             onChange={(event) => setSampleText(event.target.value)}
           />
-          <label className="field-label">طريقة التلخيص المرغوبة</label>
+          <label className="field-label">{L("طريقة التلخيص المرغوبة", "Preferred summarization style")}</label>
           <textarea
             className="field"
             rows={3}
-            placeholder="مثال: اجعل التقييم قائمة مرقمة، والخطة نقاطاً قصيرة…"
+            placeholder={L("مثال: اجعل التقييم قائمة مرقمة، والخطة نقاطاً قصيرة…", "Example: make the assessment a numbered list and the plan short bullet points…")}
             value={styleText}
             onChange={(event) => setStyleText(event.target.value)}
           />
           <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginTop: 16 }}>
             <button className="btn" onClick={() => void generate()} disabled={building}>
-              {building ? <><span className="spinner" /> يولّد البنية…</> : "ولّد القالب"}
+              {building ? <><span className="spinner" /> {L("يولّد البنية…", "Generating structure…")}</> : L("ولّد القالب", "Generate template")}
             </button>
             <span style={{ fontSize: 12.5, color: "#5B7280" }}>
-              لا يُحفظ شيء تلقائياً — المعاينة أولاً ثم الحفظ بفعلك (FR-503)
+              {L("لا يُحفظ شيء تلقائياً — المعاينة أولاً ثم الحفظ بفعلك (FR-503)",
+                 "Nothing is saved automatically — preview first, then save by your own action (FR-503)")}
             </span>
           </div>
         </div>
@@ -316,26 +321,27 @@ function TemplatesInner() {
   /* ===== W-205 — المعاينة والحفظ ===== */
   return (
     <>
-      <SpecBar ids="W-203 · W-204 · W-205" desc="الصفحة 13 — القائمة + المنشئ العكسي (إدخال ← معاينة/حفظ)" />
+      <SpecBar ids="W-203 · W-204 · W-205" desc={L("الصفحة 13 — القائمة + المنشئ العكسي (إدخال ← معاينة/حفظ)", "Page 13 — list + reverse builder (input → preview/save)")} />
       <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 6 }}>
-        <button className="btn-secondary h40" onClick={() => setView("builder")}>→ رجوع للتعديل</button>
+        <button className="btn-secondary h40" onClick={() => setView("builder")}>{L("→ رجوع للتعديل", "← Back to editing")}</button>
         <h1 style={{ fontSize: 18, fontWeight: 800, margin: 0, flex: 1, display: "inline-flex", alignItems: "center", gap: 8 }}>
-          معاينة القالب المولّد <SpecBadge id="W-205" />
+          {L("معاينة القالب المولّد", "Generated template preview")} <SpecBadge id="W-205" />
         </h1>
       </div>
       <p className="page-desc">
-        استُنتجت البنية من مثالك وشُغّلت على نص تجريبي قياسي (FR-503). لن يُحفظ القالب إلا بفعلك.
+        {L("استُنتجت البنية من مثالك وشُغّلت على نص تجريبي قياسي (FR-503). لن يُحفظ القالب إلا بفعلك.",
+           "The structure was inferred from your sample and run on a standard test text (FR-503). The template is saved only by your own action.")}
       </p>
 
       {generated === null ? (
         <div className="card" style={{ textAlign: "center", color: "#5B7280" }}>
-          لا بنية مولّدة — عد للمنشئ وولّد القالب أولاً.
+          {L("لا بنية مولّدة — عد للمنشئ وولّد القالب أولاً.", "No generated structure — go back to the builder and generate the template first.")}
         </div>
       ) : (
         <>
           {/* البنية المستنتجة structure_json */}
           <h2 style={{ fontSize: 15, fontWeight: 800, margin: "0 0 4px" }}>
-            البنية المستنتجة <bdi>structure_json</bdi>
+            {L("البنية المستنتجة", "Inferred structure")} <bdi>structure_json</bdi>
           </h2>
           {generated.structure.sections.map((section) => (
             <div
@@ -346,7 +352,7 @@ function TemplatesInner() {
               <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                 <SectionKeyBox sectionKey={section.section_key} />
                 <strong style={{ fontSize: 14 }}>{section.title}</strong>
-                {section.section_key === "E" ? <span className="badge" style={GOLD_BADGE}>قسم مستنتج جديد</span> : null}
+                {section.section_key === "E" ? <span className="badge" style={GOLD_BADGE}>{L("قسم مستنتج جديد", "New inferred section")}</span> : null}
               </div>
               <p style={{ fontSize: 13, color: "#5B7280", margin: "8px 0 0" }}>{section.instructions}</p>
             </div>
@@ -355,14 +361,15 @@ function TemplatesInner() {
           {/* تشغيل على نص تجريبي قياسي */}
           <div className="card" style={{ marginTop: 14 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-              <strong style={{ flex: 1, fontSize: 14 }}>تشغيل على نص تجريبي قياسي</strong>
+              <strong style={{ flex: 1, fontSize: 14 }}>{L("تشغيل على نص تجريبي قياسي", "Run on a standard test text")}</strong>
               <button className="btn-secondary h40" onClick={() => void runPreview()} disabled={running}>
-                {running ? <><span className="spinner dark" /> يشغّل…</> : "تشغيل المعاينة"}
+                {running ? <><span className="spinner dark" /> {L("يشغّل…", "Running…")}</> : L("تشغيل المعاينة", "Run preview")}
               </button>
             </div>
             {runSections === null ? (
               <p style={{ fontSize: 12.5, color: "#5B7280", margin: "10px 0 0" }}>
-                اضغط «تشغيل المعاينة» لعرض ناتج القالب على النص التجريبي القياسي.
+                {L("اضغط «تشغيل المعاينة» لعرض ناتج القالب على النص التجريبي القياسي.",
+                   "Press “Run preview” to see the template output on the standard test text.")}
               </p>
             ) : (
               runSections.map((section) => (
@@ -376,7 +383,7 @@ function TemplatesInner() {
 
           {/* بطاقة الحفظ */}
           <div className="card pad24" style={{ marginTop: 14 }}>
-            <label className="field-label">اسم القالب</label>
+            <label className="field-label">{L("اسم القالب", "Template name")}</label>
             <input className="field" value={tplName} onChange={(event) => setTplName(event.target.value)} />
             {saveError !== null ? (
               <p style={{ color: "#C0392B", fontSize: 12.5, fontWeight: 700, margin: "10px 0 0" }}>
@@ -385,9 +392,9 @@ function TemplatesInner() {
             ) : null}
             <div className="modal-actions">
               <button className="btn-success" onClick={() => void save()} disabled={saving}>
-                {saving ? <span className="spinner" /> : null} حفظ القالب
+                {saving ? <span className="spinner" /> : null} {L("حفظ القالب", "Save template")}
               </button>
-              <button className="btn-neutral" onClick={() => setView("list")}>إلغاء</button>
+              <button className="btn-neutral" onClick={() => setView("list")}>{L("إلغاء", "Cancel")}</button>
             </div>
           </div>
         </>
@@ -397,8 +404,9 @@ function TemplatesInner() {
 }
 
 export default function DoctorTemplatesPage() {
+  const { L } = useLang();
   return (
-    <Shell title="قوالب التلخيص">
+    <Shell title={L("قوالب التلخيص", "Summary templates")}>
       <main className="page-wrap narrow">
         <TemplatesInner />
       </main>

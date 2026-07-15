@@ -84,7 +84,7 @@ body {
   margin: 0;
   background: var(--m-bg);
   color: var(--m-ink);
-  direction: rtl;
+  /* الاتجاه يقوده html[dir] — عربي RTL / إنجليزي LTR (D-30) */
   font-family: var(--m-font);
   -webkit-font-smoothing: antialiased;
   font-size: 14px;
@@ -228,7 +228,7 @@ select.field { padding: 0 10px; }
 }
 .sub-box { background: var(--m-bg); border: 1px solid var(--m-line); border-radius: 10px; padding: 10px 14px; }
 .select-card {
-  display: block; width: 100%; text-align: right; background: #fff; border: 2px solid var(--m-line);
+  display: block; width: 100%; text-align: start; background: #fff; border: 2px solid var(--m-line);
   border-radius: 12px; cursor: pointer; padding: 14px 16px; font-family: inherit; font-size: 14px;
 }
 .select-card:hover { border-color: var(--m-primary); }

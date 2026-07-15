@@ -10,6 +10,7 @@ const USER_KEY = "medify_user";
 export class ApiError extends Error {
   code: string;
   messageAr: string;
+  messageEn: string;
   details: Record<string, unknown>;
   status: number;
 
@@ -18,7 +19,13 @@ export class ApiError extends Error {
     this.status = status;
     this.code = err.code;
     this.messageAr = err.message_ar;
+    this.messageEn = err.message_en;
     this.details = err.details ?? {};
+  }
+
+  /** الرسالة بلغة الواجهة الحالية — كل رمز MDF ثنائي اللغة من الخادم (DOC-13). */
+  text(lang: "ar" | "en"): string {
+    return lang === "ar" ? this.messageAr || this.messageEn : this.messageEn || this.messageAr;
   }
 }
 

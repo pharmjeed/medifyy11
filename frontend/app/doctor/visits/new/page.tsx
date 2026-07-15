@@ -9,6 +9,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, api, getSessionUser, wsUrl } from "@/lib/api";
+import { useLang } from "@/lib/i18n";
 import type { CreatedVisit, Patient, PatientContext, Template } from "@/lib/types";
 import { ProgressBar7 } from "@/components/ProgressBar7";
 import { Shell } from "@/components/Shell";
@@ -28,6 +29,7 @@ export default function NewVisitPage() {
   const router = useRouter();
   const toast = useToast();
   const showError = useErrorScreen();
+  const { L } = useLang();
 
   const [phase, setPhase] = useState<Phase>("patient");
   const [patients, setPatients] = useState<Patient[]>([]);
@@ -112,7 +114,9 @@ export default function NewVisitPage() {
       } else if (message.type === "resume_from" && message.seq !== undefined) {
         seq.current = message.seq;
       } else if (message.type === "error") {
-        toast(`انقطاع خط التفريغ (${message.code ?? "MDF-5031"}) — وضع الحفظ المحلي`);
+        const code = message.code ?? "MDF-5031";
+        toast(L(`انقطاع خط التفريغ (${code}) — وضع الحفظ المحلي`,
+                `Transcription stream interrupted (${code}) — local save mode`));
         setOnline(false);
       }
     };
@@ -124,14 +128,14 @@ export default function NewVisitPage() {
       }, 2500);
     };
     socket.onerror = () => { /* onclose يتكفل */ };
-  }, [toast]);
+  }, [toast, L]);
 
   const phaseRef = useRef<Phase>("patient");
   useEffect(() => { phaseRef.current = phase; }, [phase]);
 
   const startRecording = async () => {
-    if (selectedPatient === null) { toast("اختر مريضاً أولاً (FR-601)"); return; }
-    if (selectedTemplate === null) { toast("اختر قالباً — الاختيار إلزامي قبل التسجيل (FR-501)"); return; }
+    if (selectedPatient === null) { toast(L("اختر مريضاً أولاً (FR-601)", "Select a patient first (FR-601)")); return; }
+    if (selectedTemplate === null) { toast(L("اختر قالباً — الاختيار إلزامي قبل التسجيل (FR-501)", "Select a template — selection is required before recording (FR-501)")); return; }
     try {
       const created = await api<CreatedVisit>("/visits", {
         method: "POST",
@@ -207,7 +211,8 @@ export default function NewVisitPage() {
     ws.current?.close();
     try {
       await api(`/visits/${visit.id}/cancel`, { method: "POST" });
-      toast("أُلغيت الزيارة — حالة نهائية cancelled: لا اعتماد ولا رفع (FR-606)");
+      toast(L("أُلغيت الزيارة — حالة نهائية cancelled: لا اعتماد ولا رفع (FR-606)",
+              "Visit cancelled — final state cancelled: no approval, no upload (FR-606)"));
       router.push("/doctor/visits");
     } catch (err) {
       showError(err);
@@ -219,10 +224,10 @@ export default function NewVisitPage() {
   const ss = String(seconds % 60).padStart(2, "0");
 
   return (
-    <Shell title="زيارة جديدة">
+    <Shell title={L("زيارة جديدة", "New visit")}>
       {phase !== "blocked" ? <ProgressBar7 current={stage} /> : null}
       <main className="page-wrap journey">
-        <SpecBar ids="W-210 · W-211 · W-212 · W-213 · W-223" desc="الصفحة 14 — معالج (مريض ← قالب) ثم التسجيل بحالاته + الإلغاء" />
+        <SpecBar ids="W-210 · W-211 · W-212 · W-213 · W-223" desc={L("الصفحة 14 — معالج (مريض ← قالب) ثم التسجيل بحالاته + الإلغاء", "Page 14 — wizard (patient → template) then recording with its states + cancellation")} />
 
         {phase === "blocked" ? (
           <div className="card pad24" style={{ maxWidth: 620, margin: "40px auto", border: "2px solid #B07D10", textAlign: "center" }}>
@@ -231,32 +236,35 @@ export default function NewVisitPage() {
               <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#B07D10" strokeWidth="2.2"><rect x="3" y="11" width="18" height="11" rx="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></svg>
             </div>
             <div><bdi style={{ fontSize: 18, fontWeight: 700, color: "#B07D10" }}>MDF-4013</bdi></div>
-            <h1 style={{ fontSize: 22, fontWeight: 800, margin: "6px 0" }}>إنشاء الزيارات موقوف مؤقتاً</h1>
+            <h1 style={{ fontSize: 22, fontWeight: 800, margin: "6px 0" }}>{L("إنشاء الزيارات موقوف مؤقتاً", "Visit creation is temporarily suspended")}</h1>
             <p style={{ fontSize: 14, color: "#5B7280" }}>
-              منشأتك عليها فاتورة متأخرة (DOC-09 §٢)، فتوقف إنشاء الزيارات الجديدة حتى السداد.<br />
-              ما زال متاحاً لك: مراجعة واعتماد زياراتك القائمة، وسجل الزيارات للقراءة.
+              {L("منشأتك عليها فاتورة متأخرة (DOC-09 §٢)، فتوقف إنشاء الزيارات الجديدة حتى السداد.",
+                 "Your facility has an overdue invoice (DOC-09 §2), so creating new visits is paused until payment.")}<br />
+              {L("ما زال متاحاً لك: مراجعة واعتماد زياراتك القائمة، وسجل الزيارات للقراءة.",
+                 "Still available to you: reviewing and approving your existing visits, plus read-only visit history.")}
             </p>
-            <p style={{ fontSize: 12.5, color: "#5B7280" }}>التعليق الكامل يوم 30 · البيانات محفوظة 90 يوماً ثم تُصدَّر وتُحذف وفق PDPL.</p>
-            <Link href="/doctor" className="btn-secondary" style={{ textDecoration: "none", display: "inline-flex" }}>العودة للرئيسة</Link>
+            <p style={{ fontSize: 12.5, color: "#5B7280" }}>{L("التعليق الكامل يوم 30 · البيانات محفوظة 90 يوماً ثم تُصدَّر وتُحذف وفق PDPL.", "Full suspension on day 30 · data retained for 90 days, then exported and deleted per PDPL.")}</p>
+            <Link href="/doctor" className="btn-secondary" style={{ textDecoration: "none", display: "inline-flex" }}>{L("العودة للرئيسة", "Back to home")}</Link>
           </div>
         ) : null}
 
         {phase === "patient" ? (
           <div style={{ display: "grid", gridTemplateColumns: "1.2fr .9fr", gap: 16, alignItems: "start" }}>
             <section>
-              <h1 className="page-title" style={{ display: "flex", gap: 8, alignItems: "center" }}>بدء زيارة — اختيار المريض <SpecBadge id="W-210" /></h1>
-              <p className="page-desc">عند الاختيار تُجلب لقطة الملف التاريخي كسياق للتحليل (FR-601).</p>
+              <h1 className="page-title" style={{ display: "flex", gap: 8, alignItems: "center" }}>{L("بدء زيارة — اختيار المريض", "Start a visit — select patient")} <SpecBadge id="W-210" /></h1>
+              <p className="page-desc">{L("عند الاختيار تُجلب لقطة الملف التاريخي كسياق للتحليل (FR-601).", "On selection, a snapshot of the patient's history is fetched as context for analysis (FR-601).")}</p>
               <div className="badge success" style={{ marginBottom: 10 }}>
                 <span style={{ width: 8, height: 8, borderRadius: 999, background: "#2E9E5B" }} />
-                قائمة المرضى مُزامنة من نظام المستشفى — لا إنشاء مرضى داخل Medify
+                {L("قائمة المرضى مُزامنة من نظام المستشفى — لا إنشاء مرضى داخل Medify", "Patient list is synced from the hospital system — no patient creation inside Medify")}
               </div>
-              <input className="field search" placeholder="ابحث بالاسم أو رقم الملف MRN…" value={query}
+              <input className="field search" placeholder={L("ابحث بالاسم أو رقم الملف MRN…", "Search by name or MRN…")} value={query}
                 onChange={(event) => setQuery(event.target.value)} style={{ marginBottom: 12 }} />
               <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 420, overflowY: "auto" }}>
                 {patients.length === 0 ? (
                   <div className="grid-empty">
-                    لا نتائج — البحث بالاسم أو MRN داخل منشأتك فقط.<br />
-                    المريض غير موجود؟ سجّله في نظام المستشفى أولاً وسيظهر هنا مع المزامنة القادمة — لا إنشاء مرضى داخل Medify.
+                    {L("لا نتائج — البحث بالاسم أو MRN داخل منشأتك فقط.", "No results — search by name or MRN within your facility only.")}<br />
+                    {L("المريض غير موجود؟ سجّله في نظام المستشفى أولاً وسيظهر هنا مع المزامنة القادمة — لا إنشاء مرضى داخل Medify.",
+                       "Patient not found? Register them in the hospital system first and they will appear here with the next sync — no patient creation inside Medify.")}
                   </div>
                 ) : patients.map((patient) => {
                   const selected = selectedPatient?.id === patient.id;
@@ -268,11 +276,11 @@ export default function NewVisitPage() {
                       <span style={{ flex: 1 }}>
                         <strong>{patient.display_name}</strong>
                         <span style={{ display: "block", fontSize: 12.5, color: "#5B7280" }}>
-                          {patient.gender ?? "—"} · ملف <bdi>{patient.hospital_mrn}</bdi>
+                          {patient.gender ?? "—"} · {L("ملف", "MRN")} <bdi>{patient.hospital_mrn}</bdi>
                         </span>
                       </span>
                       <span className="badge" style={{ background: selected ? "#E8F6EE" : "#F7FAFB", color: selected ? "#2E9E5B" : "#5B7280" }}>
-                        {selected ? "محدد ✓" : "اختيار"}
+                        {selected ? L("محدد ✓", "Selected ✓") : L("اختيار", "Select")}
                       </span>
                     </button>
                   );
@@ -283,25 +291,26 @@ export default function NewVisitPage() {
               {selectedPatient !== null ? (
                 <div className="card" style={{ border: "1.5px solid #0E7C86" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <strong style={{ fontSize: 16, flex: 1 }}>موجز ملف المريض</strong>
+                    <strong style={{ fontSize: 16, flex: 1 }}>{L("موجز ملف المريض", "Patient file summary")}</strong>
                     <span className="tech-badge">patient_context_snapshot</span>
                   </div>
                   <p style={{ margin: "10px 0 2px", fontWeight: 700 }}>{selectedPatient.display_name}</p>
                   <p style={{ margin: 0, fontSize: 12.5, color: "#5B7280" }}>
-                    {selectedPatient.gender ?? "—"} · ملف <bdi>{selectedPatient.hospital_mrn}</bdi> · مزامنة {selectedPatient.synced_at.slice(0, 10)}
+                    {selectedPatient.gender ?? "—"} · {L("ملف", "MRN")} <bdi>{selectedPatient.hospital_mrn}</bdi> · {L("مزامنة", "Synced")} {selectedPatient.synced_at.slice(0, 10)}
                   </p>
                   <p style={{ fontSize: 12.5, color: "#5B7280", margin: "10px 0 0" }}>
-                    اللقطة بتاريخها تُحفظ لكل زيارة — قابلية تدقيق ما رآه الـ<bdi>AI</bdi> (DOC-04 §٤).
-                    تُجلب اللقطة الكاملة (المزمنة/الأدوية/الحساسيات/النتائج) عند إنشاء الزيارة.
+                    {L("اللقطة بتاريخها تُحفظ لكل زيارة — قابلية تدقيق ما رآه الـ", "A dated snapshot is stored per visit — auditability of what the ")}<bdi>AI</bdi>{L(" (DOC-04 §٤).", " saw (DOC-04 §4).")}{" "}
+                    {L("تُجلب اللقطة الكاملة (المزمنة/الأدوية/الحساسيات/النتائج) عند إنشاء الزيارة.",
+                       "The full snapshot (chronic conditions/medications/allergies/results) is fetched when the visit is created.")}
                   </p>
                   <button className="btn" style={{ width: "100%", marginTop: 14 }} onClick={() => setPhase("template")}>
-                    التالي: اختيار القالب
+                    {L("التالي: اختيار القالب", "Next: choose template")}
                   </button>
                 </div>
               ) : (
                 <div style={{ border: "2px dashed #D7E3E8", borderRadius: 12, padding: 24, textAlign: "center", color: "#5B7280", fontSize: 14 }}>
-                  اختر مريضاً لعرض موجز ملفه<br />
-                  <span style={{ fontSize: 12.5 }}>الاسم وMRN للاختيار فقط — لقطة الملف ضمن زيارتك أنت (DOC-06 §٣)</span>
+                  {L("اختر مريضاً لعرض موجز ملفه", "Select a patient to view their file summary")}<br />
+                  <span style={{ fontSize: 12.5 }}>{L("الاسم وMRN للاختيار فقط — لقطة الملف ضمن زيارتك أنت (DOC-06 §٣)", "Name and MRN for selection only — the file snapshot stays within your own visit (DOC-06 §3)")}</span>
                 </div>
               )}
             </aside>
@@ -311,13 +320,13 @@ export default function NewVisitPage() {
         {phase === "template" ? (
           <section style={{ maxWidth: 620, margin: "0 auto" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <button className="btn-ghost" onClick={() => setPhase("patient")}>→ المريض</button>
+              <button className="btn-ghost" onClick={() => setPhase("patient")}>{L("→ المريض", "← Patient")}</button>
               <h1 className="page-title" style={{ margin: 0, flex: 1, display: "flex", gap: 8, alignItems: "center" }}>
-                اختيار قالب التلخيص <SpecBadge id="W-211" />
+                {L("اختيار قالب التلخيص", "Choose summary template")} <SpecBadge id="W-211" />
               </h1>
-              <span style={{ fontSize: 12.5, color: "#5B7280" }}>المريض: {selectedPatient?.display_name}</span>
+              <span style={{ fontSize: 12.5, color: "#5B7280" }}>{L("المريض:", "Patient:")} {selectedPatient?.display_name}</span>
             </div>
-            <p className="page-desc">الاختيار إلزامي قبل بدء التسجيل (FR-501) — قالبك الافتراضي محدد مسبقاً.</p>
+            <p className="page-desc">{L("الاختيار إلزامي قبل بدء التسجيل (FR-501) — قالبك الافتراضي محدد مسبقاً.", "Selection is required before recording starts (FR-501) — your default template is preselected.")}</p>
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {templates.filter((template) => template.archived_at === null).map((template) => {
                 const selected = selectedTemplate?.id === template.id;
@@ -325,12 +334,12 @@ export default function NewVisitPage() {
                   <button key={template.id} className={selected ? "select-card selected" : "select-card"} onClick={() => setSelectedTemplate(template)}>
                     <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                       <strong style={{ flex: 1 }}>{template.name}</strong>
-                      {template.is_default ? <span className="badge" style={{ background: "rgba(201,162,39,.15)", color: "#B07D10" }}>الافتراضي</span> : null}
-                      {template.origin === "reverse_built" ? <span className="badge" style={{ background: "rgba(201,162,39,.15)", color: "#B07D10" }}>بناء عكسي</span> : null}
-                      {template.is_personal ? <span className="badge info">شخصي</span> : <span className="badge neutral">جاهز</span>}
+                      {template.is_default ? <span className="badge" style={{ background: "rgba(201,162,39,.15)", color: "#B07D10" }}>{L("الافتراضي", "Default")}</span> : null}
+                      {template.origin === "reverse_built" ? <span className="badge" style={{ background: "rgba(201,162,39,.15)", color: "#B07D10" }}>{L("بناء عكسي", "Reverse build")}</span> : null}
+                      {template.is_personal ? <span className="badge info">{L("شخصي", "Personal")}</span> : <span className="badge neutral">{L("جاهز", "Preset")}</span>}
                     </div>
                     <div style={{ fontSize: 12.5, color: "#5B7280", marginTop: 4 }}>
-                      {template.specialty ?? "—"} · {template.visit_type ?? "—"} · <span className="num">{template.structure.sections.length}</span> أقسام
+                      {template.specialty ?? "—"} · {template.visit_type ?? "—"} · <span className="num">{template.structure.sections.length}</span> {L("أقسام", "sections")}
                     </div>
                   </button>
                 );
@@ -338,7 +347,7 @@ export default function NewVisitPage() {
             </div>
             <button className="btn hero" style={{ width: "100%", marginTop: 16 }} onClick={() => void startRecording()}>
               <span style={{ width: 10, height: 10, borderRadius: 999, background: "#FDEEEE", animation: "mBlink 1.1s ease infinite" }} />
-              بدء التسجيل
+              {L("بدء التسجيل", "Start recording")}
             </button>
           </section>
         ) : null}
@@ -348,16 +357,16 @@ export default function NewVisitPage() {
             <div className="card pad24" style={{ border: online ? "1px solid #D7E3E8" : "2px solid #B07D10" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                 <SpecBadge id={online ? "W-212" : "W-223"} />
-                <strong style={{ flex: 1 }}>{visit?.patient.display_name} · قالب: {visit?.template.name}</strong>
+                <strong style={{ flex: 1 }}>{visit?.patient.display_name} · {L("قالب:", "Template:")} {visit?.template.name}</strong>
                 <span className={online ? "badge success" : "badge danger"}>
                   <span style={{ width: 8, height: 8, borderRadius: 999, background: "currentColor" }} />
-                  {online ? "متصل" : "غير متصل"}
+                  {online ? L("متصل", "Online") : L("غير متصل", "Offline")}
                 </span>
               </div>
               {!online ? (
                 <div style={{ background: "#FDF3E3", border: "1px solid #B07D10", borderRadius: 10, padding: "10px 14px", margin: "12px 0 0", fontSize: 12.5, color: "#B07D10", fontWeight: 700 }}>
-                  انقطاع الشبكة (<bdi>MDF-5031</bdi>) — وضع الحفظ المحلي: <span className="num">{offlineChunks}</span> جزءاً بانتظار الإرسال،
-                  يُستأنف من آخر جزء مؤكد تلقائياً (NFR-09).
+                  {L("انقطاع الشبكة (", "Network interruption (")}<bdi>MDF-5031</bdi>{L(") — وضع الحفظ المحلي: ", ") — local save mode: ")}<span className="num">{offlineChunks}</span>{L(" جزءاً بانتظار الإرسال، يُستأنف من آخر جزء مؤكد تلقائياً (NFR-09).",
+                    " chunks pending send — resumes automatically from the last confirmed chunk (NFR-09).")}
                 </div>
               ) : null}
               <div style={{ display: "flex", alignItems: "center", gap: 16, margin: "16px 0" }}>
@@ -370,21 +379,21 @@ export default function NewVisitPage() {
                 </div>
               </div>
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                <button className="btn-secondary" onClick={() => void togglePause()}>{paused ? "استئناف" : "إيقاف مؤقت"}</button>
-                <button className="btn hero" style={{ flex: 1 }} onClick={() => void finishRecording()}>إنهاء التسجيل وتوليد الملخص</button>
-                <button className="btn-danger-outline" onClick={() => setCancelOpen(true)}>إلغاء الزيارة</button>
+                <button className="btn-secondary" onClick={() => void togglePause()}>{paused ? L("استئناف", "Resume") : L("إيقاف مؤقت", "Pause")}</button>
+                <button className="btn hero" style={{ flex: 1 }} onClick={() => void finishRecording()}>{L("إنهاء التسجيل وتوليد الملخص", "Finish recording & generate summary")}</button>
+                <button className="btn-danger-outline" onClick={() => setCancelOpen(true)}>{L("إلغاء الزيارة", "Cancel visit")}</button>
               </div>
             </div>
 
             <div className="card" style={{ marginTop: 14 }}>
-              <strong style={{ fontSize: 16 }}>التفريغ الفوري</strong>
-              <span style={{ fontSize: 12.5, color: "#5B7280", marginInlineStart: 8 }}>partial ≤ 2s (NFR-01) · final بطوابع زمنية</span>
+              <strong style={{ fontSize: 16 }}>{L("التفريغ الفوري", "Live transcript")}</strong>
+              <span style={{ fontSize: 12.5, color: "#5B7280", marginInlineStart: 8 }}>{L("partial ≤ 2s (NFR-01) · final بطوابع زمنية", "partial ≤ 2s (NFR-01) · final with timestamps")}</span>
               <div style={{ display: "flex", flexDirection: "column-reverse", gap: 8, marginTop: 10, maxHeight: 320, overflowY: "auto" }}>
                 {segments.length === 0 ? (
-                  <p style={{ color: "#5B7280", fontSize: 14, textAlign: "center", margin: 12 }}>تحدّث الآن — يظهر التفريغ هنا فورياً…</p>
+                  <p style={{ color: "#5B7280", fontSize: 14, textAlign: "center", margin: 12 }}>{L("تحدّث الآن — يظهر التفريغ هنا فورياً…", "Speak now — the transcript appears here instantly…")}</p>
                 ) : segments.map((segment) => (
                   <div key={segment.id} style={{ opacity: segment.partial ? 0.55 : 1, fontSize: 14, lineHeight: 1.9 }}>
-                    <span className="badge" style={{ background: "#EAF6F7", color: "#0A5C64", marginInlineEnd: 8 }}>كلام</span>
+                    <span className="badge" style={{ background: "#EAF6F7", color: "#0A5C64", marginInlineEnd: 8 }}>{L("كلام", "Speech")}</span>
                     {segment.text}
                     {segment.partial ? <span style={{ display: "inline-block", width: 2, height: 14, background: "#0E7C86", marginInlineStart: 4, animation: "mBlink .9s ease infinite" }} /> : null}
                   </div>
@@ -398,10 +407,10 @@ export default function NewVisitPage() {
           <section style={{ maxWidth: 620, margin: "40px auto" }}>
             <div className="card pad24" style={{ textAlign: "center" }}>
               <SpecBadge id="W-213" />
-              <h1 style={{ fontSize: 22, fontWeight: 800, margin: "10px 0 20px" }}>جارٍ توليد الملخص والإرشاد</h1>
+              <h1 style={{ fontSize: 22, fontWeight: 800, margin: "10px 0 20px" }}>{L("جارٍ توليد الملخص والإرشاد", "Generating summary and guidance")}</h1>
               {[
-                { label: "تلخيص SOAP وفق القالب", sub: "خط المعالجة P2", state: genStep >= 1 ? "done" : "run" },
-                { label: "التحليل الذكي المدمج — سريري + ترميزي", sub: "خط المعالجة P3 على ملف المريض + كلام الزيارة", state: genStep === 2 ? "done" : genStep === 1 ? "run" : "wait" },
+                { label: L("تلخيص SOAP وفق القالب", "SOAP summary per template"), sub: L("خط المعالجة P2", "Pipeline P2"), state: genStep >= 1 ? "done" : "run" },
+                { label: L("التحليل الذكي المدمج — سريري + ترميزي", "Integrated AI analysis — clinical + coding"), sub: L("خط المعالجة P3 على ملف المريض + كلام الزيارة", "Pipeline P3 over the patient file + visit speech"), state: genStep === 2 ? "done" : genStep === 1 ? "run" : "wait" },
               ].map((step) => (
                 <div key={step.label} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 8px", borderTop: "1px solid #EAF6F7", textAlign: "start" }}>
                   {step.state === "done" ? (
@@ -414,29 +423,29 @@ export default function NewVisitPage() {
                   <span style={{ flex: 1 }}>
                     <strong>{step.label}</strong>
                     <span style={{ display: "block", fontSize: 12.5, color: "#5B7280" }}>
-                      {step.sub} — {step.state === "done" ? "اكتمل" : step.state === "run" ? "يجري الآن…" : "بانتظار الملخص"}
+                      {step.sub} — {step.state === "done" ? L("اكتمل", "Completed") : step.state === "run" ? L("يجري الآن…", "Running now…") : L("بانتظار الملخص", "Awaiting summary")}
                     </span>
                   </span>
                 </div>
               ))}
-              <p style={{ fontSize: 12.5, color: "#5B7280", marginTop: 14 }}>≤ 30 ثانية لاستشارة 15 دقيقة (NFR-02) — فشل التحليل لا يحجب الملخص (W-224).</p>
+              <p style={{ fontSize: 12.5, color: "#5B7280", marginTop: 14 }}>{L("≤ 30 ثانية لاستشارة 15 دقيقة (NFR-02) — فشل التحليل لا يحجب الملخص (W-224).", "≤ 30 seconds for a 15-minute consultation (NFR-02) — analysis failure does not block the summary (W-224).")}</p>
             </div>
           </section>
         ) : null}
 
         {cancelOpen ? (
-          <Modal title="إلغاء الزيارة" onClose={() => setCancelOpen(false)}>
+          <Modal title={L("إلغاء الزيارة", "Cancel visit")} onClose={() => setCancelOpen(false)}>
             <div style={{ textAlign: "center" }}>
               <div style={{ width: 52, height: 52, borderRadius: 999, background: "#FDEEEE", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
                 <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#C0392B" strokeWidth="2"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></svg>
               </div>
               <p style={{ fontSize: 14, margin: "12px 0" }}>
-                الإلغاء متاح أثناء التسجيل فقط — حالة نهائية <bdi>cancelled</bdi>: لا اعتماد ولا رفع، ويُحذف التسجيل (قرار مالك 2026-07-14).
+                {L("الإلغاء متاح أثناء التسجيل فقط — حالة نهائية ", "Cancellation is available during recording only — final state ")}<bdi>cancelled</bdi>{L(": لا اعتماد ولا رفع، ويُحذف التسجيل (قرار مالك 2026-07-14).", ": no approval, no upload, and the recording is deleted (owner decision 2026-07-14).")}
               </p>
             </div>
             <div className="modal-actions">
-              <button className="btn-danger" style={{ flex: 1 }} onClick={() => void cancelVisit()}>تأكيد الإلغاء</button>
-              <button className="btn-neutral" style={{ flex: 1 }} onClick={() => setCancelOpen(false)}>متابعة التسجيل</button>
+              <button className="btn-danger" style={{ flex: 1 }} onClick={() => void cancelVisit()}>{L("تأكيد الإلغاء", "Confirm cancellation")}</button>
+              <button className="btn-neutral" style={{ flex: 1 }} onClick={() => setCancelOpen(false)}>{L("متابعة التسجيل", "Continue recording")}</button>
             </div>
           </Modal>
         ) : null}

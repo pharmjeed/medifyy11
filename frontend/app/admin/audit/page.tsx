@@ -6,17 +6,15 @@ import { useCallback, useEffect, useState } from "react";
 import { Shell } from "@/components/Shell";
 import { SpecBar, fmtDateTime, useToast } from "@/components/ui";
 import { ApiError, api } from "@/lib/api";
+import { useLang } from "@/lib/i18n";
 import type { AuditRow } from "@/lib/types";
 
 const PER_PAGE = 25;
 const AUDIT_COLS = "1.1fr 1.2fr 1.9fr 1fr .8fr";
 
-function apiErrorText(err: unknown): string {
-  return err instanceof ApiError ? `${err.messageAr} (${err.code})` : "تعذر الاتصال بالخادم";
-}
-
 function AuditInner() {
   const toast = useToast();
+  const { L, lang } = useLang();
   const [rows, setRows] = useState<AuditRow[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -32,11 +30,11 @@ function AuditInner() {
       setRows(body.data);
       setTotal(body.meta.total ?? 0);
     } catch (err) {
-      toast(apiErrorText(err));
+      toast(err instanceof ApiError ? `${err.text(lang)} (${err.code})` : L("تعذر الاتصال بالخادم", "Could not reach the server"));
     } finally {
       setLoading(false);
     }
-  }, [action, page, toast]);
+  }, [action, page, toast, lang, L]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -44,11 +42,13 @@ function AuditInner() {
 
   return (
     <>
-      <SpecBar ids="W-110" desc="الصفحة 10 — سجل التدقيق (FR-303 · NFR-10)" />
+      <SpecBar ids="W-110" desc={L("الصفحة 10 — سجل التدقيق (FR-303 · NFR-10)", "Page 10 — Audit log (FR-303 · NFR-10)")} />
 
       <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 14 }}>
-        <h1 className="page-title" style={{ margin: 0 }}>سجل التدقيق</h1>
-        <span className="badge" style={{ background: "#EAF6F7", color: "#0A5C64" }}>إلحاقي فقط — لا تعديل ولا حذف</span>
+        <h1 className="page-title" style={{ margin: 0 }}>{L("سجل التدقيق", "Audit log")}</h1>
+        <span className="badge" style={{ background: "#EAF6F7", color: "#0A5C64" }}>
+          {L("إلحاقي فقط — لا تعديل ولا حذف", "Append-only — no edits, no deletions")}
+        </span>
         <span style={{ flex: 1 }} />
         <form
           style={{ display: "flex", gap: 8, alignItems: "center" }}
@@ -61,23 +61,23 @@ function AuditInner() {
           <input
             className="field"
             style={{ width: "min(300px, 100%)" }}
-            placeholder="بحث في العمليات… (مثال: invoice)"
-            aria-label="بحث في العمليات"
+            placeholder={L("بحث في العمليات… (مثال: invoice)", "Search actions… (e.g. invoice)")}
+            aria-label={L("بحث في العمليات", "Search actions")}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
           />
-          <button type="submit" className="btn h40">بحث</button>
+          <button type="submit" className="btn h40">{L("بحث", "Search")}</button>
         </form>
       </div>
 
       <div className="grid-table">
         <div className="grid-head" style={{ gridTemplateColumns: AUDIT_COLS }}>
-          <div>الوقت</div><div>المنفّذ</div><div>الحدث</div><div>الكيان</div><div>معرف الكيان</div>
+          <div>{L("الوقت", "Time")}</div><div>{L("المنفّذ", "Actor")}</div><div>{L("الحدث", "Action")}</div><div>{L("الكيان", "Entity")}</div><div>{L("معرف الكيان", "Entity ID")}</div>
         </div>
         {loading ? (
-          <div className="grid-empty">جارٍ التحميل…</div>
+          <div className="grid-empty">{L("جارٍ التحميل…", "Loading…")}</div>
         ) : rows.length === 0 ? (
-          <div className="grid-empty">لا نتائج مطابقة</div>
+          <div className="grid-empty">{L("لا نتائج مطابقة", "No matching results")}</div>
         ) : (
           rows.map((row, i) => (
             <div key={row.id} className={i % 2 ? "grid-row odd" : "grid-row"} style={{ gridTemplateColumns: AUDIT_COLS }}>
@@ -103,32 +103,34 @@ function AuditInner() {
           style={{ height: 36, padding: "0 16px", fontSize: 12.5 }}
           disabled={page <= 1 || loading}
           onClick={() => setPage((value) => Math.max(1, value - 1))}
-        >السابق</button>
+        >{L("السابق", "Previous")}</button>
         <span style={{ fontSize: 12.5, color: "#5B7280" }}>
-          صفحة <span className="num">{page}</span> من <span className="num">{totalPages}</span>
+          {L("صفحة", "Page")} <span className="num">{page}</span> {L("من", "of")} <span className="num">{totalPages}</span>
         </span>
         <button
           className="btn-secondary"
           style={{ height: 36, padding: "0 16px", fontSize: 12.5 }}
           disabled={page >= totalPages || loading}
           onClick={() => setPage((value) => Math.min(totalPages, value + 1))}
-        >التالي</button>
+        >{L("التالي", "Next")}</button>
         <span style={{ flex: 1 }} />
         <span style={{ fontSize: 12.5, color: "#5B7280" }}>
-          عدد السجلات: <span className="num">{total}</span>
+          {L("عدد السجلات:", "Total records:")} <span className="num">{total}</span>
         </span>
       </div>
 
       <p style={{ fontSize: 12.5, color: "#5B7280", margin: "14px 0 0" }}>
-        سجل إلحاقي غير قابل للتعديل (NFR-10) — إدخاله آلي من النظام
+        {L("سجل إلحاقي غير قابل للتعديل (NFR-10) — إدخاله آلي من النظام",
+           "Append-only, immutable log (NFR-10) — entries are written automatically by the system")}
       </p>
     </>
   );
 }
 
 export default function AuditPage() {
+  const { L } = useLang();
   return (
-    <Shell title="سجل التدقيق">
+    <Shell title={L("سجل التدقيق", "Audit log")}>
       <main className="page-wrap">
         <AuditInner />
       </main>

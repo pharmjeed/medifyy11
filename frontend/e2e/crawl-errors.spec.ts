@@ -16,6 +16,7 @@ async function login(page: import("@playwright/test").Page, username: string, pa
 }
 
 test("crawl all pages for client exceptions", async ({ page }) => {
+  await page.addInitScript(() => window.localStorage.setItem("medify_lang", "ar"));
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(`[pageerror] ${page.url()} :: ${error.message}`));
   page.on("console", (message) => {

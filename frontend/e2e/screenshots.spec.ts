@@ -16,6 +16,7 @@ async function login(page: import("@playwright/test").Page, username: string, pa
 }
 
 test("snapshots", async ({ page }) => {
+  await page.addInitScript(() => window.localStorage.setItem("medify_lang", "ar"));
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto("/login");
   await page.waitForTimeout(800);

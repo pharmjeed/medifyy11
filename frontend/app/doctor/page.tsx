@@ -5,18 +5,19 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { api, getSessionUser } from "@/lib/api";
+import { useLang } from "@/lib/i18n";
 import type { SessionUser, Template, VisitRow } from "@/lib/types";
 import { Shell } from "@/components/Shell";
 import { SpecBar, VisitStateBadge, useErrorScreen } from "@/components/ui";
 
-/** زر الإجراء حسب الحالة (نفس قاعدة سجل الزيارات). */
-function actionFor(row: VisitRow): { label: string; href: string } | null {
+/** زر الإجراء حسب الحالة (نفس قاعدة سجل الزيارات) — التسميات أزواج {ar, en} وتُعرض عبر L داخل المكوّن. */
+function actionFor(row: VisitRow): { label: { ar: string; en: string }; href: string } | null {
   switch (row.state) {
-    case "in_review": return { label: "فتح المراجعة", href: `/doctor/visits/${row.id}/review` };
-    case "uploaded": return { label: "عرض للقراءة", href: `/doctor/visits?open=${row.id}` };
-    case "upload_failed": return { label: "إعادة المحاولة", href: `/doctor/visits/${row.id}/review` };
-    case "draft": return { label: "استئناف", href: `/doctor/visits/new?resume=${row.id}` };
-    case "summarized": return { label: "بدء المراجعة", href: `/doctor/visits/${row.id}/review` };
+    case "in_review": return { label: { ar: "فتح المراجعة", en: "Open review" }, href: `/doctor/visits/${row.id}/review` };
+    case "uploaded": return { label: { ar: "عرض للقراءة", en: "View read-only" }, href: `/doctor/visits?open=${row.id}` };
+    case "upload_failed": return { label: { ar: "إعادة المحاولة", en: "Retry" }, href: `/doctor/visits/${row.id}/review` };
+    case "draft": return { label: { ar: "استئناف", en: "Resume" }, href: `/doctor/visits/new?resume=${row.id}` };
+    case "summarized": return { label: { ar: "بدء المراجعة", en: "Start review" }, href: `/doctor/visits/${row.id}/review` };
     default: return null;
   }
 }
@@ -25,6 +26,7 @@ const HOME_GRID = ".9fr 1.8fr 1fr 1.1fr 1.1fr";
 
 function DoctorHomeInner() {
   const showError = useErrorScreen();
+  const { L, lang } = useLang();
   const [user, setUser] = useState<SessionUser | null>(null);
   const [now, setNow] = useState<Date | null>(null);
   const [rows, setRows] = useState<VisitRow[] | null>(null);
@@ -57,14 +59,16 @@ function DoctorHomeInner() {
   const uploadedCount = all.filter((row) => row.state === "uploaded").length;
   const defaultTemplate = (templates ?? []).find((tpl) => tpl.is_default);
 
-  const greeting = now !== null && now.getHours() < 12 ? "صباح الخير" : "مساء الخير";
+  const greeting = now !== null && now.getHours() < 12
+    ? L("صباح الخير", "Good morning")
+    : L("مساء الخير", "Good evening");
   const dateLine = now !== null
-    ? now.toLocaleDateString("ar", { weekday: "long", day: "numeric", month: "long", year: "numeric" })
+    ? now.toLocaleDateString(lang, { weekday: "long", day: "numeric", month: "long", year: "numeric" })
     : "";
 
   return (
     <>
-      <SpecBar ids="W-201" desc="الصفحة 11 — رئيسة الدكتور (FR-804)" />
+      <SpecBar ids="W-201" desc={L("الصفحة 11 — رئيسة الدكتور (FR-804)", "Page 11 — Doctor home (FR-804)")} />
 
       {/* الترويسة: التحية + زر بدء زيارة جديدة */}
       <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap", marginBottom: 18 }}>
@@ -73,51 +77,51 @@ function DoctorHomeInner() {
             {greeting}{user !== null ? `، ${user.full_name}` : ""}
           </h1>
           <p className="page-desc" style={{ margin: 0 }}>
-            {dateLine}{user !== null ? ` · عيادة الباطنة — ${user.facility_name}` : ""}
+            {dateLine}{user !== null ? ` · ${L("عيادة الباطنة", "Internal medicine clinic")} — ${user.facility_name}` : ""}
           </p>
         </div>
         <Link href="/doctor/visits/new" className="btn hero" style={{ textDecoration: "none" }}>
           <span style={{ width: 10, height: 10, borderRadius: 999, background: "#C0392B", flexShrink: 0, animation: "mBlink 1.1s ease infinite" }} />
-          + بدء زيارة جديدة
+          + {L("بدء زيارة جديدة", "Start new visit")}
         </Link>
       </div>
 
       {/* أربع بطاقات إحصائية */}
       <div className="stat-grid">
         <div className="card">
-          <div className="stat-label">زيارات اليوم</div>
+          <div className="stat-label">{L("زيارات اليوم", "Today's visits")}</div>
           <div className="stat-value"><span className="num">{todayRows.length}</span></div>
         </div>
         <div className="card">
-          <div className="stat-label">بانتظار المراجعة</div>
+          <div className="stat-label">{L("بانتظار المراجعة", "Awaiting review")}</div>
           <div className="stat-value" style={{ color: "#B07D10" }}><span className="num">{inReviewCount}</span></div>
         </div>
         <div className="card">
-          <div className="stat-label">مرفوعة ✓</div>
+          <div className="stat-label">{L("مرفوعة ✓", "Uploaded ✓")}</div>
           <div className="stat-value" style={{ color: "#2E9E5B" }}><span className="num">{uploadedCount}</span></div>
         </div>
         <div className="card">
-          <div className="stat-label">قالبك الافتراضي</div>
+          <div className="stat-label">{L("قالبك الافتراضي", "Your default template")}</div>
           <div style={{ fontSize: 16, fontWeight: 800, color: "#0A5C64", lineHeight: 1.6 }}>
             {defaultTemplate !== undefined ? defaultTemplate.name : "—"}
           </div>
-          <Link href="/doctor/templates" className="btn-ghost" style={{ padding: 0 }}>إدارة القوالب</Link>
+          <Link href="/doctor/templates" className="btn-ghost" style={{ padding: 0 }}>{L("إدارة القوالب", "Manage templates")}</Link>
         </div>
       </div>
 
       {/* جدول زيارات اليوم */}
       <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "22px 0 10px" }}>
-        <h2 style={{ fontSize: 16, fontWeight: 800, margin: 0, flex: 1 }}>زيارات اليوم</h2>
-        <Link href="/doctor/visits" className="btn-ghost">السجل الكامل</Link>
+        <h2 style={{ fontSize: 16, fontWeight: 800, margin: 0, flex: 1 }}>{L("زيارات اليوم", "Today's visits")}</h2>
+        <Link href="/doctor/visits" className="btn-ghost">{L("السجل الكامل", "Full history")}</Link>
       </div>
       <div className="grid-table">
         <div className="grid-head" style={{ gridTemplateColumns: HOME_GRID }}>
-          <div>الوقت</div><div>المريض</div><div>الملف</div><div>الحالة</div><div>إجراء</div>
+          <div>{L("الوقت", "Time")}</div><div>{L("المريض", "Patient")}</div><div>{L("الملف", "File")}</div><div>{L("الحالة", "Status")}</div><div>{L("إجراء", "Action")}</div>
         </div>
         {rows === null ? (
-          <div className="grid-empty">جارٍ التحميل…</div>
+          <div className="grid-empty">{L("جارٍ التحميل…", "Loading…")}</div>
         ) : todayRows.length === 0 ? (
-          <div className="grid-empty">لا زيارات اليوم بعد</div>
+          <div className="grid-empty">{L("لا زيارات اليوم بعد", "No visits yet today")}</div>
         ) : (
           todayRows.map((row, index) => {
             const action = actionFor(row);
@@ -130,7 +134,7 @@ function DoctorHomeInner() {
                 <div>
                   {action !== null ? (
                     <Link href={action.href} className="btn-row" style={{ textDecoration: "none", display: "inline-flex", alignItems: "center" }}>
-                      {action.label}
+                      {L(action.label.ar, action.label.en)}
                     </Link>
                   ) : (
                     <span style={{ color: "#5B7280" }}>—</span>
@@ -146,8 +150,9 @@ function DoctorHomeInner() {
 }
 
 export default function DoctorHomePage() {
+  const { L } = useLang();
   return (
-    <Shell title="رئيسة الدكتور">
+    <Shell title={L("رئيسة الدكتور", "Doctor home")}>
       <main className="page-wrap">
         <DoctorHomeInner />
       </main>

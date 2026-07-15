@@ -7,6 +7,7 @@ import type { ReactNode } from "react";
 import { SHOW_SPEC_IDS } from "@/lib/api";
 import { ApiError } from "@/lib/api";
 import { mdfMeta } from "@/lib/errors";
+import { useLang } from "@/lib/i18n";
 import type { VisitState } from "@/lib/types";
 
 /* ===== شارة المواصفة W-XXX — تظهر فقط عند NEXT_PUBLIC_SHOW_SPEC_IDS=true ===== */
@@ -26,30 +27,32 @@ export function SpecBar({ ids, desc }: { ids: string; desc: string }) {
   );
 }
 
-/* ===== شارات حالة الزيارة (VSTATES حرفياً) ===== */
-const VSTATES: Record<VisitState, { label: string; bg: string; fg: string }> = {
-  draft: { label: "مسودة", bg: "#F7FAFB", fg: "#5B7280" },
-  recording: { label: "تسجيل", bg: "#EAF6F7", fg: "#0A5C64" },
-  transcribed: { label: "مفرّغة", bg: "#EAF6F7", fg: "#0A5C64" },
-  summarized: { label: "ملخّصة", bg: "rgba(42,111,151,.12)", fg: "#2A6F97" },
-  in_review: { label: "قيد المراجعة", bg: "#FDF3E3", fg: "#B07D10" },
-  approved: { label: "معتمدة", bg: "#E8F6EE", fg: "#2E9E5B" },
-  uploaded: { label: "مرفوعة ✓", bg: "#E8F6EE", fg: "#2E9E5B" },
-  upload_failed: { label: "فشل الرفع", bg: "#FDEEEE", fg: "#C0392B" },
-  cancelled: { label: "ملغاة", bg: "#F7FAFB", fg: "#5B7280" },
+/* ===== شارات حالة الزيارة (VSTATES حرفياً + الإنجليزية) ===== */
+const VSTATES: Record<VisitState, { ar: string; en: string; bg: string; fg: string }> = {
+  draft: { ar: "مسودة", en: "Draft", bg: "#F7FAFB", fg: "#5B7280" },
+  recording: { ar: "تسجيل", en: "Recording", bg: "#EAF6F7", fg: "#0A5C64" },
+  transcribed: { ar: "مفرّغة", en: "Transcribed", bg: "#EAF6F7", fg: "#0A5C64" },
+  summarized: { ar: "ملخّصة", en: "Summarized", bg: "rgba(42,111,151,.12)", fg: "#2A6F97" },
+  in_review: { ar: "قيد المراجعة", en: "In review", bg: "#FDF3E3", fg: "#B07D10" },
+  approved: { ar: "معتمدة", en: "Approved", bg: "#E8F6EE", fg: "#2E9E5B" },
+  uploaded: { ar: "مرفوعة ✓", en: "Uploaded ✓", bg: "#E8F6EE", fg: "#2E9E5B" },
+  upload_failed: { ar: "فشل الرفع", en: "Upload failed", bg: "#FDEEEE", fg: "#C0392B" },
+  cancelled: { ar: "ملغاة", en: "Cancelled", bg: "#F7FAFB", fg: "#5B7280" },
 };
 
 export function VisitStateBadge({ state }: { state: VisitState }) {
+  const { L } = useLang();
   const meta = VSTATES[state];
   return (
     <span className="badge" style={{ background: meta.bg, color: meta.fg }}>
-      {meta.label}
+      {L(meta.ar, meta.en)}
     </span>
   );
 }
 
-export function visitStateLabel(state: VisitState): string {
-  return VSTATES[state].label;
+export function visitStateLabel(state: VisitState, lang?: "ar" | "en"): string {
+  const current = lang ?? (typeof document !== "undefined" && document.documentElement.lang === "ar" ? "ar" : "en");
+  return current === "ar" ? VSTATES[state].ar : VSTATES[state].en;
 }
 
 /* ===== التوست — رسالة واحدة تختفي بعد 3000ms ===== */
@@ -85,16 +88,17 @@ interface ErrorScreenContextValue {
 const ErrorScreenContext = createContext<ErrorScreenContextValue>({ showError: () => undefined });
 
 export function ErrorScreenProvider({ children }: { children: ReactNode }) {
+  const { lang, L } = useLang();
   const [current, setCurrent] = useState<{ code: string; messageAr: string; action: string } | null>(null);
   const showError = useCallback((error: unknown) => {
     if (error instanceof ApiError) {
-      const meta = mdfMeta(error.code);
-      setCurrent({ code: error.code, messageAr: error.messageAr || meta.message_ar, action: meta.action });
+      const meta = mdfMeta(error.code, lang);
+      setCurrent({ code: error.code, messageAr: error.text(lang) || meta.message_ar, action: meta.action });
     } else {
-      const meta = mdfMeta("MDF-5001");
+      const meta = mdfMeta("MDF-5001", lang);
       setCurrent({ code: "MDF-5001", messageAr: meta.message_ar, action: meta.action });
     }
-  }, []);
+  }, [lang]);
   return (
     <ErrorScreenContext.Provider value={{ showError }}>
       {children}
@@ -116,15 +120,15 @@ export function ErrorScreenProvider({ children }: { children: ReactNode }) {
             <div style={{ marginTop: 10 }}>
               <bdi style={{ fontSize: 22, fontWeight: 700, color: "#C0392B" }}>{current.code}</bdi>
             </div>
-            <div style={{ fontSize: 18, fontWeight: 700, color: "#0A5C64", marginTop: 6 }}>حدث خطأ</div>
+            <div style={{ fontSize: 18, fontWeight: 700, color: "#0A5C64", marginTop: 6 }}>{L("حدث خطأ", "An error occurred")}</div>
             <p style={{ fontSize: 14, color: "#5B7280", margin: "8px 0 4px" }}>{current.messageAr}</p>
             <p style={{ fontSize: 12.5, color: "#5B7280", margin: "0 0 16px" }}>{current.action}</p>
             <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
-              <button className="btn" onClick={() => { setCurrent(null); window.location.reload(); }}>إعادة المحاولة</button>
-              <button className="btn-secondary" onClick={() => setCurrent(null)}>إغلاق</button>
+              <button className="btn" onClick={() => { setCurrent(null); window.location.reload(); }}>{L("إعادة المحاولة", "Retry")}</button>
+              <button className="btn-secondary" onClick={() => setCurrent(null)}>{L("إغلاق", "Close")}</button>
             </div>
             <p style={{ fontSize: 12.5, color: "#5B7280", marginTop: 14, marginBottom: 0 }}>
-              كل رمز <bdi>MDF</bdi> برسالتين عربية/إنجليزية — النظام حصري من <bdi>DOC-13</bdi>.
+              {L("كل رمز", "Every")} <bdi>MDF</bdi> {L("برسالتين عربية/إنجليزية — النظام حصري من", "code is bilingual (Arabic/English) — the registry is exclusive to")} <bdi>DOC-13</bdi>.
             </p>
           </div>
         </div>
@@ -159,7 +163,7 @@ export function Modal({
         <div className="modal-head">
           <div className="modal-title">{title}</div>
           {spec !== undefined ? <SpecBadge id={spec} /> : null}
-          <button className="modal-close" aria-label="إغلاق" onClick={onClose}>✕</button>
+          <button className="modal-close" aria-label="Close" onClick={onClose}>✕</button>
         </div>
         {children}
       </div>
@@ -200,15 +204,16 @@ export function Tabs<T extends string>({
   );
 }
 
-/* ===== تنسيقات وقت/تاريخ موجزة ===== */
+/* ===== تنسيقات وقت/تاريخ موجزة (بلغة الواجهة الحالية) ===== */
 export function fmtDateTime(iso: string): string {
+  const arabic = typeof document !== "undefined" && document.documentElement.lang === "ar";
   const date = new Date(iso);
   const today = new Date();
   const time = date.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
   const sameDay = date.toDateString() === today.toDateString();
-  if (sameDay) return `اليوم ${time}`;
+  if (sameDay) return `${arabic ? "اليوم" : "Today"} ${time}`;
   const yesterday = new Date(today.getTime() - 86400000);
-  if (date.toDateString() === yesterday.toDateString()) return `أمس ${time}`;
+  if (date.toDateString() === yesterday.toDateString()) return `${arabic ? "أمس" : "Yesterday"} ${time}`;
   return `${date.toISOString().slice(0, 10)} ${time}`;
 }
 
