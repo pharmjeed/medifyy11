@@ -34,8 +34,29 @@ def render_prompt(template: str, variables: dict[str, Any]) -> str:
 
 class LLMEngine(ABC):
     @abstractmethod
-    def complete_json(self, prompt_id: str, version: str, variables: dict[str, Any]) -> tuple[dict[str, Any], str]:
-        """تعيد (المخرج JSON، model_ref). ترفع ValueError إن تعذّر مخرج صالح بعد إعادة محاولة واحدة."""
+    def complete_json(
+        self,
+        prompt_id: str,
+        version: str,
+        variables: dict[str, Any],
+        attachments: list[dict[str, Any]] | None = None,
+    ) -> tuple[dict[str, Any], str]:
+        """تعيد (المخرج JSON، model_ref). المرفقات (صورة/PDF) قابلة للقراءة متعدد الوسائط.
+
+        ترفع ValueError إن تعذّر مخرج صالح بعد إعادة محاولة واحدة.
+        """
+
+
+def _content_blocks(rendered: str, attachments: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    """يبني كتل محتوى Anthropic: مرفقات (صورة/PDF) ثم نص المطالبة."""
+    blocks: list[dict[str, Any]] = []
+    for attachment in attachments or []:
+        media_type = attachment["media_type"]
+        source = {"type": "base64", "media_type": media_type, "data": attachment["data"]}
+        block_type = "document" if media_type == "application/pdf" else "image"
+        blocks.append({"type": block_type, "source": source})
+    blocks.append({"type": "text", "text": rendered})
+    return blocks
 
 
 class ClaudeEngine(LLMEngine):
@@ -46,19 +67,25 @@ class ClaudeEngine(LLMEngine):
         self._client = anthropic.Anthropic(api_key=s.anthropic_api_key)
         self._model = s.anthropic_model
 
-    def _call(self, rendered: str) -> str:
+    def _call(self, rendered: str, attachments: list[dict[str, Any]] | None) -> str:
         response = self._client.messages.create(
             model=self._model,
             max_tokens=4096,
-            messages=[{"role": "user", "content": rendered}],
+            messages=[{"role": "user", "content": _content_blocks(rendered, attachments)}],
         )
         return "".join(block.text for block in response.content if block.type == "text")
 
-    def complete_json(self, prompt_id: str, version: str, variables: dict[str, Any]) -> tuple[dict[str, Any], str]:
+    def complete_json(
+        self,
+        prompt_id: str,
+        version: str,
+        variables: dict[str, Any],
+        attachments: list[dict[str, Any]] | None = None,
+    ) -> tuple[dict[str, Any], str]:
         rendered = render_prompt(load_prompt(prompt_id, version), variables)
         model_ref = f"{prompt_id}@{version}/{self._model}"
         for attempt in range(2):  # مخرج غير مطابق → إعادة استدعاء واحدة (DOC-08 §٦)
-            raw = self._call(rendered)
+            raw = self._call(rendered, attachments)
             try:
                 return _extract_json(raw), model_ref
             except ValueError:
@@ -78,7 +105,13 @@ def _extract_json(raw: str) -> dict[str, Any]:
 class MockLLMEngine(LLMEngine):
     """عيّنات ثابتة معقولة سريرياً — تطابق عقود مخرجات DOC-15 (D-03)."""
 
-    def complete_json(self, prompt_id: str, version: str, variables: dict[str, Any]) -> tuple[dict[str, Any], str]:
+    def complete_json(
+        self,
+        prompt_id: str,
+        version: str,
+        variables: dict[str, Any],
+        attachments: list[dict[str, Any]] | None = None,
+    ) -> tuple[dict[str, Any], str]:
         model_ref = f"{prompt_id}@{version}/mock"
         handler = {
             "P2-summary": self._summary,

@@ -21,7 +21,18 @@ interface PreviewSection {
   content: string;
 }
 
+interface SampleFile {
+  name: string;
+  media_type: string;
+  data: string; // base64 خام (بلا بادئة data:)
+  size: number;
+}
+
 const GOLD_BADGE = { background: "rgba(201,162,39,.15)", color: "#C9A227", border: "1px solid #C9A227" } as const;
+
+// مثال الملاحظة المرفق: صورة أو PDF يقرؤه النموذج ليستنتج القالب (FR-502)
+const ALLOWED_SAMPLE_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif", "application/pdf"];
+const MAX_SAMPLE_BYTES = 12 * 1024 * 1024;
 
 function SectionKeyBox({ sectionKey }: { sectionKey: string }) {
   return (
@@ -45,7 +56,9 @@ function TemplatesInner() {
 
   // W-204 — المنشئ العكسي
   const [sampleText, setSampleText] = useState("");
-  const [styleText, setStyleText] = useState("");
+  const [sampleFile, setSampleFile] = useState<SampleFile | null>(null);
+  const [fileError, setFileError] = useState<string | null>(null);
+  const [dragging, setDragging] = useState(false);
   const [building, setBuilding] = useState(false);
 
   // W-205 — المعاينة والحفظ
@@ -94,16 +107,45 @@ function TemplatesInner() {
     }
   };
 
+  const pickFile = (file: File | null) => {
+    setFileError(null);
+    if (file === null) return;
+    if (!ALLOWED_SAMPLE_TYPES.includes(file.type)) {
+      setFileError(L("نوع غير مدعوم — استخدم صورة (PNG/JPG/WebP/GIF) أو ملف PDF",
+                     "Unsupported type — use an image (PNG/JPG/WebP/GIF) or a PDF"));
+      return;
+    }
+    if (file.size > MAX_SAMPLE_BYTES) {
+      setFileError(L("حجم الملف يتجاوز 12 ميجابايت", "File exceeds 12 MB"));
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = String(reader.result);
+      const comma = result.indexOf(",");
+      const data = comma >= 0 ? result.slice(comma + 1) : result;
+      setSampleFile({ name: file.name, media_type: file.type, data, size: file.size });
+    };
+    reader.onerror = () => setFileError(L("تعذّرت قراءة الملف", "Could not read the file"));
+    reader.readAsDataURL(file);
+  };
+
   const generate = async () => {
-    if (sampleText.trim() === "" || styleText.trim() === "") {
-      toast(L("أدخل نص المثال وطريقة التلخيص أولاً (FR-502)", "Enter the sample text and summarization style first (FR-502)"));
+    if (sampleText.trim().length < 20 && sampleFile === null) {
+      toast(L("أدخل نص المثال (20 حرفاً على الأقل) أو أرفق صورة/PDF لملاحظتك (FR-502)",
+              "Enter sample text (min 20 chars) or attach an image/PDF of your note (FR-502)"));
       return;
     }
     setBuilding(true);
     try {
       const body = await api<GeneratedTemplate>("/templates/reverse-build", {
         method: "POST",
-        body: { sample_text: sampleText, summarization_style: styleText },
+        body: {
+          sample_text: sampleText,
+          sample_file: sampleFile === null
+            ? undefined
+            : { media_type: sampleFile.media_type, data: sampleFile.data, filename: sampleFile.name },
+        },
       });
       setGenerated(body.data);
       setTplName(body.data.name.trim() !== "" ? body.data.name : L("قالب عكسي جديد", "New reverse-built template"));
@@ -165,7 +207,8 @@ function TemplatesInner() {
       setGenerated(null);
       setRunSections(null);
       setSampleText("");
-      setStyleText("");
+      setSampleFile(null);
+      setFileError(null);
       void load();
     } catch (err) {
       if (err instanceof ApiError && err.code === "MDF-4225") {
@@ -282,12 +325,15 @@ function TemplatesInner() {
           </h1>
         </div>
         <p className="page-desc">
-          {L("اكتب النص الذي تريده وطريقة تلخيصه، فيولّد الذكاء الاصطناعي بنية قالب قابلة للحفظ وإعادة الاستخدام (FR-502).",
-             "Write the text you want and how it should be summarized — the AI generates a template structure you can save and reuse (FR-502).")}
+          {L("الصق مثال ملاحظتك أو أرفق صورة/PDF لها، فيقرؤه الذكاء الاصطناعي ويولّد بنية قالب قابلة للحفظ وإعادة الاستخدام (FR-502).",
+             "Paste a sample note or attach an image/PDF of one — the AI reads it and generates a template structure you can save and reuse (FR-502).")}
         </p>
 
         <div className="card pad24">
-          <label className="field-label">{L("نص المثال — كما تحب أن تبدو ملاحظتك", "Sample text — how you want your note to look")}</label>
+          <label className="field-label">
+            {L("نص المثال — كما تحب أن تبدو ملاحظتك", "Sample text — how you want your note to look")}
+            <span style={{ fontWeight: 400, color: "#5B7280" }}> {L("(اختياري إن أرفقت ملفاً)", "(optional if you attach a file)")}</span>
+          </label>
           <textarea
             className="field clinical"
             dir="ltr"
@@ -296,14 +342,66 @@ function TemplatesInner() {
             value={sampleText}
             onChange={(event) => setSampleText(event.target.value)}
           />
-          <label className="field-label">{L("طريقة التلخيص المرغوبة", "Preferred summarization style")}</label>
-          <textarea
-            className="field"
-            rows={3}
-            placeholder={L("مثال: اجعل التقييم قائمة مرقمة، والخطة نقاطاً قصيرة…", "Example: make the assessment a numbered list and the plan short bullet points…")}
-            value={styleText}
-            onChange={(event) => setStyleText(event.target.value)}
-          />
+
+          <label className="field-label">{L("أو أرفق صورة/PDF لمثال ملاحظتك", "Or attach an image/PDF of your note example")}</label>
+          <p style={{ fontSize: 12.5, color: "#5B7280", margin: "0 0 8px" }}>
+            {L("يقرأ الذكاء الاصطناعي المرفق ويستنتج القالب المستخدم فيه ثم يبني مثله (FR-502).",
+               "The AI reads the attachment, infers the template it uses, and builds one like it (FR-502).")}
+          </p>
+
+          {sampleFile === null ? (
+            <label
+              onDragOver={(event) => { event.preventDefault(); setDragging(true); }}
+              onDragLeave={() => setDragging(false)}
+              onDrop={(event) => { event.preventDefault(); setDragging(false); pickFile(event.dataTransfer.files?.[0] ?? null); }}
+              style={{
+                display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+                border: `1.5px dashed ${dragging ? "#0A5C64" : "#9CC6CA"}`, borderRadius: 12,
+                padding: "22px 16px", cursor: "pointer", color: "#0A5C64", textAlign: "center",
+                background: dragging ? "#E6F5F6" : "#F3FBFC", transition: "background .15s, border-color .15s",
+              }}
+            >
+              <input
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/gif,application/pdf"
+                style={{ display: "none" }}
+                onChange={(event) => { pickFile(event.target.files?.[0] ?? null); event.target.value = ""; }}
+              />
+              <span style={{ fontSize: 22 }} aria-hidden>📎</span>
+              <span style={{ fontSize: 13.5, fontWeight: 700 }}>
+                {L("اسحب صورة أو PDF هنا، أو اضغط للاختيار", "Drag an image or PDF here, or click to choose")}
+              </span>
+            </label>
+          ) : (
+            <div style={{ display: "flex", alignItems: "center", gap: 12, padding: 12, borderRadius: 12, background: "#F3FBFC", border: "1px solid #D6EBED" }}>
+              {sampleFile.media_type === "application/pdf" ? (
+                <span style={{ fontSize: 26 }} aria-hidden>📄</span>
+              ) : (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={`data:${sampleFile.media_type};base64,${sampleFile.data}`}
+                  alt=""
+                  style={{ width: 46, height: 46, objectFit: "cover", borderRadius: 8, flexShrink: 0 }}
+                />
+              )}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <strong style={{ fontSize: 13.5, display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  <bdi>{sampleFile.name}</bdi>
+                </strong>
+                <span style={{ fontSize: 12, color: "#5B7280" }}>
+                  {sampleFile.media_type === "application/pdf" ? "PDF" : L("صورة", "Image")}
+                  {" · "}<span className="num">{Math.max(1, Math.round(sampleFile.size / 1024))}</span> KB
+                </span>
+              </div>
+              <button className="btn-row neutral" type="button" onClick={() => { setSampleFile(null); setFileError(null); }}>
+                {L("إزالة", "Remove")}
+              </button>
+            </div>
+          )}
+          {fileError !== null ? (
+            <p style={{ color: "#C0392B", fontSize: 12.5, fontWeight: 700, margin: "8px 0 0" }}>{fileError}</p>
+          ) : null}
+
           <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginTop: 16 }}>
             <button className="btn" onClick={() => void generate()} disabled={building}>
               {building ? <><span className="spinner" /> {L("يولّد البنية…", "Generating structure…")}</> : L("ولّد القالب", "Generate template")}

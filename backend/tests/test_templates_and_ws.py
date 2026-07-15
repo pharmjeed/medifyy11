@@ -4,12 +4,18 @@ from __future__ import annotations
 from tests.conftest import auth
 
 
+# PNG صالح 1×1 بكسل (base64) — كافٍ للتحقق من مسار المرفق دون رفع ملف كبير
+PNG_1X1 = (
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk"
+    "+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+)
+
+
 def test_reverse_build_generates_structure(client, doctor_token):
     response = client.post("/api/v1/templates/reverse-build", headers=auth(doctor_token), json={
         "sample_text": "S: Follow-up of T2DM and HTN. Reviewed adherence.\nO: BP 150/95.\n"
                        "A: 1. HTN uncontrolled. 2. T2DM.\nP: Continue metformin; recheck BP in 2 weeks.\n"
                        "E: Advised daily home BP logging.",
-        "summarization_style": "قسّم الملخص كما في المثال، اجعل التقييم قائمة مرقّمة وأضف سطر تثقيف للمريض.",
     })
     assert response.status_code == 200, response.text
     data = response.json()["data"]
@@ -17,11 +23,34 @@ def test_reverse_build_generates_structure(client, doctor_token):
     assert data["name"]
 
 
+def test_reverse_build_from_attached_image(client, doctor_token):
+    """يكفي مرفق صورة بلا نص — النموذج يقرأ المثال من المرفق (FR-502)."""
+    response = client.post("/api/v1/templates/reverse-build", headers=auth(doctor_token), json={
+        "sample_file": {"media_type": "image/png", "data": PNG_1X1, "filename": "note.png"},
+    })
+    assert response.status_code == 200, response.text
+    assert response.json()["data"]["structure"]["sections"]
+
+
+def test_reverse_build_requires_text_or_file(client, doctor_token):
+    """لا نص ولا مرفق → تحقق فاشل يُغلَّف بـ MDF-5001 (D-25)."""
+    response = client.post("/api/v1/templates/reverse-build", headers=auth(doctor_token), json={})
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "MDF-5001"
+
+
+def test_reverse_build_rejects_unsupported_media(client, doctor_token):
+    response = client.post("/api/v1/templates/reverse-build", headers=auth(doctor_token), json={
+        "sample_file": {"media_type": "application/zip", "data": PNG_1X1},
+    })
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "MDF-5001"
+
+
 def test_preview_then_save_personal_template(client, doctor_token):
     headers = auth(doctor_token)
     build = client.post("/api/v1/templates/reverse-build", headers=headers, json={
         "sample_text": "S: chronic disease follow-up example with adherence review and vitals.",
-        "summarization_style": "مختصر بقوائم",
     }).json()["data"]
 
     preview = client.post("/api/v1/templates/preview", headers=headers,

@@ -183,13 +183,20 @@ def run_guidance(db: Session, visit: Visit, summary: Summary) -> bool:
     return True
 
 
-def run_reverse_template(sample_text: str, summarization_style: str, specialty: str) -> dict[str, Any]:
-    """P4 — البناء العكسي. الفشل → MDF-5034. لا يُحفظ تلقائياً (FR-502)."""
+def run_reverse_template(
+    sample_text: str, specialty: str, attachment: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    """P4 — البناء العكسي من نص أو من مرفق (صورة/PDF). الفشل → MDF-5034. لا يُحفظ تلقائياً (FR-502)."""
+    sample_for_prompt = sample_text.strip()
+    if not sample_for_prompt and attachment is not None:
+        kind = "PDF" if attachment.get("media_type") == "application/pdf" else "صورة"
+        sample_for_prompt = f"(مثال الملاحظة مُرفق ك{kind} بهذه الرسالة — استنتج البنية من تخطيط المرفق وعناوين أقسامه.)"
     try:
         output, _model_ref = get_llm().complete_json(
             "P4-reverse-template",
             PROMPT_VERSIONS["P4-reverse-template"],
-            {"sample_text": sample_text, "summarization_style": summarization_style, "specialty": specialty},
+            {"sample_text": sample_for_prompt, "specialty": specialty},
+            attachments=[attachment] if attachment is not None else None,
         )
         assert output.get("sections"), "بنية ناقصة"
         return output

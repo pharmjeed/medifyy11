@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 
 from fastapi import FastAPI, Request
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -58,8 +59,11 @@ async def medify_error_handler(request: Request, exc: MedifyError):
 
 @app.exception_handler(RequestValidationError)
 async def validation_error_handler(request: Request, exc: RequestValidationError):
-    """لا رمز تحقق عام في الـ22 — تغليف بـ MDF-5001 مع التفاصيل (D-25)."""
-    error = MedifyError("MDF-5001", details={"validation": exc.errors()})
+    """لا رمز تحقق عام في الـ22 — تغليف بـ MDF-5001 مع التفاصيل (D-25).
+
+    jsonable_encoder يضمن قابلية التسلسل حتى حين يحمل ctx كائن استثناء (ValueError من مدقق).
+    """
+    error = MedifyError("MDF-5001", details={"validation": jsonable_encoder(exc.errors())})
     return JSONResponse(status_code=422, content=error.body())
 
 

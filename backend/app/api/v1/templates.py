@@ -1,12 +1,14 @@
 """القوالب — DOC-05 §٤ (FR-500): القائمة + البناء العكسي + المعاينة + الحفظ + الافتراضي."""
 from __future__ import annotations
 
+import base64
+import binascii
 import datetime as dt
 import uuid
 from typing import Any
 
 from fastapi import APIRouter
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import select
 
 from ...analytics import track
@@ -59,15 +61,49 @@ def _validate_structure(structure: dict[str, Any]) -> None:
         seen_keys.add(key)
 
 
+# مثال الملاحظة المرفق: صورة أو PDF يقرؤه النموذج ليستنتج بنية القالب (FR-502)
+ALLOWED_SAMPLE_MEDIA = {"image/png", "image/jpeg", "image/webp", "image/gif", "application/pdf"}
+MAX_SAMPLE_FILE_BYTES = 12 * 1024 * 1024  # ~12MB بعد فك التشفير
+
+
+class SampleFileIn(BaseModel):
+    """مرفق مثال الملاحظة — base64 خام (بلا بادئة data:)."""
+    media_type: str
+    data: str
+    filename: str | None = None
+
+
 class ReverseBuildIn(BaseModel):
-    sample_text: str = Field(min_length=20)
-    summarization_style: str = Field(min_length=3)
+    """يكفي أحد المدخلين: نص المثال (٢٠ حرفاً فأكثر) أو ملف مرفق (صورة/PDF)."""
+    sample_text: str = ""
+    sample_file: SampleFileIn | None = None
+
+    @model_validator(mode="after")
+    def _require_example(self) -> "ReverseBuildIn":
+        has_text = len(self.sample_text.strip()) >= 20
+        if self.sample_file is None and not has_text:
+            raise ValueError("أدخل نص مثال (٢٠ حرفاً على الأقل) أو أرفق صورة/PDF لمثال الملاحظة")
+        if self.sample_file is not None:
+            if self.sample_file.media_type not in ALLOWED_SAMPLE_MEDIA:
+                raise ValueError(f"نوع ملف غير مدعوم: {self.sample_file.media_type}")
+            try:
+                raw = base64.b64decode(self.sample_file.data, validate=True)
+            except (binascii.Error, ValueError) as exc:
+                raise ValueError("ترميز الملف غير صالح (base64)") from exc
+            if not raw:
+                raise ValueError("الملف المرفق فارغ")
+            if len(raw) > MAX_SAMPLE_FILE_BYTES:
+                raise ValueError("حجم الملف يتجاوز الحد المسموح (12MB)")
+        return self
 
 
 @router.post("/templates/reverse-build")
 def reverse_build(body: ReverseBuildIn, ctx: DoctorAuth, db: DB):
-    """P4 — يولّد البنية ولا يحفظ تلقائياً (FR-502)."""
-    structure = run_reverse_template(body.sample_text, body.summarization_style, ctx.user.specialty or "")
+    """P4 — يولّد البنية من نص أو من صورة/PDF مرفق، ولا يحفظ تلقائياً (FR-502)."""
+    attachment = None
+    if body.sample_file is not None:
+        attachment = {"media_type": body.sample_file.media_type, "data": body.sample_file.data}
+    structure = run_reverse_template(body.sample_text, ctx.user.specialty or "", attachment=attachment)
     track("template.reverse_built", ctx.facility_id, "doctor", saved=False, preview_iterations=0)
     return ok({"name": structure.get("name", ""), "structure": {"sections": structure["sections"]}})
 
