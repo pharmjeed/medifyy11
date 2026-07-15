@@ -26,6 +26,7 @@ os.environ.update({
     "DATABASE_URL": f"{APP_URL}/{TEST_DB}",
     "MIGRATIONS_DATABASE_URL": f"{OWNER_URL}/{TEST_DB}",
     "ENVIRONMENT": "dev",
+    "SEED_SUPER_ADMIN_PASSWORD": "Owner@12345",  # يبذر السوبر أدمن للاختبارات (البذر يتخطّاه بلا هذا المتغير)
     "LLM_ENGINE": "mock",
     "STT_ENGINE": "mock",
     "INTEGRATION_ENGINE": "mock",

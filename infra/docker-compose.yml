@@ -65,6 +65,8 @@ services:
     environment:
       MIGRATIONS_DATABASE_URL: postgresql+psycopg://medify_owner:${POSTGRES_PASSWORD:-medify_dev_pw}@postgres:5432/medify
       COLUMN_ENCRYPTION_KEY: ${COLUMN_ENCRYPTION_KEY:-dev-only-column-key}
+      # تطوير فقط — سوبر أدمن بكلمة معروفة؛ الإنتاج (compose.prod) لا يمرّرها فيُتخطّى الإنشاء
+      SEED_SUPER_ADMIN_PASSWORD: ${SEED_SUPER_ADMIN_PASSWORD:-Owner@12345}
     volumes:
       - ../scripts:/scripts:ro
     depends_on:

@@ -32,6 +32,8 @@ test("الرحلة الكاملة: من الدخول إلى الرفع", async (
   // 5) التسجيل الحي + التفريغ المتدفق (W-212)
   await expect(page.getByText("متصل")).toBeVisible({ timeout: 15_000 });
   await expect(page.getByText("يشتكي المريض من").or(page.getByText("السلام عليكم دكتور"))).toBeVisible({ timeout: 20_000 });
+  // كل مقطع يحمل هوية متكلمه المُستنتَجة — أول أدوار الحوار للمريض
+  await expect(page.getByText("المريض", { exact: true }).first()).toBeVisible({ timeout: 20_000 });
 
   // 6) إنهاء → حالة التوليد (W-213) → المراجعة
   await page.getByRole("button", { name: "إنهاء التسجيل وتوليد الملخص" }).click();

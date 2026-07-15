@@ -48,6 +48,34 @@ def create_access_token(user_id: uuid.UUID, facility_id: uuid.UUID, role: str) -
     return jwt.encode(payload, s.jwt_secret, algorithm=s.jwt_algorithm)
 
 
+def create_sa_access_token(admin_id: uuid.UUID) -> str:
+    """رمز وصول السوبر أدمن — scope=platform بلا facility_id (لا يمر أبداً من deps.authenticated)."""
+    s = get_settings()
+    payload = {
+        "sub": str(admin_id),
+        "role": "super_admin",
+        "scope": "platform",
+        "type": "access",
+        "exp": _now() + dt.timedelta(minutes=s.access_token_minutes),
+        "iat": _now(),
+    }
+    return jwt.encode(payload, s.jwt_secret, algorithm=s.jwt_algorithm)
+
+
+def create_sa_refresh_token(admin_id: uuid.UUID) -> str:
+    s = get_settings()
+    payload = {
+        "sub": str(admin_id),
+        "role": "super_admin",
+        "scope": "platform",
+        "type": "refresh",
+        "jti": secrets.token_urlsafe(16),
+        "exp": _now() + dt.timedelta(days=s.refresh_token_days),
+        "iat": _now(),
+    }
+    return jwt.encode(payload, s.jwt_secret, algorithm=s.jwt_algorithm)
+
+
 def create_refresh_token(user_id: uuid.UUID, facility_id: uuid.UUID, role: str) -> str:
     s = get_settings()
     payload = {

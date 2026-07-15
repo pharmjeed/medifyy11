@@ -31,6 +31,9 @@ TODAY = NOW.replace(hour=6, minute=0, second=0, microsecond=0)
 
 ADMIN_PASSWORD = os.environ.get("SEED_ADMIN_PASSWORD", "Admin@12345")
 DOCTOR_PASSWORD = os.environ.get("SEED_DOCTOR_PASSWORD", "Doctor@12345")
+# لا كلمة مرور افتراضية للسوبر أدمن — يُنشأ فقط إن ضُبطت صراحة (أمان الإنتاج).
+# للتطوير: صدّر SEED_SUPER_ADMIN_PASSWORD (compose يمرّر Owner@12345 افتراضياً). للإنتاج: scripts/create_super_admin.py.
+SUPER_ADMIN_PASSWORD = os.environ.get("SEED_SUPER_ADMIN_PASSWORD", "")
 
 
 def d(days: int = 0, hour: int = 9, minute: int = 0) -> dt.datetime:
@@ -93,7 +96,36 @@ PATIENTS_EXTRA = [
 ]
 
 
+def seed_platform(db: Session) -> None:
+    """طبقة المنصة (قرار مالك 2026-07-15): سوبر أدمن تطويري + التأكد من الباقتين — idempotent."""
+    from decimal import Decimal
+
+    from app.models import Plan, PlatformAdmin
+
+    if not SUPER_ADMIN_PASSWORD:
+        # لا حساب سوبر أدمن افتراضي — على الإنتاج يُنشأ عبر scripts/create_super_admin.py بكلمة قوية
+        print("seed: تخطّي السوبر أدمن — اضبط SEED_SUPER_ADMIN_PASSWORD أو استخدم scripts/create_super_admin.py")
+    elif not db.execute(select(PlatformAdmin).where(PlatformAdmin.username == "owner")).scalar_one_or_none():
+        db.add(PlatformAdmin(
+            username="owner",
+            full_name="مالك ميديفاي",
+            email="owner@medify.example.sa",
+            password_hash=hash_password(SUPER_ADMIN_PASSWORD),
+            is_active=True,
+        ))
+        print("seed: أُنشئ السوبر أدمن التطويري owner")
+    for code, name_ar, name_en, price, cycle in [
+        ("monthly", "شهرية", "Monthly", Decimal("400.00"), "monthly"),
+        ("yearly", "سنوية", "Yearly", Decimal("4080.00"), "yearly"),
+    ]:
+        if not db.execute(select(Plan).where(Plan.code == code)).scalar_one_or_none():
+            db.add(Plan(code=code, name_ar=name_ar, name_en=name_en,
+                        seat_price_sar=price, billing_cycle=cycle, is_active=True))
+    db.flush()
+
+
 def seed(db: Session) -> None:
+    seed_platform(db)
     if db.execute(select(Facility).where(Facility.commercial_reg == "1010456789")).scalar_one_or_none():
         print("seed: المنشأة موجودة — تخطٍّ (idempotent)")
         return

@@ -37,8 +37,17 @@ PROMPT_VERSIONS = {
 
 
 def _transcript_text(transcript: Transcript) -> str:
+    """نص المحادثة مُسنَداً للمتحدث (الطبيب/المريض:) ليُميّز الملخص من قال ماذا."""
     segments = (transcript.content_json or {}).get("segments", [])
-    return "\n".join(segment.get("text", "") for segment in segments)
+    lines: list[str] = []
+    for segment in segments:
+        text = segment.get("text", "")
+        if not text:
+            continue
+        speaker = segment.get("speaker")
+        prefix = {"doctor": "الطبيب: ", "patient": "المريض: "}.get(speaker, "")
+        lines.append(f"{prefix}{text}")
+    return "\n".join(lines)
 
 
 def _active_coding_systems(db: Session, facility_id: uuid.UUID) -> list[str]:

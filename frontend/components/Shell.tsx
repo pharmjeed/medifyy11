@@ -183,6 +183,18 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
     setChecked(true);
   }, [router]);
 
+  // حارس الدور (طبقة تجربة استخدام فوق حراس الخادم admin_only/doctor_only):
+  // كل قسم لدوره — دكتور يفتح /admin (bookmark/رابط قديم) يُعاد بهدوء للوحته والعكس،
+  // بدل نافذة MDF-4031. الأمان الفعلي يبقى على الخادم؛ هذا لتجربة الاستخدام فقط.
+  const section = pathname.startsWith("/admin") ? "admin" : pathname.startsWith("/doctor") ? "doctor" : null;
+  const roleMismatch = user !== null && section !== null && user.role !== section;
+
+  useEffect(() => {
+    if (roleMismatch && user !== null) {
+      router.replace(user.role === "admin" ? "/admin" : "/doctor");
+    }
+  }, [roleMismatch, user, router]);
+
   useEffect(() => {
     // عداد الجرس عند التحميل
     void (async () => {
@@ -193,7 +205,7 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
     })();
   }, [pathname]);
 
-  if (!checked || user === null) return null;
+  if (!checked || user === null || roleMismatch) return null;
 
   const nav = user.role === "admin" ? ADMIN_NAV : DOCTOR_NAV;
   const roleLabel = user.role === "admin" ? L("أدمن المنشأة", "Facility admin") : L("دكتور", "Doctor");

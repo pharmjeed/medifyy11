@@ -87,6 +87,7 @@ from .api.v1 import (  # noqa: E402
     facilities,
     notifications,
     summary,
+    superadmin,
     templates,
     visits,
     ws_transcribe,
@@ -102,4 +103,5 @@ app.include_router(visits.router, prefix=API, tags=["visits"])
 app.include_router(summary.router, prefix=API, tags=["summary"])
 app.include_router(approvals.router, prefix=API, tags=["approvals"])
 app.include_router(notifications.router, prefix=API, tags=["notifications"])
+app.include_router(superadmin.router, prefix=API, tags=["super-admin"])
 app.include_router(ws_transcribe.router, tags=["ws"])

@@ -12,6 +12,7 @@ from sqlalchemy import select
 from ...config import get_settings
 from ...db import rls_session
 from ...models import Recording, Transcript, Visit
+from ...pipelines.speaker import attribute_speaker
 from ...pipelines.stt import get_stt
 from ...security import decode_token
 
@@ -72,10 +73,17 @@ async def transcribe_ws(websocket: WebSocket, visit_id: uuid.UUID, token: str = 
                     for segment in stt.stream_chunk(session_id, seq, chunk_payload):
                         if segment.is_final:
                             segment_id = f"s-{len(segments)}"
-                            segments.append({"id": segment_id, "text": segment.text, "t0": segment.t0, "t1": segment.t1})
+                            # إسناد المتحدث بالمحتوى + سياق الدور السابق (طبيب/مريض)
+                            prev_speaker = segments[-1]["speaker"] if segments else None
+                            speaker, speaker_confidence = attribute_speaker(segment.text, prev_speaker)
+                            segments.append({
+                                "id": segment_id, "text": segment.text, "t0": segment.t0, "t1": segment.t1,
+                                "speaker": speaker, "speaker_confidence": speaker_confidence,
+                            })
                             await websocket.send_json({
                                 "type": "final", "segment_id": segment_id,
                                 "text": segment.text, "t0": segment.t0, "t1": segment.t1,
+                                "speaker": speaker, "speaker_confidence": speaker_confidence,
                             })
                         else:
                             await websocket.send_json({"type": "partial", "seq": seq, "text": segment.text})

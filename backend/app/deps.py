@@ -9,9 +9,9 @@ from fastapi import Depends, Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .db import get_db, set_rls_context
+from .db import get_db, get_system_db, set_rls_context
 from .errors import MedifyError
-from .models import User
+from .models import PlatformAdmin, User
 from .security import decode_token
 
 
@@ -21,6 +21,13 @@ class AuthContext:
     facility_id: uuid.UUID
     role: str  # admin | doctor
     user: User
+
+
+@dataclass
+class SuperAdminContext:
+    admin_id: uuid.UUID
+    username: str
+    admin: PlatformAdmin
 
 
 def _bearer_token(request: Request) -> str:
@@ -36,6 +43,9 @@ def authenticated(
 ) -> AuthContext:
     """تتحقق من JWT وتضبط جلسة RLS (SET LOCAL) — كل النقاط المسجلة تمر من هنا."""
     payload = decode_token(_bearer_token(request), "access")
+    if payload.get("scope") == "platform":
+        # رمز السوبر أدمن لا يفتح مسارات المنشآت — نطاقه /sa حصراً
+        raise MedifyError("MDF-4031")
     user_id = uuid.UUID(payload["sub"])
     facility_id = uuid.UUID(payload["facility_id"])
     role = payload["role"]
@@ -60,10 +70,27 @@ def doctor_only(ctx: Annotated[AuthContext, Depends(authenticated)]) -> AuthCont
     return ctx
 
 
+def super_admin_only(
+    request: Request,
+    db: Annotated[Session, Depends(get_system_db)],
+) -> SuperAdminContext:
+    """مصادقة السوبر أدمن — محرك النظام (يتجاوز RLS)؛ ترفض رموز المنشآت (admin/doctor)."""
+    payload = decode_token(_bearer_token(request), "access")
+    if payload.get("role") != "super_admin" or payload.get("scope") != "platform":
+        raise MedifyError("MDF-4031")
+    admin = db.execute(
+        select(PlatformAdmin).where(PlatformAdmin.id == uuid.UUID(payload["sub"]))
+    ).scalar_one_or_none()
+    if admin is None or not admin.is_active:
+        raise MedifyError("MDF-4013")
+    return SuperAdminContext(admin_id=admin.id, username=admin.username, admin=admin)
+
+
 DB = Annotated[Session, Depends(get_db)]
 Auth = Annotated[AuthContext, Depends(authenticated)]
 AdminAuth = Annotated[AuthContext, Depends(admin_only)]
 DoctorAuth = Annotated[AuthContext, Depends(doctor_only)]
+SuperAuth = Annotated[SuperAdminContext, Depends(super_admin_only)]
 
 
 def pagination(page: int = 1, per_page: int = 25) -> tuple[int, int]:

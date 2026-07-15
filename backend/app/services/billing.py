@@ -13,10 +13,18 @@ from sqlalchemy.orm import Session
 
 from ..config import get_settings
 from ..errors import MedifyError
-from ..models import Invoice, Subscription, User
+from ..models import Invoice, Plan, Subscription, User
 
-SEAT_PRICE_SAR = Decimal("400.00")  # توضيحي — يُقفل وفق DOC-09 §٤ بعد التحقق الميداني
+SEAT_PRICE_SAR = Decimal("400.00")  # احتياطي إن غابت الباقة — يُقفل وفق DOC-09 §٤ بعد التحقق الميداني
 VAT_RATE = Decimal("0.15")
+
+
+def plan_seat_price(db: Session, plan_code: str) -> Decimal:
+    """سعر المقعد من كتالوج الباقات (هجرة 0002) — الاحتياطي الثابت إن غاب الرمز."""
+    price = db.execute(
+        select(Plan.seat_price_sar).where(Plan.code == plan_code)
+    ).scalar_one_or_none()
+    return price if price is not None else SEAT_PRICE_SAR
 
 
 def seats_used(db: Session, facility_id: uuid.UUID) -> int:
@@ -45,7 +53,7 @@ def ensure_seat_available(db: Session, facility_id: uuid.UUID) -> None:
 
 
 def issue_invoice(db: Session, subscription: Subscription, seats: int, note: str = "") -> Invoice:
-    amount = SEAT_PRICE_SAR * seats
+    amount = plan_seat_price(db, subscription.plan) * seats
     vat = (amount * VAT_RATE).quantize(Decimal("0.01"))
     now = dt.datetime.now(dt.timezone.utc)
     invoice = Invoice(

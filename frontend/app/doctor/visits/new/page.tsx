@@ -10,14 +10,14 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, api, getSessionUser, wsUrl } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
-import type { CreatedVisit, Patient, PatientContext, Template } from "@/lib/types";
+import type { CreatedVisit, Patient, PatientContext, Speaker, Template } from "@/lib/types";
 import { ProgressBar7 } from "@/components/ProgressBar7";
 import { Shell } from "@/components/Shell";
-import { Modal, SpecBadge, SpecBar, useErrorScreen, useToast } from "@/components/ui";
+import { Modal, SpeakerBadge, SpecBadge, SpecBar, useErrorScreen, useToast } from "@/components/ui";
 
 type Phase = "patient" | "template" | "recording" | "generating" | "blocked";
 
-interface Segment { id: string; text: string; partial: boolean }
+interface Segment { id: string; text: string; partial: boolean; speaker?: Speaker; speaker_confidence?: number }
 
 function medsText(context: PatientContext): string {
   return (context.medications ?? [])
@@ -100,6 +100,7 @@ export default function NewVisitPage() {
     socket.onmessage = (event) => {
       const message = JSON.parse(String(event.data)) as {
         type: string; text?: string; segment_id?: string; seq?: number; code?: string; state?: string;
+        speaker?: Speaker; speaker_confidence?: number;
       };
       if (message.type === "partial" && message.text !== undefined) {
         const text = message.text;
@@ -110,7 +111,12 @@ export default function NewVisitPage() {
       } else if (message.type === "final" && message.text !== undefined) {
         const text = message.text;
         const id = message.segment_id ?? `s-${Date.now()}`;
-        setSegments((current) => [...current.filter((segment) => !segment.partial), { id, text, partial: false }]);
+        const speaker = message.speaker;
+        const speakerConfidence = message.speaker_confidence;
+        setSegments((current) => [
+          ...current.filter((segment) => !segment.partial),
+          { id, text, partial: false, speaker, speaker_confidence: speakerConfidence },
+        ]);
       } else if (message.type === "resume_from" && message.seq !== undefined) {
         seq.current = message.seq;
       } else if (message.type === "error") {
@@ -393,7 +399,7 @@ export default function NewVisitPage() {
                   <p style={{ color: "#5B7280", fontSize: 14, textAlign: "center", margin: 12 }}>{L("تحدّث الآن — يظهر التفريغ هنا فورياً…", "Speak now — the transcript appears here instantly…")}</p>
                 ) : segments.map((segment) => (
                   <div key={segment.id} style={{ opacity: segment.partial ? 0.55 : 1, fontSize: 14, lineHeight: 1.9 }}>
-                    <span className="badge" style={{ background: "#EAF6F7", color: "#0A5C64", marginInlineEnd: 8 }}>{L("كلام", "Speech")}</span>
+                    <span style={{ marginInlineEnd: 8 }}><SpeakerBadge speaker={segment.speaker} confidence={segment.speaker_confidence} /></span>
                     {segment.text}
                     {segment.partial ? <span style={{ display: "inline-block", width: 2, height: 14, background: "#0E7C86", marginInlineStart: 4, animation: "mBlink .9s ease infinite" }} /> : null}
                   </div>

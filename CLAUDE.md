@@ -37,6 +37,16 @@ Monorepo: `frontend/` (Next.js 14 App Router + TS strict) · `backend/` (FastAPI
 - أنظمة الترميز: ICD10AM (لا يُعطَّل — CHECK) + ACHI + SBS + SFDA.
 - desktop-first، RTL افتراضاً، كل مقطع لاتيني داخل `<bdi>`.
 
+## طبقة السوبر أدمن (قرار مالك 2026-07-15 — تعديل معتمد على DOC-04/05/06/09/10)
+
+- **دور ثالث فوق المنشآت**: `super_admin` لمالك ميديفاي — جدول `platform_admins` مستقل (ليس في `users`؛ قيد الدورين يبقى). JWT بـ `scope=platform` بلا `facility_id` — مرفوض في مسارات المنشآت والعكس صحيح (`deps.super_admin_only`).
+- **جدولان جديدان** (هجرة 0002): `platform_admins` (محجوب كلياً عن medify_app) و`plans` (كتالوج الباقات — SELECT فقط لدور التطبيق). `subscriptions.plan` يشير تطبيقياً إلى `plans.code`. `seat_events.actor_user_id` أصبح NULL-able (NULL = فعل المنصة).
+- **API**: كل شيء تحت `/api/v1/sa/*` بمحرك النظام (يتجاوز RLS بقيود صريحة): auth (login/refresh/logout/me) · overview · facilities (قائمة/تفاصيل/حالة/اشتراك) · users (إنشاء أدمن/دكتور، تفعيل/تعطيل، إعادة كلمة مرور) · plans (CRUD — الرمز ثابت) · invoices (قائمة/إصدار/تسوية يدوية paid/void/overdue).
+- **الفوترة حسب الدكاترة**: فاتورة الدورة = عدد الدكاترة النشطين × `plans.seat_price_sar` + VAT 15% مفصولة (`billing.plan_seat_price` مع احتياطي 400). تغيير الباقة/المقاعد من المنصة **لا** يُصدر فاتورة تلقائياً — الإصدار فعل صريح. التسوية اليدوية ترفع تعليق المنشأة إن لم تبقَ متأخرات؛ لا تراجع عن paid.
+- **السوبر أدمن لا يقرأ محتوى سريرياً أبداً** — نفس قيد أدمن المنشأة: عدادات وتجميعات فقط. كل فعل منصةٍ يُدوَّن في `audit_logs` منشأته بـ `actor_user_id=NULL` + `meta.sa`.
+- **الواجهات**: `/sa/login` · `/sa` (نظرة) · `/sa/facilities[/:id]` · `/sa/plans` · `/sa/invoices` — هيكل `SaShell` بشارة ذهبية وجلسة مستقلة (`lib/sa.ts`).
+- **البذر**: dev عبر `scripts/seed.py` (حساب `owner` / `Owner@12345`) · الإنتاج عبر `scripts/create_super_admin.py` (كلمة المرور من `SUPER_ADMIN_PASSWORD`).
+
 ## المحركات القابلة للتبديل (متغيرات بيئة)
 
 - `STT_ENGINE=whisper|mock` · `LLM_ENGINE=claude|mock` (نموذج claude-sonnet-4-5)

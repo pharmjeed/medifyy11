@@ -14,7 +14,7 @@ import type {
 } from "@/lib/types";
 import { ProgressBar7 } from "@/components/ProgressBar7";
 import { Shell } from "@/components/Shell";
-import { Modal, SpecBadge, SpecBar, useErrorScreen, useToast } from "@/components/ui";
+import { Modal, SpeakerBadge, SpecBadge, SpecBar, useErrorScreen, useToast } from "@/components/ui";
 
 const SECTION_TITLES: Record<string, { ar: string; en: string }> = {
   S: { ar: "الذاتي — Subjective", en: "Subjective" },
@@ -562,6 +562,7 @@ export default function ReviewPage() {
             <div style={{ flex: 1, overflowY: "auto", padding: 16 }}>
               {transcript.map((segment) => (
                 <div key={segment.id} style={{ marginBottom: 10, fontSize: 14, lineHeight: 1.9 }}>
+                  <SpeakerBadge speaker={segment.speaker} confidence={segment.speaker_confidence} />{" "}
                   <bdi className="tech-badge">{segment.t0.toFixed(0)}s</bdi> {segment.text}
                 </div>
               ))}

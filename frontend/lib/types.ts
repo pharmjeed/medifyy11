@@ -183,11 +183,15 @@ export interface VisitSummary {
   approval: ApprovalRecord | null;
 }
 
+export type Speaker = "doctor" | "patient";
+
 export interface TranscriptSegment {
   id: string;
   text: string;
   t0: number;
   t1: number;
+  speaker?: Speaker;
+  speaker_confidence?: number;
 }
 
 export interface UploadStatus {
@@ -245,4 +249,87 @@ export interface ChatPatch {
   section_key: string;
   old_content: string;
   new_content: string;
+}
+
+/* ===== طبقة السوبر أدمن /sa (قرار مالك 2026-07-15) ===== */
+
+export type FacilityStatus = "active" | "suspended" | "archived";
+
+export interface SaOverview {
+  facilities: { total: number; active: number; suspended: number; archived: number };
+  users: { doctors_active: number; doctors_total: number; admins_total: number };
+  seats_sold: number;
+  invoices: {
+    due: number;
+    overdue: number;
+    paid: number;
+    void: number;
+    outstanding_sar: string;
+    collected_sar: string;
+    collected_this_month_sar: string;
+  };
+}
+
+export interface SaFacilityRow {
+  id: string;
+  name: string;
+  commercial_reg: string;
+  status: FacilityStatus;
+  created_at: string;
+  plan: string | null;
+  seats_total: number;
+  doctors_active: number;
+  admins_count: number;
+  overdue_count: number;
+}
+
+export interface SaPlan {
+  id: string;
+  code: string;
+  name_ar: string;
+  name_en: string;
+  seat_price_sar: string;
+  billing_cycle: "monthly" | "yearly";
+  is_active: boolean;
+  facilities_count: number;
+}
+
+export interface SaInvoice extends Invoice {
+  facility_id: string;
+  facility_name?: string;
+  provider_ref: string | null;
+}
+
+export interface SaFacilityUser {
+  id: string;
+  role: "admin" | "doctor";
+  full_name: string;
+  username: string;
+  email: string | null;
+  specialty: string | null;
+  clinic_id: string | null;
+  clinic_name: string | null;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface SaFacilityDetail {
+  facility: {
+    id: string;
+    name: string;
+    commercial_reg: string;
+    status: FacilityStatus;
+    created_at: string;
+  };
+  subscription: {
+    plan: string;
+    seats_total: number;
+    seats_used: number;
+    seats_available: number;
+    plan_info: SaPlan | null;
+  } | null;
+  clinics: { id: string; name: string }[];
+  users: SaFacilityUser[];
+  invoices: SaInvoice[];
+  seat_events: { id: string; delta: number; reason: string; at: string; by_platform: boolean }[];
 }

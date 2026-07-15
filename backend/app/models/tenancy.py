@@ -87,7 +87,8 @@ class SeatEvent(Base, TimestampMixin):
     subscription_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("subscriptions.id"), nullable=False, index=True)
     delta: Mapped[int] = mapped_column(Integer, nullable=False)
     reason: Mapped[str] = mapped_column(SEAT_EVENT_REASON, nullable=False)
-    actor_user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
+    # NULL = فعل المنصة (السوبر أدمن/النظام) — موازٍ لـ audit_logs.actor_user_id (هجرة 0002)
+    actor_user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"), nullable=True)
 
 
 class Invoice(Base, TimestampMixin):

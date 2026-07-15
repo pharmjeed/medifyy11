@@ -8,7 +8,7 @@ import { SHOW_SPEC_IDS } from "@/lib/api";
 import { ApiError } from "@/lib/api";
 import { mdfMeta } from "@/lib/errors";
 import { useLang } from "@/lib/i18n";
-import type { VisitState } from "@/lib/types";
+import type { Speaker, VisitState } from "@/lib/types";
 
 /* ===== شارة المواصفة W-XXX — تظهر فقط عند NEXT_PUBLIC_SHOW_SPEC_IDS=true ===== */
 export function SpecBadge({ id }: { id: string }) {
@@ -53,6 +53,34 @@ export function VisitStateBadge({ state }: { state: VisitState }) {
 export function visitStateLabel(state: VisitState, lang?: "ar" | "en"): string {
   const current = lang ?? (typeof document !== "undefined" && document.documentElement.lang === "ar" ? "ar" : "en");
   return current === "ar" ? VSTATES[state].ar : VSTATES[state].en;
+}
+
+/* ===== شارة هوية المتحدث — طبيب/مريض مُستنتَجة من محتوى الكلام وسياق المحادثة =====
+   الطبيب يحتفظ باللون الفيروزي المألوف؛ المريض بلون أزرق مميّز.
+   عند تدنّي الثقة تُعرض الشارة باهتة مع "؟" لأن الإسناد استدلالي لا صوتي. */
+const SPEAKERS: Record<Speaker, { ar: string; en: string; bg: string; fg: string; dot: string }> = {
+  doctor: { ar: "الطبيب", en: "Doctor", bg: "#EAF6F7", fg: "#0A5C64", dot: "#0E7C86" },
+  patient: { ar: "المريض", en: "Patient", bg: "rgba(42,111,151,.12)", fg: "#2A6F97", dot: "#2A6F97" },
+};
+
+export function SpeakerBadge({ speaker, confidence }: { speaker?: Speaker; confidence?: number }) {
+  const { L } = useLang();
+  if (speaker === undefined) {
+    // مقطع مؤقت (partial) لا يزال يُبثّ — لم يُسنَد بعد
+    return <span className="badge" style={{ background: "#F0F4F5", color: "#5B7280" }}>{L("كلام", "Speech")}</span>;
+  }
+  const meta = SPEAKERS[speaker];
+  const uncertain = confidence !== undefined && confidence < 0.62;
+  return (
+    <span
+      className="badge"
+      style={{ background: meta.bg, color: meta.fg, opacity: uncertain ? 0.72 : 1, display: "inline-flex", alignItems: "center", gap: 5 }}
+      title={uncertain ? L("إسناد مبدئي — راجعه في نص المحادثة", "Tentative attribution — review in the transcript") : undefined}
+    >
+      <span style={{ width: 6, height: 6, borderRadius: "50%", background: meta.dot, display: "inline-block", flex: "0 0 auto" }} />
+      {L(meta.ar, meta.en)}{uncertain ? " ؟" : ""}
+    </span>
+  );
 }
 
 /* ===== التوست — رسالة واحدة تختفي بعد 3000ms ===== */

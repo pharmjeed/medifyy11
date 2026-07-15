@@ -116,6 +116,9 @@ def test_websocket_transcribe_protocol(client, doctor_token):
             elif message["type"] == "final":
                 got_final = True
                 assert "t0" in message and "t1" in message and message["segment_id"]
+                # إسناد المتحدث يُبثّ مع كل مقطع نهائي
+                assert message["speaker"] in ("doctor", "patient")
+                assert 0.0 <= message["speaker_confidence"] <= 1.0
         assert got_partial and got_final
 
         # فجوة تسلسل → الخادم يطلب الإعادة من آخر مؤكد (NFR-09)

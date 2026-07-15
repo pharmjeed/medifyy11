@@ -188,14 +188,15 @@ def recording_stop(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB, body: Recording
     # إن لم يصل تفريغ عبر WS (تعطل P1) نبني transcript فارغاً بعلامة انقطاع
     transcript = db.execute(select(Transcript).where(Transcript.visit_id == visit.id)).scalar_one_or_none()
     if transcript is None:
+        from ...pipelines.speaker import attribute_segments
         from ...pipelines.stt import MOCK_DIALOGUE
         db.add(Transcript(
             visit_id=visit.id,
             facility_id=ctx.facility_id,
-            content_json={"segments": [
+            content_json={"segments": attribute_segments([
                 {"id": f"s-{i}", "text": text, "t0": i * 4.0, "t1": i * 4.0 + 3.5}
                 for i, text in enumerate(MOCK_DIALOGUE)
-            ]},
+            ])},
             language_stats={"ar": 0.9, "en": 0.1},
         ))
         db.flush()
