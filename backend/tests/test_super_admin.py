@@ -11,7 +11,7 @@ def sa_token(client) -> str:
     response = client.post("/api/v1/sa/auth/login", json={"username": "owner", "password": "Owner@12345"})
     assert response.status_code == 200, response.text
     body = response.json()["data"]
-    assert body["admin"]["role"] == "super_admin"
+    assert body["admin"]["role"] == "owner"  # الدرجة (DOC-20 §١.٢) — النطاق scope=platform في الرمز
     return body["access_token"]
 
 
@@ -225,3 +225,177 @@ def test_all_invoices_listing_with_facility_name(client, sa_token):
     assert len(rows) >= 1
     assert all(row["status"] == "paid" for row in rows)
     assert all(row["facility_name"] for row in rows)
+
+
+# ═══ الحوكمة — الدرجات الخمس (DOC-20 §١.٢) ═══
+
+def _sa_login(client, username: str, password: str, totp_code: str | None = None) -> str:
+    body = {"username": username, "password": password}
+    if totp_code is not None:
+        body["totp_code"] = totp_code
+    response = client.post("/api/v1/sa/auth/login", json=body)
+    assert response.status_code == 200, response.text
+    return response.json()["data"]["access_token"]
+
+
+@pytest.fixture(scope="module")
+def finance_token(client, sa_token) -> str:
+    created = client.post("/api/v1/sa/admins", headers=auth(sa_token), json={
+        "username": "fin.test", "full_name": "محاسب المنصة", "password": "Finance@12345",
+        "role": "finance",
+    })
+    assert created.status_code == 201, created.text
+    return _sa_login(client, "fin.test", "Finance@12345")
+
+
+def test_me_includes_role(client, sa_token):
+    me = client.get("/api/v1/sa/me", headers=auth(sa_token)).json()["data"]
+    assert me["role"] == "owner"
+    assert me["totp_enabled"] is False
+
+
+def test_finance_grade_limits(client, sa_token, finance_token):
+    """finance: فواتير فقط — لا حالة منشأة ولا مستخدمين ولا باقات ولا حسابات."""
+    fid = client.get("/api/v1/sa/facilities?q=الشفاء", headers=auth(sa_token)).json()["data"][0]["id"]
+
+    # قراءة مسموحة
+    assert client.get("/api/v1/sa/overview", headers=auth(finance_token)).status_code == 200
+    assert client.get(f"/api/v1/sa/facilities/{fid}", headers=auth(finance_token)).status_code == 200
+
+    # كتابات محظورة
+    for method, path, body in [
+        ("PATCH", f"/api/v1/sa/facilities/{fid}", {"status": "suspended"}),
+        ("PATCH", f"/api/v1/sa/facilities/{fid}/subscription", {"seats_total": 10}),
+        ("POST", "/api/v1/sa/plans", {"code": "x-plan", "name_ar": "تجريبية", "name_en": "XPlan", "seat_price_sar": "1.00"}),
+        ("GET", "/api/v1/sa/admins", None),
+    ]:
+        response = client.request(method, path, headers=auth(finance_token), json=body)
+        assert response.status_code == 403, f"{method} {path}: {response.text}"
+        assert response.json()["error"]["code"] == "MDF-4031"
+
+    # إصدار فاتورة مسموح للمالية
+    issued = client.post(f"/api/v1/sa/facilities/{fid}/invoices", headers=auth(finance_token), json={"seats": 1})
+    assert issued.status_code == 201
+    voided = client.patch(f"/api/v1/sa/invoices/{issued.json()['data']['id']}",
+                          headers=auth(finance_token), json={"status": "void"})
+    assert voided.status_code == 200
+
+
+def test_last_owner_protection(client, sa_token):
+    """MDF-4229: لا تخفيض/تعطيل لآخر مالك فعّال."""
+    owner_id = next(
+        a["id"] for a in client.get("/api/v1/sa/admins", headers=auth(sa_token)).json()["data"]
+        if a["username"] == "owner"
+    )
+    for body in [{"role": "ops"}, {"is_active": False}]:
+        response = client.patch(f"/api/v1/sa/admins/{owner_id}", headers=auth(sa_token), json=body)
+        assert response.status_code == 422, response.text
+        assert response.json()["error"]["code"] == "MDF-4229"
+
+
+def test_admin_lifecycle_and_audit_trail(client, sa_token):
+    created = client.post("/api/v1/sa/admins", headers=auth(sa_token), json={
+        "username": "ops.test", "full_name": "مشغّل المنصة", "password": "Operate@12345",
+        "role": "ops",
+    })
+    assert created.status_code == 201
+    admin_id = created.json()["data"]["id"]
+
+    # ops يقدر يعدّل منشأة لكن لا ينشئ باقة
+    ops_token = _sa_login(client, "ops.test", "Operate@12345")
+    fid = client.get("/api/v1/sa/facilities?q=النخبة", headers=auth(sa_token)).json()["data"][0]["id"]
+    assert client.patch(f"/api/v1/sa/facilities/{fid}", headers=auth(ops_token),
+                        json={"name": "مستشفى النخبة التخصصي"}).status_code == 200
+    assert client.post("/api/v1/sa/plans", headers=auth(ops_token),
+                       json={"code": "op-x", "name_ar": "تجريبية", "name_en": "OpsPlan", "seat_price_sar": "1.00"}).status_code == 403
+
+    # تعطيل الحساب ثم رفض دخوله
+    disabled = client.patch(f"/api/v1/sa/admins/{admin_id}", headers=auth(sa_token), json={"is_active": False})
+    assert disabled.status_code == 200
+    login = client.post("/api/v1/sa/auth/login", json={"username": "ops.test", "password": "Operate@12345"})
+    assert login.status_code == 403  # MDF-4013
+
+    # السجل الموحّد التقط الأفعال
+    audit_rows = client.get("/api/v1/sa/audit?action=sa.admin", headers=auth(sa_token)).json()["data"]
+    actions = {row["action"] for row in audit_rows}
+    assert "sa.admin_created" in actions
+    assert "sa.admin_updated" in actions
+    assert all(row["actor"] for row in audit_rows)
+
+
+def test_platform_audit_filters(client, sa_token):
+    fid = client.get("/api/v1/sa/facilities?q=الشفاء", headers=auth(sa_token)).json()["data"][0]["id"]
+    rows = client.get(f"/api/v1/sa/audit?facility_id={fid}", headers=auth(sa_token)).json()["data"]
+    assert len(rows) >= 1
+    assert all(row["facility_id"] == fid for row in rows)
+    assert all(row["facility_name"] for row in rows)
+
+
+# ═══ المصادقة الثنائية 2FA (DOC-20 §١.٣) ═══
+
+def _totp_code(secret: str) -> str:
+    import time
+
+    from app.totp import _hotp
+    return _hotp(secret, int(time.time() // 30))
+
+
+def test_2fa_full_lifecycle(client, sa_token):
+    """setup → enable → login يتطلب رمزاً → recovery يعمل → reauth للإجراءات الحساسة → disable."""
+    # حساب مخصص كي لا يؤثر على جلسات بقية الاختبارات
+    created = client.post("/api/v1/sa/admins", headers=auth(sa_token), json={
+        "username": "sec.test", "full_name": "أمن المنصة", "password": "Secure@12345",
+        "role": "owner",
+    })
+    assert created.status_code == 201
+    token = _sa_login(client, "sec.test", "Secure@12345")
+
+    setup = client.post("/api/v1/sa/me/2fa/setup", headers=auth(token))
+    assert setup.status_code == 200
+    secret = setup.json()["data"]["secret"]
+    assert setup.json()["data"]["otpauth_uri"].startswith("otpauth://totp/")
+
+    # تفعيل برمز خاطئ يرفض
+    bad = client.post("/api/v1/sa/me/2fa/enable", headers=auth(token), json={"code": "000000"})
+    assert bad.status_code == 401
+    assert bad.json()["error"]["code"] == "MDF-4015"
+
+    enabled = client.post("/api/v1/sa/me/2fa/enable", headers=auth(token), json={"code": _totp_code(secret)})
+    assert enabled.status_code == 200
+    recovery_codes = enabled.json()["data"]["recovery_codes"]
+    assert len(recovery_codes) == 8
+
+    # الدخول بلا رمز → MDF-4015 · برمز صحيح → ينجح
+    no_code = client.post("/api/v1/sa/auth/login", json={"username": "sec.test", "password": "Secure@12345"})
+    assert no_code.status_code == 401
+    assert no_code.json()["error"]["details"].get("totp_required") is True
+    token2 = _sa_login(client, "sec.test", "Secure@12345", _totp_code(secret))
+
+    # إعادة المصادقة للإجراء الحساس: تغيير سعر بلا ترويسة → MDF-4015، بها → ينجح
+    plan_id = next(p["id"] for p in client.get("/api/v1/sa/plans", headers=auth(token2)).json()["data"]
+                   if p["code"] == "monthly")
+    no_reauth = client.patch(f"/api/v1/sa/plans/{plan_id}", headers=auth(token2),
+                             json={"seat_price_sar": "450.00"})
+    assert no_reauth.status_code == 401
+    assert no_reauth.json()["error"]["details"].get("reason") == "reauth_required"
+    with_reauth = client.patch(f"/api/v1/sa/plans/{plan_id}",
+                               headers={**auth(token2), "X-SA-Reauth": _totp_code(secret)},
+                               json={"seat_price_sar": "450.00"})
+    assert with_reauth.status_code == 200
+    assert with_reauth.json()["data"]["seat_price_sar"] == "450.00"
+    # إرجاع السعر
+    client.patch(f"/api/v1/sa/plans/{plan_id}",
+                 headers={**auth(token2), "X-SA-Reauth": _totp_code(secret)},
+                 json={"seat_price_sar": "400.00"})
+
+    # رمز استرداد يدخل مرة واحدة فقط
+    token3 = _sa_login(client, "sec.test", "Secure@12345", recovery_codes[0])
+    reused = client.post("/api/v1/sa/auth/login", json={
+        "username": "sec.test", "password": "Secure@12345", "totp_code": recovery_codes[0],
+    })
+    assert reused.status_code == 401
+
+    # تعطيل 2FA برمز حي
+    disabled = client.post("/api/v1/sa/me/2fa/disable", headers=auth(token3), json={"code": _totp_code(secret)})
+    assert disabled.status_code == 200
+    _sa_login(client, "sec.test", "Secure@12345")  # يدخل بلا رمز بعد التعطيل

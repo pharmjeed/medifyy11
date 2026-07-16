@@ -14,8 +14,10 @@ def test_health(client):
     assert response.json()["data"]["status"] == "ok"
 
 
-def test_mdf_catalog_is_exactly_22():
-    assert len(MDF_CATALOG) == 22
+def test_mdf_catalog_is_exactly_24():
+    """DOC-13 v1.2 — 22 + رمزا DOC-20 المعتمدين (MDF-4015 2FA · MDF-4229 آخر مالك)."""
+    assert len(MDF_CATALOG) == 24
+    assert "MDF-4015" in MDF_CATALOG and "MDF-4229" in MDF_CATALOG
     for code, (status, ar, en) in MDF_CATALOG.items():
         assert code.startswith("MDF-")
         assert ar and en  # ثنائية اللغة إلزامية

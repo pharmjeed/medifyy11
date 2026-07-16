@@ -15,7 +15,7 @@ from .clinical import (
     UploadJob,
     Visit,
 )
-from .platform import Plan, PlatformAdmin
+from .platform import Plan, PlatformAdmin, PlatformAuditLog
 from .system import AuditLog, Notification
 from .tenancy import (
     Clinic,
@@ -37,5 +37,5 @@ __all__ = [
     "Transcript", "Summary", "SummarySection", "GuidanceItem", "EditEvent",
     "Approval", "UploadJob", "UploadAttempt",
     "AuditLog", "Notification",
-    "PlatformAdmin", "Plan",
+    "PlatformAdmin", "Plan", "PlatformAuditLog",
 ]

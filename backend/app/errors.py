@@ -1,4 +1,5 @@
-"""رموز الأخطاء MDF — حصرياً الـ22 من DOC-13 v1.1. لا يُخترع رمز هنا؛ يُضاف في الوثيقة أولاً."""
+"""رموز الأخطاء MDF — حصرياً الـ24 من DOC-13 v1.2 (22 + رمزا DOC-20 المعتمدين 2026-07-16).
+لا يُخترع رمز هنا؛ يُضاف في الوثيقة أولاً."""
 from __future__ import annotations
 
 from typing import Any
@@ -12,6 +13,7 @@ MDF_CATALOG: dict[str, tuple[int, str, str]] = {
     "MDF-4041": (404, "المورد غير موجود أو خارج نطاق رؤيتك.", "Resource not found or outside your visibility scope."),
     "MDF-4013": (403, "الحساب معطّل أو المنشأة معلّقة — تواصل مع الأدمن أو سدد الفواتير المستحقة.", "Account disabled or facility suspended — contact your admin or settle due invoices."),
     "MDF-4014": (401, "رابط استعادة كلمة المرور غير صالح أو منتهٍ أو مستخدم.", "Password reset link is invalid, expired, or already used."),
+    "MDF-4015": (401, "المصادقة الثنائية مطلوبة أو الرمز غير صحيح.", "Two-factor authentication required or the code is incorrect."),
     # ٢ — قواعد العمل (42xx)
     "MDF-4221": (422, "لا مقاعد متاحة — وسّع الاشتراك أولاً.", "No seats available — expand the subscription first."),
     "MDF-4222": (422, "لا يمكن الاعتماد — توجد إرشادات معلقة يجب حسمها أولاً.", "Approval blocked — pending guidance items must be resolved first."),
@@ -21,6 +23,7 @@ MDF_CATALOG: dict[str, tuple[int, str, str]] = {
     "MDF-4226": (422, "لا يمكن تعديل زيارة معتمدة.", "Approved visits cannot be modified."),
     "MDF-4227": (422, "الإلغاء غير مسموح — الزيارة تجاوزت مرحلة التسجيل.", "Cancellation not allowed — visit is past the recording stage."),
     "MDF-4228": (422, "فشلت عملية السداد لدى مزود الدفع.", "Payment failed at the payment provider."),
+    "MDF-4229": (422, "لا يمكن تعطيل أو تخفيض آخر حساب مالك فعّال للمنصة.", "The last active platform owner account cannot be disabled or downgraded."),
     "MDF-4291": (429, "تجاوزت حد المعدل — أعد المحاولة بعد قليل.", "Rate limit exceeded — retry shortly."),
     # ٣ — المعالجة والتكامل (50xx)
     "MDF-5031": (500, "انقطاع خط التفريغ الفوري.", "Live transcription pipeline interrupted."),
@@ -32,7 +35,7 @@ MDF_CATALOG: dict[str, tuple[int, str, str]] = {
     "MDF-5001": (500, "خطأ داخلي غير مصنّف.", "Unclassified internal error."),
 }
 
-assert len(MDF_CATALOG) == 22, "DOC-13 v1.1: 22 رمزاً لا غير"
+assert len(MDF_CATALOG) == 24, "DOC-13 v1.2: 24 رمزاً لا غير (22 + MDF-4015/4229 من DOC-20)"
 
 
 class MedifyError(Exception):

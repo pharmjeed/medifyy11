@@ -1,6 +1,7 @@
 "use client";
 
-/** باقات المنصة — إنشاء وتعديل الأسعار (تسري على الفواتير اللاحقة فقط) وإيقاف الباقات. */
+/** تسعير الدكتور (W-SA-05) — تكلفة كل دكتور لكل دورة فوترة، يحددها مالك المنصة (DOC-20 §٠.١ تعديل ٢).
+ *  تغيير السعر إجراء حسّاس: يطلب رمز مصادقة حياً عند تفعيل 2FA، ويسري على الفواتير اللاحقة فقط. */
 
 import { useCallback, useEffect, useState } from "react";
 import { SaShell } from "@/components/SaShell";
@@ -9,9 +10,23 @@ import { ApiError } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
 import type { Lang } from "@/lib/i18n";
 import { saApi } from "@/lib/sa";
+import type { SaApiOptions } from "@/lib/sa";
 import type { SaPlan } from "@/lib/types";
 
 type LFn = (ar: string, en: string) => string;
+
+/** نداء حسّاس: عند طلب الخادم إعادة مصادقة يسأل عن رمز حي ويعيد المحاولة مرة واحدة. */
+async function saSensitive<T>(L: LFn, path: string, options: SaApiOptions) {
+  try {
+    return await saApi<T>(path, options);
+  } catch (err) {
+    if (err instanceof ApiError && err.code === "MDF-4015" && err.details["reason"] === "reauth_required") {
+      const code = window.prompt(L("إجراء حسّاس — أدخل رمز المصادقة الحالي:", "Sensitive action — enter your current authenticator code:"));
+      if (code) return await saApi<T>(path, { ...options, reauthCode: code });
+    }
+    throw err;
+  }
+}
 
 const COLS = ".9fr 1.2fr 1fr .9fr .9fr .7fr .9fr";
 
@@ -45,18 +60,18 @@ function PlanModal({ plan, onClose, onDone }: {
     setError(null);
     try {
       if (plan === null) {
-        await saApi("/plans", {
+        await saSensitive(L, "/plans", {
           method: "POST",
           body: { code, name_ar: nameAr, name_en: nameEn, seat_price_sar: price, billing_cycle: cycle },
         });
-        toast(L(`أُنشئت الباقة ${code}`, `Plan ${code} created`));
+        toast(L(`أُنشئت دورة التسعير ${code}`, `Pricing cycle ${code} created`));
       } else {
-        await saApi(`/plans/${plan.id}`, {
+        await saSensitive(L, `/plans/${plan.id}`, {
           method: "PATCH",
           body: { name_ar: nameAr, name_en: nameEn, seat_price_sar: price },
         });
-        toast(L(`حُدّثت الباقة ${plan.code} — السعر الجديد يسري على الفواتير اللاحقة`,
-                `Plan ${plan.code} updated — the new price applies to future invoices`));
+        toast(L(`حُدّثت تكلفة الدكتور في ${plan.code} — تسري على الفواتير اللاحقة فقط`,
+                `Doctor cost updated for ${plan.code} — applies to future invoices only`));
       }
       await onDone();
     } catch (err) {
@@ -67,7 +82,7 @@ function PlanModal({ plan, onClose, onDone }: {
   };
 
   return (
-    <Modal title={plan === null ? L("باقة جديدة", "New plan") : L(`تعديل الباقة ${plan.code}`, `Edit plan ${plan.code}`)} onClose={onClose}>
+    <Modal title={plan === null ? L("دورة تسعير جديدة", "New pricing cycle") : L(`تعديل ${plan.code}`, `Edit ${plan.code}`)} onClose={onClose}>
       <form onSubmit={(event) => { event.preventDefault(); void submit(); }}>
         {plan === null ? (
           <>
@@ -83,7 +98,7 @@ function PlanModal({ plan, onClose, onDone }: {
         ) : null}
         <Field label={L("الاسم بالعربية", "Arabic name")} value={nameAr} onChange={(event) => setNameAr(event.target.value)} required minLength={2} />
         <Field label={L("الاسم بالإنجليزية", "English name")} ltr value={nameEn} onChange={(event) => setNameEn(event.target.value)} required minLength={2} />
-        <Field label={L("سعر المقعد (SAR — قبل الضريبة)", "Seat price (SAR — before VAT)")} ltr type="number" min={0} step="0.01"
+        <Field label={L("تكلفة الدكتور (SAR — قبل الضريبة)", "Cost per doctor (SAR — before VAT)")} ltr type="number" min={0} step="0.01"
           value={price} onChange={(event) => setPrice(event.target.value)} required />
         {error !== null ? <p style={{ color: "#C0392B", fontSize: 12.5, fontWeight: 700, margin: "10px 0 0" }}>{error}</p> : null}
         <button type="submit" className="btn" style={{ width: "100%", marginTop: 14 }} disabled={busy}>
@@ -133,13 +148,13 @@ function PlansInner() {
   return (
     <>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-        <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0, flex: 1 }}>{L("كتالوج الباقات", "Plan catalog")}</h2>
-        <button className="btn h40" onClick={() => setEditing("new")}>{L("+ باقة جديدة", "+ New plan")}</button>
+        <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0, flex: 1 }}>{L("تكلفة الدكتور لكل دورة فوترة", "Cost per doctor by billing cycle")}</h2>
+        <button className="btn h40" onClick={() => setEditing("new")}>{L("+ دورة تسعير جديدة", "+ New pricing cycle")}</button>
       </div>
       <div className="grid-table">
         <div className="grid-head" style={{ gridTemplateColumns: COLS }}>
           <div>{L("الرمز", "Code")}</div><div>{L("الاسم", "Name")}</div>
-          <div>{L("سعر المقعد", "Seat price")}</div><div>{L("الدورة", "Cycle")}</div>
+          <div>{L("تكلفة الدكتور", "Cost / doctor")}</div><div>{L("الدورة", "Cycle")}</div>
           <div>{L("منشآت عليها", "Facilities on it")}</div><div>{L("الحالة", "Status")}</div><div>{L("إجراءات", "Actions")}</div>
         </div>
         {loading ? (
@@ -170,8 +185,8 @@ function PlansInner() {
         )}
       </div>
       <p style={{ fontSize: 12.5, color: "#5B7280", margin: "10px 0 0" }}>
-        {L("الفاتورة = عدد الدكاترة النشطين × سعر المقعد + ضريبة 15% مفصولة · تعديل السعر لا يمس الفواتير الصادرة.",
-           "Invoice = active doctors × seat price + itemized 15% VAT · price changes never touch issued invoices.")}
+        {L("الفاتورة = عدد الدكاترة النشطين × تكلفة الدكتور + ضريبة 15% مفصولة · تعديل التكلفة لا يمس الفواتير الصادرة ويظهر فوراً في صفحة تسجيل المنشآت.",
+           "Invoice = active doctors × cost per doctor + itemized 15% VAT · cost changes never touch issued invoices and appear immediately on the facility signup page.")}
       </p>
       {editing !== null ? (
         <PlanModal plan={editing === "new" ? null : editing} onClose={() => setEditing(null)}
@@ -184,7 +199,7 @@ function PlansInner() {
 export default function SaPlansPage() {
   const { L } = useLang();
   return (
-    <SaShell title={L("الباقات", "Plans")}>
+    <SaShell title={L("تسعير الدكتور", "Doctor pricing")}>
       <main className="page-wrap narrow">
         <PlansInner />
       </main>

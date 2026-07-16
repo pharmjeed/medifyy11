@@ -43,9 +43,9 @@ def main() -> None:
         if admin is None:
             db.add(PlatformAdmin(
                 username=username, full_name=full_name, email=email,
-                password_hash=hash_password(password), is_active=True,
+                password_hash=hash_password(password), role="owner", is_active=True,
             ))
-            print(f"أُنشئ السوبر أدمن: {username}")
+            print(f"أُنشئ السوبر أدمن: {username} (درجة owner)")
         else:
             admin.full_name = full_name
             admin.email = email or admin.email

@@ -20,6 +20,7 @@ from ...models import (
     Facility,
     IntegrationConfig,
     Invoice,
+    Plan,
     SeatEvent,
     Subscription,
     User,
@@ -50,7 +51,26 @@ class RegisterFacilityIn(BaseModel):
     name: str = Field(min_length=2)
     commercial_reg: str = Field(min_length=4)
     admin: RegisterAdminIn
-    seats: int = Field(ge=1, le=500)
+    seats: int = Field(ge=1, le=500)  # عدد الدكاترة المطلوبين (تعديل مالك DOC-20 §٠.١)
+    plan: str = "monthly"             # دورة الفوترة — التكلفة من كتالوج السوبر أدمن
+
+
+@router.get("/plans")
+def list_public_plans(db: SystemDB):
+    """نقطة عامة للقراءة فقط — تكلفة الدكتور لكل دورة كما حدّدها السوبر أدمن (DOC-20 §٠.١ تعديل ٢)."""
+    plans = db.execute(
+        select(Plan).where(Plan.is_active == True).order_by(Plan.created_at)  # noqa: E712
+    ).scalars().all()
+    return ok([
+        {
+            "code": plan.code,
+            "name_ar": plan.name_ar,
+            "name_en": plan.name_en,
+            "doctor_price_sar": str(plan.seat_price_sar),
+            "billing_cycle": plan.billing_cycle,
+        }
+        for plan in plans
+    ])
 
 
 @router.post("/facilities/register", status_code=201)
@@ -61,6 +81,9 @@ def register_facility(body: RegisterFacilityIn, db: SystemDB):
     ).scalar_one_or_none()
     if exists is not None:
         raise MedifyError("MDF-4041", details={"reason": "commercial_reg_taken"})
+    plan = db.execute(select(Plan).where(Plan.code == body.plan)).scalar_one_or_none()
+    if plan is None or not plan.is_active:
+        raise MedifyError("MDF-4041", details={"reason": "plan_not_found_or_inactive"})
 
     facility = Facility(name=body.name, commercial_reg=body.commercial_reg, status="active")
     db.add(facility)
@@ -75,7 +98,7 @@ def register_facility(body: RegisterFacilityIn, db: SystemDB):
         is_active=True,
     )
     db.add(admin)
-    subscription = Subscription(facility_id=facility.id, seats_total=body.seats, plan="monthly")
+    subscription = Subscription(facility_id=facility.id, seats_total=body.seats, plan=plan.code)
     db.add(subscription)
     db.flush()
     db.add(SeatEvent(subscription_id=subscription.id, delta=body.seats, reason="expand", actor_user_id=admin.id))

@@ -7,17 +7,28 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { LangToggle, useLang } from "@/lib/i18n";
-import { clearSaSession, getSaAdmin, getSaToken, saApi } from "@/lib/sa";
-import type { SaAdmin } from "@/lib/sa";
+import { clearSaSession, getSaAdmin, getSaToken, saApi, saCan, setSaSession } from "@/lib/sa";
+import type { SaAdmin, SaRole } from "@/lib/sa";
 import { ErrorScreenProvider, ToastProvider, initials } from "./ui";
 import { Logo } from "./Shell";
 
-const SA_NAV = [
+const SA_NAV: { href: string; ar: string; en: string; cap?: string }[] = [
   { href: "/sa", ar: "نظرة المنصة", en: "Platform overview" },
   { href: "/sa/facilities", ar: "المنشآت", en: "Facilities" },
-  { href: "/sa/plans", ar: "الباقات", en: "Plans" },
+  { href: "/sa/plans", ar: "تسعير الدكتور", en: "Doctor pricing" },
   { href: "/sa/invoices", ar: "الفواتير والمدفوعات", en: "Invoices & payments" },
+  { href: "/sa/audit", ar: "سجل المنصة", en: "Platform audit" },
+  { href: "/sa/admins", ar: "حسابات المنصة", en: "Platform accounts", cap: "admins.manage" },
+  { href: "/sa/security", ar: "الأمان", en: "Security" },
 ];
+
+const ROLE_LABEL: Record<SaRole, { ar: string; en: string }> = {
+  owner: { ar: "مالك المنصة", en: "Platform owner" },
+  ops: { ar: "تشغيل", en: "Operations" },
+  finance: { ar: "مالية", en: "Finance" },
+  support: { ar: "دعم", en: "Support" },
+  read_only: { ar: "قراءة فقط", en: "Read-only" },
+};
 
 export function SaShell({ title, children }: { title: string; children: ReactNode }) {
   const [admin, setAdmin] = useState<SaAdmin | null>(null);
@@ -34,6 +45,15 @@ export function SaShell({ title, children }: { title: string; children: ReactNod
     }
     setAdmin(session);
     setChecked(true);
+    // حدّث الدرجة وحالة 2FA من الخادم (الدرجة تُحقن من القاعدة لا من الرمز — DOC-20 §١.٢)
+    void (async () => {
+      try {
+        const me = await saApi<SaAdmin>("/me");
+        setAdmin(me.data);
+        const token = getSaToken();
+        if (token) setSaSession(token, me.data);
+      } catch { /* عند انتهاء الجلسة يعيد saApi التوجيه بنفسه */ }
+    })();
   }, [router]);
 
   if (!checked || admin === null) return null;
@@ -61,7 +81,7 @@ export function SaShell({ title, children }: { title: string; children: ReactNod
               <span style={{ textAlign: "start" }}>
                 <span style={{ display: "block", fontSize: 14, fontWeight: 700, lineHeight: 1.3 }}>{admin.full_name}</span>
                 <span style={{ display: "block", fontSize: 12.5, color: "#5B7280", lineHeight: 1.3 }}>
-                  {L("مالك المنصة", "Platform owner")}
+                  {L(ROLE_LABEL[admin.role]?.ar ?? admin.role, ROLE_LABEL[admin.role]?.en ?? admin.role)}
                 </span>
               </span>
               <span className="avatar" style={{ background: "#C9A227", color: "#0F2233" }}>{initials(admin.full_name)}</span>
@@ -74,7 +94,7 @@ export function SaShell({ title, children }: { title: string; children: ReactNod
           </div>
           <nav style={{ borderTop: "1px solid #EAF6F7", background: "#fff" }} aria-label={L("تنقل المنصة", "Platform navigation")}>
             <div style={{ maxWidth: 1160, margin: "0 auto", padding: "0 20px", display: "flex", gap: 4, overflowX: "auto" }}>
-              {SA_NAV.map((item) => {
+              {SA_NAV.filter((item) => item.cap === undefined || saCan(admin, item.cap)).map((item) => {
                 const active = item.href === "/sa/facilities"
                   ? pathname === item.href || pathname.startsWith("/sa/facilities/")
                   : pathname === item.href;
@@ -90,6 +110,12 @@ export function SaShell({ title, children }: { title: string; children: ReactNod
             </div>
           </nav>
         </header>
+        {!admin.totp_enabled && pathname !== "/sa/security" ? (
+          <div style={{ background: "#FDF3E3", borderBottom: "1px solid #E8D59A", padding: "8px 20px", textAlign: "center", fontSize: 13.5 }}>
+            {L("المصادقة الثنائية غير مفعّلة لحسابك — إلزامية على الإنتاج قبل فتح الكونسول.", "Two-factor authentication is not enabled — mandatory on production before the console opens.")}{" "}
+            <Link href="/sa/security" style={{ fontWeight: 700, color: "#8A6A12" }}>{L("فعّلها الآن ←", "Enable it now →")}</Link>
+          </div>
+        ) : null}
         {children}
       </ErrorScreenProvider>
     </ToastProvider>

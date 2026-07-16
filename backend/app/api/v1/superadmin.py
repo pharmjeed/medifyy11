@@ -1,9 +1,11 @@
-"""طبقة السوبر أدمن /sa — إدارة المنصة لمالك ميديفاي (قرار مالك 2026-07-15).
+"""طبقة السوبر أدمن /sa — كونسول مالك المنصة (DOC-20 v1.1 معتمدة 2026-07-16).
 
-المبادئ:
-- محرك النظام (يتجاوز RLS) — لذلك كل استعلام يقيَّد بمعرّفات صريحة.
-- لا محتوى سريرياً أبداً — عدادات وتجميعات فقط (نفس قيد أدمن المنشأة في DOC-06).
-- كل فعل يُدوَّن في audit_logs بمنشأته مع actor_user_id=NULL وmeta.sa=اسم السوبر أدمن.
+المبادئ الحاكمة:
+- محرك النظام (يتجاوز RLS) — كل استعلام يقيَّد بمعرّفات صريحة.
+- لا محتوى سريرياً أبداً — عدادات وتجميعات فقط (نفس قيد أدمن المنشأة DOC-06).
+- حارس مزدوج: scope=platform + درجة الحساب (owner/ops/finance/support/read_only).
+- كل فعل يُدوَّن مزدوجاً: platform_audit_logs (الموحّد) + audit_logs المنشأة المعنية.
+- إعادة مصادقة TOTP (X-SA-Reauth) للإجراءات الحسّاسة عند تفعيل 2FA.
 """
 from __future__ import annotations
 
@@ -22,7 +24,7 @@ from sqlalchemy.orm import Session
 from ...audit import audit
 from ...config import get_settings
 from ...db import get_system_db
-from ...deps import SuperAuth, pagination
+from ...deps import SuperAdminContext, SuperAuth, pagination, require_cap, require_reauth
 from ...envelope import ok, paginated
 from ...errors import MedifyError
 from ...models import (
@@ -31,6 +33,7 @@ from ...models import (
     Invoice,
     Plan,
     PlatformAdmin,
+    PlatformAuditLog,
     SeatEvent,
     Subscription,
     User,
@@ -44,6 +47,13 @@ from ...security import (
     verify_password,
 )
 from ...services.billing import issue_invoice, plan_seat_price, seats_used
+from ...totp import (
+    generate_recovery_codes,
+    generate_secret,
+    hash_recovery_code,
+    otpauth_uri,
+    verify_totp,
+)
 
 router = APIRouter(prefix="/sa")
 logger = logging.getLogger("medify.sa")
@@ -54,11 +64,38 @@ SA_REFRESH_COOKIE = "medify_sa_refresh"
 SA_LOCKOUT_KEY = "__platform__"  # مفتاح قفل المحاولات — منفصل عن مفاتيح المنشآت
 
 
+def sa_audit(
+    db: Session,
+    ctx: SuperAdminContext,
+    action: str,
+    entity: str,
+    entity_id: uuid.UUID | str | None = None,
+    facility_id: uuid.UUID | None = None,
+    meta: dict | None = None,
+) -> None:
+    """التدوين المزدوج (DOC-20 §٤ W-SA-09): السجل الموحّد دائماً + سجل المنشأة إن كان الفعل عليها."""
+    db.add(PlatformAuditLog(
+        actor_admin_id=ctx.admin_id,
+        actor_username=ctx.username,
+        actor_role=ctx.role,
+        action=action,
+        facility_id=facility_id,
+        entity=entity,
+        entity_id=str(entity_id) if entity_id else None,
+        ip=ctx.ip,
+        meta_json=meta,
+        at=dt.datetime.now(dt.timezone.utc),
+    ))
+    if facility_id is not None:
+        audit(db, facility_id, action, entity, entity_id, None, {"sa": ctx.username, **(meta or {})})
+
+
 # ════════════════ المصادقة ════════════════
 
 class SaLoginIn(BaseModel):
     username: str = Field(min_length=1)
     password: str = Field(min_length=1)
+    totp_code: str | None = None  # إلزامي إن كان 2FA مفعّلاً — يقبل رمز استرداد أيضاً
 
 
 def _set_sa_refresh_cookie(response: Response, token: str) -> None:
@@ -80,12 +117,27 @@ def _admin_out(admin: PlatformAdmin) -> dict:
         "username": admin.username,
         "full_name": admin.full_name,
         "email": admin.email,
-        "role": "super_admin",
+        "role": admin.role,
+        "totp_enabled": admin.totp_enabled,
+        "is_active": admin.is_active,
+        "last_login_at": admin.last_login_at.isoformat() if admin.last_login_at else None,
+        "created_at": admin.created_at.isoformat(),
     }
 
 
+def _consume_recovery_code(admin: PlatformAdmin, code: str) -> bool:
+    """رمز استرداد يُصرف لمرة واحدة — القائمة تحمل هاشات فقط."""
+    hashes: list[str] = list(admin.recovery_codes or [])
+    hashed = hash_recovery_code(code)
+    if hashed not in hashes:
+        return False
+    hashes.remove(hashed)
+    admin.recovery_codes = hashes
+    return True
+
+
 @router.post("/auth/login")
-def sa_login(body: SaLoginIn, response: Response, db: SystemDB):
+def sa_login(body: SaLoginIn, request: Request, response: Response, db: SystemDB):
     if lockout.is_locked(SA_LOCKOUT_KEY, body.username):
         raise MedifyError("MDF-4011", details={"locked": True})
     admin = db.execute(
@@ -96,9 +148,21 @@ def sa_login(body: SaLoginIn, response: Response, db: SystemDB):
         raise MedifyError("MDF-4011")
     if not admin.is_active:
         raise MedifyError("MDF-4013")
+
+    # المصادقة الثنائية (DOC-20 §١.٣) — TOTP أو رمز استرداد لمرة واحدة
+    if admin.totp_enabled:
+        code = (body.totp_code or "").strip()
+        if not code:
+            raise MedifyError("MDF-4015", details={"totp_required": True})
+        secret = admin.totp_secret_encrypted or ""
+        if not verify_totp(secret, code) and not _consume_recovery_code(admin, code):
+            lockout.record_failure(SA_LOCKOUT_KEY, body.username)
+            raise MedifyError("MDF-4015", details={"totp_required": True})
+
     lockout.reset(SA_LOCKOUT_KEY, body.username)
+    admin.last_login_at = dt.datetime.now(dt.timezone.utc)
     _set_sa_refresh_cookie(response, create_sa_refresh_token(admin.id))
-    logger.info("sa.login username=%s", admin.username)
+    logger.info("sa.login username=%s role=%s", admin.username, admin.role)
     return ok({"access_token": create_sa_access_token(admin.id), "admin": _admin_out(admin)})
 
 
@@ -141,8 +205,209 @@ def sa_change_password(body: SaChangePasswordIn, ctx: SuperAuth, db: SystemDB):
     if not verify_password(admin.password_hash, body.current_password):
         raise MedifyError("MDF-4011")
     admin.password_hash = hash_password(body.new_password)
-    logger.info("sa.password_changed username=%s", admin.username)
+    sa_audit(db, ctx, "sa.password_changed", "platform_admin", admin.id)
     return ok({"changed": True})
+
+
+# ════════════════ المصادقة الثنائية 2FA (W-SA-12) ════════════════
+
+@router.post("/me/2fa/setup")
+def sa_2fa_setup(ctx: SuperAuth, db: SystemDB):
+    """يولّد سراً معلّقاً (لا يفعّل) — التفعيل بعد التحقق من أول رمز."""
+    admin = db.execute(select(PlatformAdmin).where(PlatformAdmin.id == ctx.admin_id)).scalar_one()
+    if admin.totp_enabled:
+        raise MedifyError("MDF-4015", details={"reason": "already_enabled"})
+    secret = generate_secret()
+    admin.totp_secret_encrypted = secret  # يُشفَّر عمودياً (EncryptedText)
+    return ok({"secret": secret, "otpauth_uri": otpauth_uri(secret, admin.username)})
+
+
+class Sa2faCodeIn(BaseModel):
+    code: str = Field(min_length=6, max_length=8)
+
+
+@router.post("/me/2fa/enable")
+def sa_2fa_enable(body: Sa2faCodeIn, ctx: SuperAuth, db: SystemDB):
+    """يتحقق من أول رمز ويفعّل — يعيد رموز الاسترداد مرة واحدة فقط."""
+    admin = db.execute(select(PlatformAdmin).where(PlatformAdmin.id == ctx.admin_id)).scalar_one()
+    if admin.totp_enabled:
+        raise MedifyError("MDF-4015", details={"reason": "already_enabled"})
+    secret = admin.totp_secret_encrypted
+    if not secret or not verify_totp(secret, body.code):
+        raise MedifyError("MDF-4015")
+    raw_codes = generate_recovery_codes()
+    admin.recovery_codes = [hash_recovery_code(c) for c in raw_codes]
+    admin.totp_enabled = True
+    sa_audit(db, ctx, "sa.2fa_enabled", "platform_admin", admin.id)
+    return ok({"enabled": True, "recovery_codes": raw_codes})
+
+
+@router.post("/me/2fa/disable")
+def sa_2fa_disable(body: Sa2faCodeIn, ctx: SuperAuth, db: SystemDB):
+    """تعطيل 2FA يتطلب رمزاً حياً — على الإنتاج سيُطالَب بالإعداد من جديد عند التالي."""
+    admin = db.execute(select(PlatformAdmin).where(PlatformAdmin.id == ctx.admin_id)).scalar_one()
+    if not admin.totp_enabled:
+        return ok({"enabled": False})
+    secret = admin.totp_secret_encrypted or ""
+    if not verify_totp(secret, body.code) and not _consume_recovery_code(admin, body.code):
+        raise MedifyError("MDF-4015")
+    admin.totp_enabled = False
+    admin.totp_secret_encrypted = None
+    admin.recovery_codes = None
+    sa_audit(db, ctx, "sa.2fa_disabled", "platform_admin", admin.id)
+    return ok({"enabled": False})
+
+
+# ════════════════ إدارة حسابات السوبر أدمن (W-SA-11 — owner حصراً) ════════════════
+
+PLATFORM_ROLES = ("owner", "ops", "finance", "support", "read_only")
+
+
+def _active_owners_count(db: Session, excluding: uuid.UUID | None = None) -> int:
+    query = select(func.count(PlatformAdmin.id)).where(
+        PlatformAdmin.role == "owner", PlatformAdmin.is_active == True  # noqa: E712
+    )
+    if excluding is not None:
+        query = query.where(PlatformAdmin.id != excluding)
+    return db.execute(query).scalar_one()
+
+
+@router.get("/admins")
+def sa_list_admins(ctx: SuperAuth, db: SystemDB):
+    require_cap(ctx, "admins.manage")
+    admins = db.execute(select(PlatformAdmin).order_by(PlatformAdmin.created_at)).scalars().all()
+    return ok([_admin_out(a) for a in admins])
+
+
+class SaAdminCreateIn(BaseModel):
+    username: str = Field(min_length=3, max_length=40, pattern=r"^[a-z0-9][a-z0-9\.\-_]*$")
+    full_name: str = Field(min_length=2)
+    email: EmailStr | None = None
+    password: str = Field(min_length=10)
+    role: Literal["owner", "ops", "finance", "support", "read_only"]
+
+
+@router.post("/admins", status_code=201)
+def sa_create_admin(body: SaAdminCreateIn, ctx: SuperAuth, request: Request, db: SystemDB):
+    require_cap(ctx, "admins.manage")
+    require_reauth(ctx, request)
+    duplicate = db.execute(
+        select(PlatformAdmin).where(PlatformAdmin.username == body.username)
+    ).scalar_one_or_none()
+    if duplicate is not None:
+        raise MedifyError("MDF-4041", details={"reason": "username_taken"})
+    admin = PlatformAdmin(
+        username=body.username,
+        full_name=body.full_name,
+        email=body.email,
+        password_hash=hash_password(body.password),
+        role=body.role,
+        is_active=True,
+        invited_by=ctx.admin_id,
+    )
+    db.add(admin)
+    db.flush()
+    sa_audit(db, ctx, "sa.admin_created", "platform_admin", admin.id,
+             meta={"username": body.username, "role": body.role})
+    return ok(_admin_out(admin))
+
+
+class SaAdminPatchIn(BaseModel):
+    full_name: str | None = Field(default=None, min_length=2)
+    email: EmailStr | None = None
+    role: Literal["owner", "ops", "finance", "support", "read_only"] | None = None
+    is_active: bool | None = None
+
+
+@router.patch("/admins/{admin_id}")
+def sa_patch_admin(admin_id: uuid.UUID, body: SaAdminPatchIn, ctx: SuperAuth, request: Request, db: SystemDB):
+    require_cap(ctx, "admins.manage")
+    require_reauth(ctx, request)
+    admin = db.execute(select(PlatformAdmin).where(PlatformAdmin.id == admin_id)).scalar_one_or_none()
+    if admin is None:
+        raise MedifyError("MDF-4041")
+
+    # حماية آخر مالك فعّال (MDF-4229 — DOC-20 §٤ W-SA-11)
+    losing_owner = admin.role == "owner" and admin.is_active and (
+        (body.role is not None and body.role != "owner") or body.is_active is False
+    )
+    if losing_owner and _active_owners_count(db, excluding=admin.id) == 0:
+        raise MedifyError("MDF-4229")
+
+    changes: dict[str, object] = {}
+    if body.full_name is not None:
+        admin.full_name = body.full_name
+    if body.email is not None:
+        admin.email = body.email
+    if body.role is not None and body.role != admin.role:
+        changes["role"] = {"from": admin.role, "to": body.role}
+        admin.role = body.role
+    if body.is_active is not None and body.is_active != admin.is_active:
+        changes["is_active"] = body.is_active
+        admin.is_active = body.is_active
+        admin.disabled_at = None if body.is_active else dt.datetime.now(dt.timezone.utc)
+    if changes:
+        sa_audit(db, ctx, "sa.admin_updated", "platform_admin", admin.id, meta=changes)
+    return ok(_admin_out(admin))
+
+
+@router.post("/admins/{admin_id}/reset-password")
+def sa_reset_admin_password(admin_id: uuid.UUID, ctx: SuperAuth, request: Request, db: SystemDB):
+    require_cap(ctx, "admins.manage")
+    require_reauth(ctx, request)
+    admin = db.execute(select(PlatformAdmin).where(PlatformAdmin.id == admin_id)).scalar_one_or_none()
+    if admin is None:
+        raise MedifyError("MDF-4041")
+    temp_password = "Md-" + secrets.token_urlsafe(10)
+    admin.password_hash = hash_password(temp_password)
+    sa_audit(db, ctx, "sa.admin_password_reset", "platform_admin", admin.id)
+    return ok({"temporary_password": temp_password})
+
+
+# ════════════════ سجل المنصة الموحّد (W-SA-09) ════════════════
+
+@router.get("/audit")
+def sa_platform_audit(
+    ctx: SuperAuth, db: SystemDB,
+    facility_id: str = "", action: str = "", actor: str = "",
+    page: int = 1, per_page: int = 50,
+):
+    page, per_page = pagination(page, per_page)
+    base = select(PlatformAuditLog)
+    if facility_id:
+        try:
+            base = base.where(PlatformAuditLog.facility_id == uuid.UUID(facility_id))
+        except ValueError:
+            raise MedifyError("MDF-4041", details={"reason": "bad_facility_id"})
+    if action:
+        base = base.where(PlatformAuditLog.action.ilike(f"%{action}%"))
+    if actor:
+        base = base.where(PlatformAuditLog.actor_username.ilike(f"%{actor}%"))
+    total = db.execute(select(func.count()).select_from(base.subquery())).scalar_one()
+    rows = db.execute(
+        base.order_by(PlatformAuditLog.at.desc()).offset((page - 1) * per_page).limit(per_page)
+    ).scalars().all()
+    facility_names = dict(db.execute(
+        select(Facility.id, Facility.name).where(
+            Facility.id.in_({r.facility_id for r in rows if r.facility_id})
+        )
+    ).all()) if rows else {}
+    return paginated([
+        {
+            "id": str(r.id),
+            "at": r.at.isoformat(),
+            "actor": r.actor_username,
+            "actor_role": r.actor_role,
+            "action": r.action,
+            "facility_id": str(r.facility_id) if r.facility_id else None,
+            "facility_name": facility_names.get(r.facility_id),
+            "entity": r.entity,
+            "entity_id": r.entity_id,
+            "ip": r.ip,
+            "meta": r.meta_json,
+        }
+        for r in rows
+    ], total, page, per_page)
 
 
 # ════════════════ نظرة المنصة ════════════════
@@ -346,30 +611,34 @@ class SaFacilityPatchIn(BaseModel):
 
 
 @router.patch("/facilities/{facility_id}")
-def sa_patch_facility(facility_id: uuid.UUID, body: SaFacilityPatchIn, ctx: SuperAuth, db: SystemDB):
-    """تفعيل/تعليق/أرشفة المنشأة وتعديل اسمها — الأرشفة تمنع دخول كل مستخدميها (auth.login)."""
+def sa_patch_facility(facility_id: uuid.UUID, body: SaFacilityPatchIn, ctx: SuperAuth, request: Request, db: SystemDB):
+    """تفعيل/تعليق/أرشفة المنشأة — يسري فوراً على دخول أدمنها ودكاترتها (ترابط المنصات §٠.١)."""
+    require_cap(ctx, "facilities.write")
     facility = _get_facility(db, facility_id)
     changes: dict[str, str] = {}
     if body.name is not None and body.name != facility.name:
         changes["name"] = body.name
         facility.name = body.name
     if body.status is not None and body.status != facility.status:
+        if body.status in ("suspended", "archived"):
+            require_reauth(ctx, request)  # إجراء حسّاس — DOC-20 §١.٣
         changes["status"] = body.status
         facility.status = body.status
     if changes:
-        audit(db, facility.id, "sa.facility_updated", "facility", facility.id, None,
-              {"sa": ctx.username, **changes})
+        sa_audit(db, ctx, "sa.facility_updated", "facility", facility.id,
+                 facility_id=facility.id, meta=changes)
     return ok({"id": str(facility.id), "name": facility.name, "status": facility.status})
 
 
 class SaSubscriptionPatchIn(BaseModel):
     plan_code: str | None = None
-    seats_total: int | None = Field(default=None, ge=1, le=500)
+    seats_total: int | None = Field(default=None, ge=1, le=500)  # عدد الدكاترة (§٠.١ تعديل ٢)
 
 
 @router.patch("/facilities/{facility_id}/subscription")
 def sa_patch_subscription(facility_id: uuid.UUID, body: SaSubscriptionPatchIn, ctx: SuperAuth, db: SystemDB):
-    """تغيير الباقة/المقاعد من المنصة — بلا فوترة تلقائية (الفاتورة فعل صريح من السوبر أدمن)."""
+    """تغيير دورة الفوترة/عدد الدكاترة من المنصة — بلا فوترة تلقائية (الفاتورة فعل صريح)."""
+    require_cap(ctx, "facilities.write")
     facility = _get_facility(db, facility_id)
     subscription = db.execute(
         select(Subscription).where(Subscription.facility_id == facility.id)
@@ -400,8 +669,8 @@ def sa_patch_subscription(facility_id: uuid.UUID, body: SaSubscriptionPatchIn, c
         changes["seats_delta"] = delta
 
     if changes:
-        audit(db, facility.id, "sa.subscription_updated", "subscription", subscription.id, None,
-              {"sa": ctx.username, **changes})
+        sa_audit(db, ctx, "sa.subscription_updated", "subscription", subscription.id,
+                 facility_id=facility.id, meta=changes)
     return ok({
         "plan": subscription.plan,
         "seats_total": subscription.seats_total,
@@ -423,6 +692,7 @@ class SaUserCreateIn(BaseModel):
 
 @router.post("/facilities/{facility_id}/users", status_code=201)
 def sa_create_user(facility_id: uuid.UUID, body: SaUserCreateIn, ctx: SuperAuth, db: SystemDB):
+    require_cap(ctx, "users.write")
     facility = _get_facility(db, facility_id)
     if body.role == "admin" and body.email is None:
         raise MedifyError("MDF-4041", details={"reason": "admin_email_required"})
@@ -464,8 +734,8 @@ def sa_create_user(facility_id: uuid.UUID, body: SaUserCreateIn, ctx: SuperAuth,
             select(Subscription).where(Subscription.facility_id == facility.id)
         ).scalar_one()
         db.add(SeatEvent(subscription_id=subscription.id, delta=0, reason="activate_dr", actor_user_id=None))
-    audit(db, facility.id, "sa.user_created", "user", user.id, None,
-          {"sa": ctx.username, "role": body.role, "username": body.username})
+    sa_audit(db, ctx, "sa.user_created", "user", user.id, facility_id=facility.id,
+             meta={"role": body.role, "username": body.username})
     return ok({"id": str(user.id), "username": user.username, "role": user.role})
 
 
@@ -485,7 +755,8 @@ class SaUserPatchIn(BaseModel):
 
 @router.patch("/users/{user_id}")
 def sa_patch_user(user_id: uuid.UUID, body: SaUserPatchIn, ctx: SuperAuth, db: SystemDB):
-    """تعديل/تفعيل/تعطيل أي مستخدم (أدمن أو دكتور) — تعطيل الدكتور يحرر مقعده فوراً."""
+    """تعديل/تفعيل/تعطيل أي مستخدم — تعطيل الدكتور يحرر مقعده فوراً في الطبقات الثلاث."""
+    require_cap(ctx, "users.write")
     user = _get_platform_user(db, user_id)
     if body.full_name is not None:
         user.full_name = body.full_name
@@ -512,22 +783,23 @@ def sa_patch_user(user_id: uuid.UUID, body: SaUserPatchIn, ctx: SuperAuth, db: S
                     reason="activate_dr" if body.is_active else "deactivate_dr",
                     actor_user_id=None,
                 ))
-    audit(db, user.facility_id, "sa.user_updated", "user", user.id, None,
-          {"sa": ctx.username, **body.model_dump(exclude_none=True, mode="json")})
+    sa_audit(db, ctx, "sa.user_updated", "user", user.id, facility_id=user.facility_id,
+             meta=body.model_dump(exclude_none=True, mode="json"))
     return ok({"id": str(user.id), "is_active": user.is_active})
 
 
 @router.post("/users/{user_id}/reset-password")
 def sa_reset_user_password(user_id: uuid.UUID, ctx: SuperAuth, db: SystemDB):
     """كلمة مرور مؤقتة لأي مستخدم — تُعرض مرة واحدة (نمط FR-204)."""
+    require_cap(ctx, "users.write")
     user = _get_platform_user(db, user_id)
     temp_password = "Md-" + secrets.token_urlsafe(8)
     user.password_hash = hash_password(temp_password)
-    audit(db, user.facility_id, "sa.user_password_reset", "user", user.id, None, {"sa": ctx.username})
+    sa_audit(db, ctx, "sa.user_password_reset", "user", user.id, facility_id=user.facility_id)
     return ok({"temporary_password": temp_password})
 
 
-# ════════════════ الباقات ════════════════
+# ════════════════ التسعير — تكلفة الدكتور لكل دورة (تعديل مالك §٠.١) ════════════════
 
 def _plan_out(db: Session, plan: Plan) -> dict:
     facilities_count = db.execute(
@@ -555,12 +827,14 @@ class SaPlanCreateIn(BaseModel):
     code: str = Field(min_length=2, max_length=40, pattern=r"^[a-z0-9][a-z0-9\-_]*$")
     name_ar: str = Field(min_length=2)
     name_en: str = Field(min_length=2)
-    seat_price_sar: Decimal = Field(ge=0, le=Decimal("1000000"))
+    seat_price_sar: Decimal = Field(ge=0, le=Decimal("1000000"))  # تكلفة الدكتور
     billing_cycle: Literal["monthly", "yearly"] = "monthly"
 
 
 @router.post("/plans", status_code=201)
-def sa_create_plan(body: SaPlanCreateIn, ctx: SuperAuth, db: SystemDB):
+def sa_create_plan(body: SaPlanCreateIn, ctx: SuperAuth, request: Request, db: SystemDB):
+    require_cap(ctx, "plans.write")  # owner حصراً (DOC-20 §١.٢)
+    require_reauth(ctx, request)
     duplicate = db.execute(select(Plan).where(Plan.code == body.code)).scalar_one_or_none()
     if duplicate is not None:
         raise MedifyError("MDF-4041", details={"reason": "plan_code_taken"})
@@ -574,7 +848,8 @@ def sa_create_plan(body: SaPlanCreateIn, ctx: SuperAuth, db: SystemDB):
     )
     db.add(plan)
     db.flush()
-    logger.info("sa.plan_created code=%s price=%s by=%s", plan.code, plan.seat_price_sar, ctx.username)
+    sa_audit(db, ctx, "sa.plan_created", "plan", plan.id,
+             meta={"code": plan.code, "doctor_price_sar": str(plan.seat_price_sar)})
     return ok(_plan_out(db, plan))
 
 
@@ -586,20 +861,26 @@ class SaPlanPatchIn(BaseModel):
 
 
 @router.patch("/plans/{plan_id}")
-def sa_patch_plan(plan_id: uuid.UUID, body: SaPlanPatchIn, ctx: SuperAuth, db: SystemDB):
-    """تعديل الباقة (الرمز ثابت) — تغيير السعر يسري على الفواتير اللاحقة فقط."""
+def sa_patch_plan(plan_id: uuid.UUID, body: SaPlanPatchIn, ctx: SuperAuth, request: Request, db: SystemDB):
+    """تعديل تكلفة الدكتور (الرمز ثابت) — يسري على الفواتير اللاحقة فقط."""
+    require_cap(ctx, "plans.write")
     plan = db.execute(select(Plan).where(Plan.id == plan_id)).scalar_one_or_none()
     if plan is None:
         raise MedifyError("MDF-4041")
+    changes: dict[str, object] = {}
+    if body.seat_price_sar is not None and body.seat_price_sar != plan.seat_price_sar:
+        require_reauth(ctx, request)  # تغيير سعر — إجراء حسّاس (DOC-20 §١.٣)
+        changes["doctor_price_sar"] = {"from": str(plan.seat_price_sar), "to": str(body.seat_price_sar)}
+        plan.seat_price_sar = body.seat_price_sar
     if body.name_ar is not None:
         plan.name_ar = body.name_ar
     if body.name_en is not None:
         plan.name_en = body.name_en
-    if body.seat_price_sar is not None:
-        plan.seat_price_sar = body.seat_price_sar
-    if body.is_active is not None:
+    if body.is_active is not None and body.is_active != plan.is_active:
+        changes["is_active"] = body.is_active
         plan.is_active = body.is_active
-    logger.info("sa.plan_updated code=%s by=%s", plan.code, ctx.username)
+    if changes:
+        sa_audit(db, ctx, "sa.plan_updated", "plan", plan.id, meta={"code": plan.code, **changes})
     return ok(_plan_out(db, plan))
 
 
@@ -638,7 +919,8 @@ class SaInvoiceCreateIn(BaseModel):
 
 @router.post("/facilities/{facility_id}/invoices", status_code=201)
 def sa_issue_invoice(facility_id: uuid.UUID, body: SaInvoiceCreateIn, ctx: SuperAuth, db: SystemDB):
-    """إصدار فاتورة دورة — المبلغ = عدد الدكاترة النشطين × سعر مقعد الباقة (أو عدد صريح)."""
+    """إصدار فاتورة دورة — المبلغ = عدد الدكاترة النشطين × تكلفة الدكتور (أو عدد صريح)."""
+    require_cap(ctx, "invoices.write")
     facility = _get_facility(db, facility_id)
     subscription = db.execute(
         select(Subscription).where(Subscription.facility_id == facility.id)
@@ -649,8 +931,8 @@ def sa_issue_invoice(facility_id: uuid.UUID, body: SaInvoiceCreateIn, ctx: Super
     if seats < 1:
         raise MedifyError("MDF-4221", details={"reason": "no_active_doctors"})
     invoice = issue_invoice(db, subscription, seats)
-    audit(db, facility.id, "sa.invoice_issued", "invoice", invoice.id, None,
-          {"sa": ctx.username, "seats": seats, "number": invoice.number})
+    sa_audit(db, ctx, "sa.invoice_issued", "invoice", invoice.id, facility_id=facility.id,
+             meta={"seats": seats, "number": invoice.number})
     return ok(_invoice_out(invoice, facility.name))
 
 
@@ -661,6 +943,7 @@ class SaInvoicePatchIn(BaseModel):
 @router.patch("/invoices/{invoice_id}")
 def sa_patch_invoice(invoice_id: uuid.UUID, body: SaInvoicePatchIn, ctx: SuperAuth, db: SystemDB):
     """تسوية يدوية: paid تسجل السداد وترفع التعليق إن لم تبقَ متأخرات؛ void إلغاء؛ due/overdue تصنيف."""
+    require_cap(ctx, "invoices.write")
     invoice = db.execute(select(Invoice).where(Invoice.id == invoice_id)).scalar_one_or_none()
     if invoice is None:
         raise MedifyError("MDF-4041")
@@ -673,7 +956,7 @@ def sa_patch_invoice(invoice_id: uuid.UUID, body: SaInvoicePatchIn, ctx: SuperAu
         raise MedifyError("MDF-4228", details={"reason": "void_invoice"})
 
     invoice.status = body.status
-    meta: dict[str, object] = {"sa": ctx.username, "number": invoice.number, "to": body.status}
+    meta: dict[str, object] = {"number": invoice.number, "to": body.status}
     if body.status == "paid":
         invoice.paid_at = dt.datetime.now(dt.timezone.utc)
         invoice.provider_ref = invoice.provider_ref or f"manual_{uuid.uuid4().hex[:10]}"
@@ -688,7 +971,8 @@ def sa_patch_invoice(invoice_id: uuid.UUID, body: SaInvoicePatchIn, ctx: SuperAu
         ).scalar_one()
         if facility.status == "suspended" and remaining_overdue == 0:
             facility.status = "active"
-            audit(db, facility.id, "facility.suspension_lifted", "facility", facility.id, None,
-                  {"sa": ctx.username, "invoice": invoice.number})
-    audit(db, invoice.facility_id, "sa.invoice_status_changed", "invoice", invoice.id, None, meta)
+            sa_audit(db, ctx, "facility.suspension_lifted", "facility", facility.id,
+                     facility_id=facility.id, meta={"invoice": invoice.number})
+    sa_audit(db, ctx, "sa.invoice_status_changed", "invoice", invoice.id,
+             facility_id=invoice.facility_id, meta=meta)
     return ok(_invoice_out(invoice))

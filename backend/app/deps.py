@@ -27,7 +27,29 @@ class AuthContext:
 class SuperAdminContext:
     admin_id: uuid.UUID
     username: str
+    role: str  # owner | ops | finance | support | read_only (DOC-20 §١.٢)
     admin: PlatformAdmin
+    ip: str | None = None
+
+
+# قدرات الدرجات — DOC-20 §١.٢: كل درجة أقل من التي فوقها؛ الكتالوج/الأسعار والحسابات للـowner حصراً
+GRADE_CAPS: dict[str, frozenset[str]] = {
+    "owner": frozenset({"facilities.write", "users.write", "invoices.write", "plans.write", "admins.manage", "security"}),
+    "ops": frozenset({"facilities.write", "users.write", "invoices.write"}),
+    "finance": frozenset({"invoices.write"}),
+    "support": frozenset(),
+    "read_only": frozenset(),
+}
+
+
+def require_cap(ctx: SuperAdminContext, cap: str) -> None:
+    """الحارس المزدوج (ب): الدرجة تسمح بالفعل — تُحقن من القاعدة لا من الرمز (DOC-20 §١.٢)."""
+    if cap not in GRADE_CAPS.get(ctx.role, frozenset()):
+        raise MedifyError("MDF-4031", details={"grade": ctx.role, "required": cap})
+
+
+# مسارات مسموحة قبل إتمام تفعيل 2FA (الإعداد نفسه + الهوية)
+_SA_2FA_EXEMPT_PREFIXES = ("/api/v1/sa/auth/", "/api/v1/sa/me")
 
 
 def _bearer_token(request: Request) -> str:
@@ -70,11 +92,22 @@ def doctor_only(ctx: Annotated[AuthContext, Depends(authenticated)]) -> AuthCont
     return ctx
 
 
+def _client_ip(request: Request) -> str | None:
+    forwarded = request.headers.get("X-Forwarded-For", "")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else None
+
+
 def super_admin_only(
     request: Request,
     db: Annotated[Session, Depends(get_system_db)],
 ) -> SuperAdminContext:
-    """مصادقة السوبر أدمن — محرك النظام (يتجاوز RLS)؛ ترفض رموز المنشآت (admin/doctor)."""
+    """مصادقة السوبر أدمن — محرك النظام (يتجاوز RLS)؛ ترفض رموز المنشآت (admin/doctor).
+
+    فرض 2FA (DOC-20 §١.٣): على الإنتاج لا يُفتح الكونسول قبل تفعيل TOTP —
+    تُستثنى مسارات الهوية والإعداد نفسها (/sa/auth/*, /sa/me*).
+    """
     payload = decode_token(_bearer_token(request), "access")
     if payload.get("role") != "super_admin" or payload.get("scope") != "platform":
         raise MedifyError("MDF-4031")
@@ -83,7 +116,32 @@ def super_admin_only(
     ).scalar_one_or_none()
     if admin is None or not admin.is_active:
         raise MedifyError("MDF-4013")
-    return SuperAdminContext(admin_id=admin.id, username=admin.username, admin=admin)
+
+    from .config import get_settings
+    if (
+        get_settings().environment == "production"
+        and not admin.totp_enabled
+        and not request.url.path.startswith(_SA_2FA_EXEMPT_PREFIXES)
+    ):
+        raise MedifyError("MDF-4015", details={"reason": "2fa_setup_required"})
+
+    return SuperAdminContext(
+        admin_id=admin.id, username=admin.username, role=admin.role, admin=admin, ip=_client_ip(request),
+    )
+
+
+def require_reauth(ctx: SuperAdminContext, request: Request) -> None:
+    """إعادة مصادقة للإجراءات الحسّاسة (DOC-20 §١.٣): رمز TOTP حي في ترويسة X-SA-Reauth.
+
+    تُفرض فقط عندما يكون 2FA مفعّلاً للحساب (قبل التفعيل لا معنى لها).
+    """
+    if not ctx.admin.totp_enabled:
+        return
+    from .totp import verify_totp
+    code = request.headers.get("X-SA-Reauth", "")
+    secret = ctx.admin.totp_secret_encrypted
+    if not code or not secret or not verify_totp(secret, code):
+        raise MedifyError("MDF-4015", details={"reason": "reauth_required"})
 
 
 DB = Annotated[Session, Depends(get_db)]

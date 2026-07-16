@@ -111,6 +111,7 @@ def seed_platform(db: Session) -> None:
             full_name="مالك ميديفاي",
             email="owner@medify.example.sa",
             password_hash=hash_password(SUPER_ADMIN_PASSWORD),
+            role="owner",  # الدرجة العليا — DOC-20 §١.٢
             is_active=True,
         ))
         print("seed: أُنشئ السوبر أدمن التطويري owner")

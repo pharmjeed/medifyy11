@@ -1,21 +1,27 @@
 "use client";
 
-/** الصفحة 2 — تسجيل منشأة جديدة W-002: معالج 3 خطوات (بيانات، أدمن، مقاعد) — FR-101 — ثنائية اللغة (D-30). */
+/** الصفحة 2 — تسجيل منشأة جديدة W-002: معالج 3 خطوات (بيانات، أدمن، عدد الدكاترة) — FR-101.
+ *  الاشتراك بعدد الدكاترة فقط، والتكلفة من كتالوج السوبر أدمن (تعديل مالك DOC-20 §٠.١). */
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ApiError, api } from "@/lib/api";
 import { LangToggle, useLang } from "@/lib/i18n";
 import { Logo } from "@/components/Shell";
 import { Field, SpecBadge, ToastProvider, useToast } from "@/components/ui";
 
-const MONTHLY = 499;
-const YEARLY = 5388;
+interface PublicPlan {
+  code: string;
+  name_ar: string;
+  name_en: string;
+  doctor_price_sar: string;
+  billing_cycle: "monthly" | "yearly";
+}
 
 const STEP_LABELS: readonly { ar: string; en: string }[] = [
   { ar: "بيانات المنشأة", en: "Facility details" },
   { ar: "حساب الأدمن", en: "Admin account" },
-  { ar: "المقاعد والخطة", en: "Seats & plan" },
+  { ar: "عدد الدكاترة", en: "Doctors count" },
 ];
 
 function fmt(value: number): string {
@@ -65,11 +71,28 @@ function RegisterInner() {
   const [adminEmail, setAdminEmail] = useState("");
   const [adminPassword, setAdminPassword] = useState("");
   const [seats, setSeats] = useState(3);
-  const [plan, setPlan] = useState<"yearly" | "monthly">("yearly");
+  const [plans, setPlans] = useState<PublicPlan[]>([]);
+  const [planCode, setPlanCode] = useState("monthly");
 
-  const unit = plan === "yearly" ? YEARLY : MONTHLY;
+  // تكلفة الدكتور من كتالوج السوبر أدمن — لا أسعار مثبّتة في الواجهة (DOC-20 §٠.١)
+  useEffect(() => {
+    void (async () => {
+      try {
+        const body = await api<PublicPlan[]>("/plans");
+        setPlans(body.data);
+        if (body.data.length > 0 && !body.data.some((p) => p.code === "monthly")) {
+          setPlanCode(body.data[0]!.code);
+        }
+      } catch { /* تُعرض البطاقات فارغة والتسجيل يستخدم monthly الافتراضي */ }
+    })();
+  }, []);
+
+  const selectedPlan = plans.find((p) => p.code === planCode);
+  const unit = selectedPlan ? Number(selectedPlan.doctor_price_sar) : 0;
   const subtotal = seats * unit;
   const vat = subtotal * 0.15;
+
+  const clampSeats = (value: number) => Math.min(500, Math.max(1, Math.round(value)));
 
   const submit = async () => {
     setBusy(true);
@@ -82,6 +105,7 @@ function RegisterInner() {
           commercial_reg: commercialReg,
           admin: { full_name: adminName, username: adminUsername, email: adminEmail, password: adminPassword },
           seats,
+          plan: planCode,
         },
       });
       setDone(true);
@@ -100,8 +124,8 @@ function RegisterInner() {
         {L("تسجيل منشأة جديدة", "Register a new facility")} <SpecBadge id="W-002" />
       </h1>
       <p style={{ color: "#5B7280", fontSize: 14, margin: 0 }}>
-        {L("الاشتراك بالمقعد لكل دكتور — يحدده الأدمن الآن ويوسّعه لاحقاً.",
-           "Per-seat subscription for each doctor — set by the admin now, expandable later.")}
+        {L("الاشتراك بعدد الدكاترة — تحدد العدد الآن وتوسّعه أو تقلّصه لاحقاً.",
+           "Subscription by doctor count — set the number now, expand or reduce it later.")}
       </p>
 
       <div className="card pad24" style={{ width: "min(620px,94vw)", marginTop: 16 }}>
@@ -110,8 +134,8 @@ function RegisterInner() {
             <div style={{ width: 56, height: 56, borderRadius: 999, background: "#E8F6EE", display: "inline-flex", alignItems: "center", justifyContent: "center", color: "#2E9E5B", fontSize: 24, fontWeight: 800 }}>✓</div>
             <h2 style={{ fontSize: 18, fontWeight: 700, color: "#0A5C64", margin: "12px 0 6px" }}>{L("أُنشئت المنشأة بنجاح", "Facility created successfully")}</h2>
             <p style={{ fontSize: 14, color: "#5B7280" }}>
-              {L("حُجزت", "Reserved")} <span className="num">{seats}</span> {L("مقاعد، وأُنشئ حساب الأدمن. الخطوة التالية: الدخول ثم إنشاء العيادات وحسابات الدكاترة.",
-                "seats and created the admin account. Next: sign in, then create clinics and doctor accounts.")}
+              {L("حُجز اشتراك", "Reserved a subscription for")} <span className="num">{seats}</span> {L("دكتوراً، وأُنشئ حساب الأدمن. الخطوة التالية: الدخول ثم إنشاء العيادات وحسابات الدكاترة.",
+                "doctors and created the admin account. Next: sign in, then create clinics and doctor accounts.")}
             </p>
             <Link href="/login" className="btn big" style={{ textDecoration: "none", display: "inline-flex", marginTop: 8 }}>{L("الذهاب للدخول", "Go to sign in")}</Link>
           </div>
@@ -140,31 +164,37 @@ function RegisterInner() {
             ) : null}
             {step === 3 ? (
               <>
-                <label className="field-label">{L("عدد مقاعد الدكاترة الأولي", "Initial doctor seat count")}</label>
-                <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-                  <button type="button" aria-label={L("إنقاص", "Decrease")} onClick={() => setSeats((value) => Math.max(1, value - 1))}
+                <label className="field-label" htmlFor="doctors-count">{L("كم دكتوراً تحتاج؟ (اكتب العدد أو استخدم العدّاد)", "How many doctors do you need? (type or use the counter)")}</label>
+                <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+                  <button type="button" aria-label={L("إنقاص", "Decrease")} onClick={() => setSeats((value) => clampSeats(value - 1))}
                     style={{ width: 44, height: 44, border: "1.5px solid #0E7C86", borderRadius: 10, background: "#fff", color: "#0A5C64", fontSize: 18, fontWeight: 700, cursor: "pointer" }}>−</button>
-                  <span className="num" style={{ fontSize: 28, fontWeight: 800, color: "#0A5C64", minWidth: 40, textAlign: "center" }}>{seats}</span>
-                  <button type="button" aria-label={L("زيادة", "Increase")} onClick={() => setSeats((value) => Math.min(50, value + 1))}
+                  <input id="doctors-count" className="field num" type="number" min={1} max={500} value={seats} dir="ltr"
+                    style={{ margin: 0, width: 96, textAlign: "center", fontSize: 24, fontWeight: 800, color: "#0A5C64", height: 44 }}
+                    onChange={(event) => setSeats(clampSeats(Number(event.target.value) || 1))} />
+                  <button type="button" aria-label={L("زيادة", "Increase")} onClick={() => setSeats((value) => clampSeats(value + 1))}
                     style={{ width: 44, height: 44, border: "1.5px solid #0E7C86", borderRadius: 10, background: "#fff", color: "#0A5C64", fontSize: 18, fontWeight: 700, cursor: "pointer" }}>+</button>
-                  <span style={{ fontSize: 12.5, color: "#5B7280" }}>{L("كل دكتور نشط يستهلك مقعداً (FR-202)", "Each active doctor consumes a seat (FR-202)")}</span>
+                  <span style={{ fontSize: 12.5, color: "#5B7280" }}>{L("كل دكتور نشط يستهلك اشتراكاً (FR-202)", "Each active doctor consumes one subscription (FR-202)")}</span>
                 </div>
-                <label className="field-label">{L("الخطة", "Plan")}</label>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                  <button type="button" className={plan === "yearly" ? "select-card selected" : "select-card"}
-                    style={plan === "yearly" ? { background: "#EAF6F7" } : undefined} onClick={() => setPlan("yearly")}>
-                    <strong>{L("سنوية", "Yearly")}</strong> <span className="badge success">{L("وفر 10%", "Save 10%")}</span>
-                    <div style={{ fontSize: 12.5, color: "#5B7280", marginTop: 4 }}><span className="num">5,388</span> {L("ر.س / مقعد / سنة", "SAR / seat / year")}</div>
-                  </button>
-                  <button type="button" className={plan === "monthly" ? "select-card selected" : "select-card"}
-                    style={plan === "monthly" ? { background: "#EAF6F7" } : undefined} onClick={() => setPlan("monthly")}>
-                    <strong>{L("شهرية", "Monthly")}</strong>
-                    <div style={{ fontSize: 12.5, color: "#5B7280", marginTop: 4 }}><span className="num">499</span> {L("ر.س / مقعد / شهر", "SAR / seat / month")}</div>
-                  </button>
-                </div>
+                <label className="field-label">{L("دورة الفوترة", "Billing cycle")}</label>
+                {plans.length === 0 ? (
+                  <div className="grid-empty">{L("جارٍ تحميل التسعير…", "Loading pricing…")}</div>
+                ) : (
+                  <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.min(plans.length, 2)}, 1fr)`, gap: 10 }}>
+                    {plans.map((p) => (
+                      <button key={p.code} type="button" className={planCode === p.code ? "select-card selected" : "select-card"}
+                        style={planCode === p.code ? { background: "#EAF6F7" } : undefined} onClick={() => setPlanCode(p.code)}>
+                        <strong>{lang === "ar" ? p.name_ar : p.name_en}</strong>
+                        <div style={{ fontSize: 12.5, color: "#5B7280", marginTop: 4 }}>
+                          <span className="num">{fmt(Number(p.doctor_price_sar))}</span>{" "}
+                          {p.billing_cycle === "yearly" ? L("ر.س / دكتور / سنة", "SAR / doctor / year") : L("ر.س / دكتور / شهر", "SAR / doctor / month")}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
                 <div className="sub-box" style={{ marginTop: 14, fontSize: 14 }}>
                   <div style={{ display: "flex", justifyContent: "space-between" }}>
-                    <span><span className="num">{seats}</span> {L("مقاعد ×", "seats ×")} <span className="num">{fmt(unit)}</span> ({plan === "yearly" ? L("سنوي", "yearly") : L("شهري", "monthly")})</span>
+                    <span><span className="num">{seats}</span> {L("دكتور ×", "doctors ×")} <span className="num">{fmt(unit)}</span></span>
                     <bdi>{fmt(subtotal)} SAR</bdi>
                   </div>
                   <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4 }}>
@@ -177,8 +207,8 @@ function RegisterInner() {
                   </div>
                 </div>
                 <div className="info-box" style={{ marginTop: 12 }}>
-                  <strong>{L("تجربة 30 يوماً", "30-day trial")}</strong> — {L("متاحة للمنشآت الجديدة بحد 3 مقاعد — تخدم بروتوكول العيادة التجريبية. الأسعار توضيحية وتُقفل وفق DOC-09 §٤.",
-                    "Available to new facilities with up to 3 seats — serves the pilot clinic protocol. Prices are illustrative and locked per DOC-09 §4.")}
+                  {L("الاشتراك بعدد الدكاترة فقط — التكلفة يحددها مالك المنصة وتظهر هنا لحظياً، وتقدر توسّع أو تقلّص العدد لاحقاً من لوحة الأدمن.",
+                     "Subscription is by doctor count only — pricing is set by the platform owner and shown here live; you can expand or reduce the count later from the admin panel.")}
                 </div>
               </>
             ) : null}

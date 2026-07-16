@@ -11,9 +11,23 @@ import { ApiError } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
 import type { Lang } from "@/lib/i18n";
 import { saApi } from "@/lib/sa";
+import type { SaApiOptions } from "@/lib/sa";
 import type { FacilityStatus, SaFacilityDetail, SaFacilityUser, SaInvoice, SaPlan } from "@/lib/types";
 
 type LFn = (ar: string, en: string) => string;
+
+/** نداء حسّاس: عند طلب الخادم إعادة مصادقة (2FA مفعّل) يسأل عن رمز حي ويعيد المحاولة مرة واحدة. */
+async function saSensitive<T>(L: LFn, path: string, options: SaApiOptions) {
+  try {
+    return await saApi<T>(path, options);
+  } catch (err) {
+    if (err instanceof ApiError && err.code === "MDF-4015" && err.details["reason"] === "reauth_required") {
+      const code = window.prompt(L("إجراء حسّاس — أدخل رمز المصادقة الحالي:", "Sensitive action — enter your current authenticator code:"));
+      if (code) return await saApi<T>(path, { ...options, reauthCode: code });
+    }
+    throw err;
+  }
+}
 
 const FACILITY_STATUS_META: Record<FacilityStatus, { ar: string; en: string; cls: string }> = {
   active: { ar: "نشطة", en: "Active", cls: "badge success" },
@@ -67,8 +81,10 @@ function StatusSubscriptionTab({ detail, plans, reload }: {
   const setStatus = async (status: FacilityStatus) => {
     setBusy(true);
     try {
-      await saApi(`/facilities/${facility.id}`, { method: "PATCH", body: { status } });
-      toast(L("حُدّثت حالة المنشأة", "Facility status updated"));
+      await saSensitive(L, `/facilities/${facility.id}`, { method: "PATCH", body: { status } });
+      toast(status === "active"
+        ? L("فُعّلت المنشأة — يسري فوراً على دخول أدمنها ودكاترتها", "Facility activated — takes effect immediately for its admin and doctors")
+        : L("حُدّثت حالة المنشأة — يُمنع دخول مستخدميها فوراً (MDF-4013)", "Facility status updated — its users are blocked immediately (MDF-4013)"));
       await reload();
     } catch (err) {
       toast(apiErrorText(err, lang, L));
@@ -136,15 +152,15 @@ function StatusSubscriptionTab({ detail, plans, reload }: {
           </div>
         </div>
         <div className="card">
-          <div className="stat-label">{L("المقاعد المستهلكة (دكاترة نشطون)", "Seats used (active doctors)")}</div>
+          <div className="stat-label">{L("دكاترة نشطون / عدد الدكاترة", "Active doctors / doctors count")}</div>
           <div className="stat-value num">{sub?.seats_used ?? 0} / {sub?.seats_total ?? 0}</div>
         </div>
         <div className="card">
-          <div className="stat-label">{L("الباقة الحالية", "Current plan")}</div>
+          <div className="stat-label">{L("دورة الفوترة وتكلفة الدكتور", "Billing cycle & doctor cost")}</div>
           <div className="stat-value">{sub?.plan_info ? (lang === "ar" ? sub.plan_info.name_ar : sub.plan_info.name_en) : sub?.plan ?? "—"}</div>
           {sub?.plan_info ? (
             <div style={{ fontSize: 12.5, color: "#5B7280", marginTop: 4 }}>
-              <bdi>{fmtSar(sub.plan_info.seat_price_sar)} SAR</bdi> {L("لكل مقعد /", "per seat /")} {sub.plan_info.billing_cycle === "monthly" ? L("شهرياً", "month") : L("سنوياً", "year")}
+              <bdi>{fmtSar(sub.plan_info.seat_price_sar)} SAR</bdi> {L("لكل دكتور /", "per doctor /")} {sub.plan_info.billing_cycle === "monthly" ? L("شهرياً", "month") : L("سنوياً", "year")}
             </div>
           ) : null}
         </div>
@@ -155,7 +171,7 @@ function StatusSubscriptionTab({ detail, plans, reload }: {
           <h3 style={{ fontSize: 15, fontWeight: 700, margin: "0 0 12px" }}>{L("تعديل الاشتراك (فعل منصة)", "Edit subscription (platform action)")}</h3>
           <div style={{ display: "flex", gap: 18, flexWrap: "wrap", alignItems: "flex-end" }}>
             <div style={{ minWidth: 220 }}>
-              <label className="field-label">{L("الباقة", "Plan")}</label>
+              <label className="field-label">{L("دورة الفوترة (تكلفة الدكتور)", "Billing cycle (doctor cost)")}</label>
               <select className="field" style={{ margin: 0 }} value={planCode} onChange={(event) => setPlanCode(event.target.value)}>
                 {plans.filter((plan) => plan.is_active || plan.code === sub.plan).map((plan) => (
                   <option key={plan.code} value={plan.code}>
@@ -165,11 +181,13 @@ function StatusSubscriptionTab({ detail, plans, reload }: {
               </select>
             </div>
             <div>
-              <label className="field-label">{L("إجمالي المقاعد", "Total seats")}</label>
+              <label className="field-label">{L("عدد الدكاترة (كتابة أو عدّاد)", "Doctors count (type or counter)")}</label>
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <button type="button" aria-label={L("إنقاص", "Decrease")} style={stepBtn} onClick={() => setSeats((value) => Math.max(1, value - 1))}>−</button>
-                <span className="num" style={{ fontSize: 24, fontWeight: 800, color: "#0A5C64", minWidth: 34, textAlign: "center" }}>{seats}</span>
-                <button type="button" aria-label={L("زيادة", "Increase")} style={stepBtn} onClick={() => setSeats((value) => Math.min(500, value + 1))}>+</button>
+                <button type="button" aria-label={L("إنقاص", "Decrease")} style={stepBtn} onClick={() => setSeats((value) => Math.max(1, Math.min(500, value - 1)))}>−</button>
+                <input aria-label={L("عدد الدكاترة", "Doctors count")} className="field num" type="number" min={1} max={500} dir="ltr"
+                  value={seats} style={{ margin: 0, width: 80, textAlign: "center", fontSize: 20, fontWeight: 800, color: "#0A5C64", height: 38 }}
+                  onChange={(event) => setSeats(Math.min(500, Math.max(1, Math.round(Number(event.target.value) || 1))))} />
+                <button type="button" aria-label={L("زيادة", "Increase")} style={stepBtn} onClick={() => setSeats((value) => Math.max(1, Math.min(500, value + 1)))}>+</button>
               </div>
             </div>
             <button className="btn h40" disabled={busy} onClick={() => void applySubscription()}>

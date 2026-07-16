@@ -76,33 +76,37 @@ function SeatsTab({ info, reload }: { info: SubscriptionInfo; reload: () => Prom
     background: "#fff", color: "#0A5C64", fontSize: 18, fontWeight: 700, cursor: "pointer",
   } as const;
 
+  const clampSeats = (value: number) => Math.min(500, Math.max(1, Math.round(value)));
+
   return (
     <>
       <div className="stat-grid">
         <div className="card" style={{ borderColor: "#0E7C86" }}>
-          <div className="stat-label">{L("إجمالي المقاعد — توسعة / تقليص", "Total seats — expand / reduce")}</div>
+          <div className="stat-label">{L("عدد الدكاترة — اكتب العدد أو استخدم العدّاد", "Doctors count — type or use the counter")}</div>
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 6 }}>
-            <button type="button" aria-label={L("إنقاص", "Decrease")} style={stepBtn} onClick={() => setNewTotal((value) => Math.max(1, value - 1))}>−</button>
-            <span className="num" style={{ fontSize: 28, fontWeight: 800, color: "#0A5C64", minWidth: 36, textAlign: "center" }}>{newTotal}</span>
-            <button type="button" aria-label={L("زيادة", "Increase")} style={stepBtn} onClick={() => setNewTotal((value) => Math.min(50, value + 1))}>+</button>
+            <button type="button" aria-label={L("إنقاص", "Decrease")} style={stepBtn} onClick={() => setNewTotal((value) => clampSeats(value - 1))}>−</button>
+            <input aria-label={L("عدد الدكاترة", "Doctors count")} className="field num" type="number" min={1} max={500} dir="ltr"
+              value={newTotal} style={{ margin: 0, width: 84, textAlign: "center", fontSize: 22, fontWeight: 800, color: "#0A5C64", height: 40 }}
+              onChange={(event) => setNewTotal(clampSeats(Number(event.target.value) || 1))} />
+            <button type="button" aria-label={L("زيادة", "Increase")} style={stepBtn} onClick={() => setNewTotal((value) => clampSeats(value + 1))}>+</button>
           </div>
           <div style={{ fontSize: 12.5, color: "#5B7280", margin: "6px 0 10px" }}>
-            {L("الحالي:", "Current:")} <span className="num">{info.seats_total}</span> {L("— كل دكتور نشط يستهلك مقعداً (FR-202)", "— each active doctor consumes a seat (FR-202)")}
+            {L("الحالي:", "Current:")} <span className="num">{info.seats_total}</span> {L("— كل دكتور نشط يستهلك اشتراكاً (FR-202)", "— each active doctor consumes one subscription (FR-202)")}
           </div>
           <button className="btn h40" onClick={() => void apply()} disabled={busy}>
             {busy ? <span className="spinner" /> : null} {L("تطبيق", "Apply")}
           </button>
         </div>
         <div className="card">
-          <div className="stat-label">{L("المستهلكة", "Used")}</div>
+          <div className="stat-label">{L("دكاترة نشطون", "Active doctors")}</div>
           <div className="stat-value num">{info.seats_used}</div>
         </div>
         <div className="card">
-          <div className="stat-label">{L("المتاحة", "Available")}</div>
+          <div className="stat-label">{L("متاح للإضافة", "Available to add")}</div>
           <div className="stat-value num" style={{ color: "#2E9E5B" }}>{info.seats_available}</div>
         </div>
         <div className="card">
-          <div className="stat-label">{L("الخطة", "Plan")}</div>
+          <div className="stat-label">{L("دورة الفوترة", "Billing cycle")}</div>
           <div className="stat-value">{info.plan === "monthly" ? L("شهرية", "Monthly") : info.plan === "yearly" ? L("سنوية", "Yearly") : info.plan}</div>
         </div>
       </div>

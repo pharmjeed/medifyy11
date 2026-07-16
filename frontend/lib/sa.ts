@@ -9,12 +9,32 @@ import type { Envelope, MdfError } from "./types";
 const SA_TOKEN_KEY = "medify_sa_token";
 const SA_ADMIN_KEY = "medify_sa_admin";
 
+export type SaRole = "owner" | "ops" | "finance" | "support" | "read_only";
+
 export interface SaAdmin {
   id: string;
   username: string;
   full_name: string;
   email: string | null;
-  role: "super_admin";
+  role: SaRole;
+  totp_enabled: boolean;
+  is_active: boolean;
+  last_login_at: string | null;
+  created_at: string;
+}
+
+/** قدرات الدرجات — مرآة GRADE_CAPS في الباك اند (DOC-20 §١.٢) لإخفاء الأزرار فقط؛ الفرض في الخادم. */
+export const SA_GRADE_CAPS: Record<SaRole, ReadonlySet<string>> = {
+  owner: new Set(["facilities.write", "users.write", "invoices.write", "plans.write", "admins.manage", "security"]),
+  ops: new Set(["facilities.write", "users.write", "invoices.write"]),
+  finance: new Set(["invoices.write"]),
+  support: new Set(),
+  read_only: new Set(),
+};
+
+export function saCan(admin: SaAdmin | null, cap: string): boolean {
+  if (admin === null) return false;
+  return SA_GRADE_CAPS[admin.role]?.has(cap) ?? false;
 }
 
 function storageGet(key: string): string | null {
@@ -81,11 +101,14 @@ async function trySaRefresh(): Promise<boolean> {
 export interface SaApiOptions {
   method?: "GET" | "POST" | "PATCH" | "DELETE";
   body?: unknown;
+  /** رمز TOTP حي للإجراءات الحسّاسة — يُرسل بترويسة X-SA-Reauth (DOC-20 §١.٣) */
+  reauthCode?: string;
 }
 
 export async function saApi<T>(path: string, options: SaApiOptions = {}, retried = false): Promise<Envelope<T>> {
   const headers: Record<string, string> = {};
   if (options.body !== undefined) headers["Content-Type"] = "application/json";
+  if (options.reauthCode) headers["X-SA-Reauth"] = options.reauthCode;
   const token = getSaToken();
   if (token) headers["Authorization"] = `Bearer ${token}`;
 

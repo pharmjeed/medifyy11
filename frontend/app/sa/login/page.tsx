@@ -19,6 +19,8 @@ function SaLoginInner() {
 
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [totpCode, setTotpCode] = useState("");
+  const [needTotp, setNeedTotp] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -34,13 +36,21 @@ function SaLoginInner() {
     try {
       const body = await saApi<{ access_token: string; admin: SaAdmin }>("/auth/login", {
         method: "POST",
-        body: { username, password },
+        body: { username, password, ...(totpCode ? { totp_code: totpCode } : {}) },
       });
       setSaSession(body.data.access_token, body.data.admin);
       toast(L(`مرحباً ${body.data.admin.full_name} — لوحة المنصة`, `Welcome ${body.data.admin.full_name} — platform console`));
       router.push("/sa");
     } catch (err) {
-      setError(err instanceof ApiError ? `${err.text(lang)} (${err.code})` : L("تعذر الاتصال بالخادم", "Could not reach the server"));
+      if (err instanceof ApiError && err.code === "MDF-4015") {
+        // الحساب محمي بمصادقة ثنائية — اطلب الرمز (DOC-20 §١.٣)
+        setNeedTotp(true);
+        setError(totpCode
+          ? L("رمز المصادقة غير صحيح — أدخل الرمز الحالي من تطبيق المصادقة", "Incorrect code — enter the current code from your authenticator app")
+          : L("الحساب محمي بمصادقة ثنائية — أدخل رمز تطبيق المصادقة", "This account is 2FA-protected — enter your authenticator code"));
+      } else {
+        setError(err instanceof ApiError ? `${err.text(lang)} (${err.code})` : L("تعذر الاتصال بالخادم", "Could not reach the server"));
+      }
     } finally {
       setBusy(false);
     }
@@ -72,6 +82,11 @@ function SaLoginInner() {
           <Field label={L("كلمة المرور", "Password")} ltr type="password" placeholder="••••••••" value={password}
             name="password" autoComplete="current-password"
             onChange={(event) => setPassword(event.target.value)} required />
+          {needTotp ? (
+            <Field label={L("رمز المصادقة الثنائية (أو رمز استرداد)", "2FA code (or a recovery code)")} ltr
+              placeholder="123456" value={totpCode} autoComplete="one-time-code" autoFocus
+              onChange={(event) => setTotpCode(event.target.value)} required />
+          ) : null}
           {error !== null ? (
             <p style={{ color: "#C0392B", fontSize: 12.5, fontWeight: 700, margin: "10px 0 0" }}>{error}</p>
           ) : null}
