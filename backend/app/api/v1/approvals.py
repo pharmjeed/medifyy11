@@ -12,7 +12,15 @@ from ...audit import audit
 from ...deps import DoctorAuth, DB
 from ...envelope import ok
 from ...errors import MedifyError
-from ...models import Approval, GuidanceItem, Summary, SummarySection, UploadAttempt, UploadJob
+from ...models import (
+    Approval,
+    GuidanceItem,
+    NoteApproval,
+    Summary,
+    SummarySection,
+    UploadAttempt,
+    UploadJob,
+)
 from ...services.fhir import build_bundle, store_bundle
 from ...services.uploader import process_upload_job
 from ...services.visits import get_visit_for_doctor, summary_hashes, transition
@@ -20,9 +28,60 @@ from ...services.visits import get_visit_for_doctor, summary_hashes, transition
 router = APIRouter()
 
 
+@router.post("/visits/{visit_id}/note-approve")
+def note_approve_visit(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB):
+    """البوابة ① — اعتماد نص المذكرة (توجيه المالك 2026-07-22).
+
+    بعدها يتجمّد نص المذكرة (trigger القاعدة) ويبقى حسم الأكواد مفتوحاً للبوابة ②.
+    """
+    visit = get_visit_for_doctor(db, visit_id)
+    if visit.state != "in_review":
+        raise MedifyError("MDF-4223", details={"state": visit.state})
+    summary = db.execute(select(Summary).where(Summary.visit_id == visit.id)).scalar_one_or_none()
+    if summary is None:
+        raise MedifyError("MDF-4041")
+
+    existing = db.execute(select(NoteApproval).where(NoteApproval.visit_id == visit.id)).scalar_one_or_none()
+    if existing is not None:
+        return ok({
+            "note_approved": True,
+            "note_approval_id": str(existing.id),
+            "approved_at": existing.approved_at.isoformat(),
+            "summary_hash": existing.summary_hash,
+            "already_approved": True,
+        })
+
+    content_hash, _codes_hash = summary_hashes(db, visit)
+    note_approval = NoteApproval(
+        visit_id=visit.id,
+        facility_id=ctx.facility_id,
+        approved_by=ctx.user_id,
+        approved_at=dt.datetime.now(dt.timezone.utc),
+        summary_hash=content_hash,
+    )
+    db.add(note_approval)
+    db.flush()
+    audit(db, ctx.facility_id, "visit.note_approved", "visit", visit.id, ctx.user_id,
+          {"gate": 1, "summary_hash": content_hash[:12]})
+    review_ms = int((note_approval.approved_at - summary.generated_at).total_seconds() * 1000)
+    track("visit.note_approved", ctx.facility_id, "doctor", visit.id, review_ms=review_ms)
+    return ok({
+        "note_approved": True,
+        "note_approval_id": str(note_approval.id),
+        "approved_at": note_approval.approved_at.isoformat(),
+        "summary_hash": content_hash,
+        "already_approved": False,
+    })
+
+
 @router.post("/visits/{visit_id}/approve")
 def approve_visit(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB):
-    """البوابة النهائية (FR-801): إرشادات معلقة → MDF-4222 · ينشئ approval ثم upload_job (FR-802)."""
+    """البوابة ② — اعتماد الأكواد (FR-801).
+
+    لا تُقبل قبل البوابة ① (MDF-4231 تطبيقياً، ومفتاح أجنبي NOT NULL في القاعدة)،
+    ولا مع إرشادات معلقة (MDF-4222) ولا مع كود ينتظر إدخال الطبيب.
+    ثم تنشئ upload_job (FR-802) — ولا خروج بيانات قبلها.
+    """
     visit = get_visit_for_doctor(db, visit_id)
     if visit.state != "in_review":
         raise MedifyError("MDF-4223", details={"state": visit.state})
@@ -30,6 +89,13 @@ def approve_visit(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB):
     summary = db.execute(select(Summary).where(Summary.visit_id == visit.id)).scalar_one_or_none()
     if summary is None:
         raise MedifyError("MDF-4041")
+
+    note_approval = db.execute(
+        select(NoteApproval).where(NoteApproval.visit_id == visit.id)
+    ).scalar_one_or_none()
+    if note_approval is None:
+        raise MedifyError("MDF-4231", details={"visit_id": str(visit.id)})
+
     pending = db.execute(
         select(func.count(GuidanceItem.id))
         .join(SummarySection, SummarySection.id == GuidanceItem.section_id)
@@ -38,10 +104,26 @@ def approve_visit(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB):
     if pending > 0:
         raise MedifyError("MDF-4222", details={"pending_count": pending})
 
+    # «لا تخمين»: بند محسوم بكود محجوب دون العتبة لا يمر إلا بإدخال الطبيب
+    awaiting_input = db.execute(
+        select(func.count(GuidanceItem.id))
+        .join(SummarySection, SummarySection.id == GuidanceItem.section_id)
+        .where(
+            SummarySection.summary_id == summary.id,
+            GuidanceItem.status.in_(["accepted", "modified"]),
+            GuidanceItem.requires_doctor_input.is_(True),
+            GuidanceItem.code_value.is_(None),
+        )
+    ).scalar_one()
+    if awaiting_input > 0:
+        raise MedifyError("MDF-4222", details={"awaiting_doctor_input": awaiting_input,
+                                               "reason": "codes_below_confidence_threshold"})
+
     content_hash, codes_hash = summary_hashes(db, visit)
     approval = Approval(
         visit_id=visit.id,
         facility_id=ctx.facility_id,
+        note_approval_id=note_approval.id,
         approved_by=ctx.user_id,
         approved_at=dt.datetime.now(dt.timezone.utc),
         summary_hash=content_hash,
@@ -64,7 +146,8 @@ def approve_visit(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB):
     db.flush()
 
     audit(db, ctx.facility_id, "visit.approved", "visit", visit.id, ctx.user_id,
-          {"summary_hash": content_hash[:12], "codes_hash": codes_hash[:12]})
+          {"gate": 2, "summary_hash": content_hash[:12], "codes_hash": codes_hash[:12],
+           "note_approval_id": str(note_approval.id)})
     review_ms = int((approval.approved_at - summary.generated_at).total_seconds() * 1000)
     edits_count = db.execute(
         select(func.count(SummarySection.id)).where(

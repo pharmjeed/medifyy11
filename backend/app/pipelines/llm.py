@@ -151,34 +151,76 @@ class MockLLMEngine(LLMEngine):
         return {"sections": out}
 
     def _guidance(self, variables: dict[str, Any]) -> dict[str, Any]:
+        """عيّنة P3 v1.1 — بنود خطة مهيكلة بكودها ومبررها ودرجة ثقتها.
+
+        البند الثاني ثقته دون العتبة عمداً: يُظهر سلوك «لا تخمين» (خانة كود فارغة + طلب إدخال الطبيب).
+        """
         systems = str(variables.get("active_coding_systems", "ICD10AM"))
+        has_sfda = "SFDA" in systems
         items: list[dict[str, Any]] = [
             {
                 "section_key": "A", "kind": "clinical_dx",
                 "suggestion_text": "Consider documenting essential (primary) hypertension explicitly — "
                                    "patient has 2 prior elevated readings in file plus today's 165/95.",
                 "code_system": "ICD10AM", "code_value": "I10",
+                "code_secondary_system": None, "code_secondary_value": None,
+                "code_registry_version": "ICD-10-AM 12th ed.", "code_effective_date": "2025-07-01",
+                "confidence": 0.94, "linked_dx_code": None, "justification": None,
                 "evidence_source": "patient_file",
                 "evidence_ref": "Previous visits 2026-05-02 and 2026-06-10: BP 158/92, 161/94",
                 "safety_flag": False,
             },
             {
                 "section_key": "A", "kind": "coding_match",
-                "suggestion_text": "Tension-type headache maps to ICD-10-AM G44.2.",
+                "suggestion_text": "Headache pattern is consistent with tension-type headache, but the "
+                                   "documentation does not distinguish it from migraine without aura.",
                 "code_system": "ICD10AM", "code_value": "G44.2",
+                "code_secondary_system": None, "code_secondary_value": None,
+                "code_registry_version": "ICD-10-AM 12th ed.", "code_effective_date": "2025-07-01",
+                "confidence": 0.61, "linked_dx_code": None, "justification": None,
                 "evidence_source": "current_visit",
-                "evidence_ref": "Patient reports frontal headache 5 days",
+                "evidence_ref": "Patient reports frontal headache 5 days, no aura documented",
                 "safety_flag": False,
             },
             {
                 "section_key": "P", "kind": "clinical_rx",
-                "suggestion_text": "Verify amlodipine dose against file allergy list — patient file notes "
-                                   "prior ankle oedema on amlodipine 10 mg; current plan uses 5 mg.",
-                "code_system": "SFDA" if "SFDA" in systems else "ICD10AM",
-                "code_value": "SFDA-GTIN-6285074001122" if "SFDA" in systems else "I10",
+                "suggestion_text": "Verify amlodipine dose against the file history — prior ankle oedema on "
+                                   "amlodipine 10 mg; current plan uses 5 mg.",
+                "code_system": "SFDA" if has_sfda else "ICD10AM",
+                "code_value": "SFDA-2100034521" if has_sfda else "I10",
+                "code_secondary_system": "GTIN" if has_sfda else None,
+                "code_secondary_value": "06285074001122" if has_sfda else None,
+                "code_registry_version": "SFDA Drug List 2026-Q2", "code_effective_date": "2026-04-01",
+                "confidence": 0.88, "linked_dx_code": "I10", "justification": None,
                 "evidence_source": "patient_file",
                 "evidence_ref": "Medication history: amlodipine 10 mg — ankle oedema 2025-11",
                 "safety_flag": True,
+            },
+            {
+                "section_key": "P", "kind": "clinical_service",
+                "suggestion_text": "Fasting lipid profile is indicated for cardiovascular risk stratification "
+                                   "in newly documented hypertension.",
+                "code_system": "SBS", "code_value": "SBS-80061",
+                "code_secondary_system": None, "code_secondary_value": None,
+                "code_registry_version": "SBS 2026 release 1", "code_effective_date": "2026-01-01",
+                "confidence": 0.91, "linked_dx_code": "I10", "justification": None,
+                "evidence_source": "current_visit",
+                "evidence_ref": "Clinician states: we will check cholesterol before next visit",
+                "safety_flag": False,
+            },
+            {
+                "section_key": "P", "kind": "clinical_device",
+                "suggestion_text": "Dispense an ambulatory blood-pressure monitor for 7-day home readings.",
+                "code_system": "GMDN", "code_value": "GMDN-35146",
+                "code_secondary_system": "GTIN", "code_secondary_value": "04015630001231",
+                "code_registry_version": "GMDN 2026-05", "code_effective_date": "2026-05-01",
+                "confidence": 0.86, "linked_dx_code": "I10",
+                "justification": "White-coat effect suspected: clinic readings elevated across three visits "
+                                 "while the patient reports normal home readings — home monitoring is "
+                                 "required before escalating therapy.",
+                "evidence_source": "current_visit",
+                "evidence_ref": "Clinician asks the patient to measure at home twice daily for a week",
+                "safety_flag": False,
             },
         ]
         return {"items": items}

@@ -20,6 +20,12 @@ dependencies = [
     "python-multipart>=0.0.9",
     "anthropic>=0.40",
     "redis>=5.0",
+    # تصدير المذكرة PDF بترويسة ثنائية اللغة (A3) — التشكيل والاتجاه للعربية،
+    # وfonttools[woff] لتحويل خطوط الهوية woff2 إلى TTF بلا تكرار ملفات الخطوط.
+    "reportlab>=4.2",
+    "arabic-reshaper>=3.0",
+    "python-bidi>=0.6",
+    "fonttools[woff]>=4.53",
 ]
 
 [project.optional-dependencies]

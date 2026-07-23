@@ -86,7 +86,7 @@ function InvoicesInner() {
               onClick={() => { setStatus(key ?? ""); setPage(1); }}>{label}</button>
           ))}
         </div>
-        <span style={{ fontSize: 13, color: "#5B7280" }}>
+        <span style={{ fontSize: 13, color: "#5c7096" }}>
           {L("الإجمالي:", "Total:")} <span className="num">{total}</span>
         </span>
       </div>
@@ -131,7 +131,7 @@ function InvoicesInner() {
                       </button>
                     </>
                   ) : (
-                    <span style={{ color: "#5B7280", fontSize: 12.5 }}>
+                    <span style={{ color: "#5c7096", fontSize: 12.5 }}>
                       {invoice.paid_at !== null ? fmtDateTime(invoice.paid_at) : "—"}
                     </span>
                   )}
@@ -147,7 +147,7 @@ function InvoicesInner() {
           <button className="btn-secondary" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}>
             {L("السابق", "Previous")}
           </button>
-          <span style={{ fontSize: 13, color: "#5B7280" }}>
+          <span style={{ fontSize: 13, color: "#5c7096" }}>
             <span className="num">{page}</span> / <span className="num">{pages}</span>
           </span>
           <button className="btn-secondary" disabled={page >= pages} onClick={() => setPage((value) => value + 1)}>
@@ -156,7 +156,7 @@ function InvoicesInner() {
         </div>
       ) : null}
 
-      <p style={{ fontSize: 12.5, color: "#5B7280", margin: "10px 0 0" }}>
+      <p style={{ fontSize: 12.5, color: "#5c7096", margin: "10px 0 0" }}>
         {L("تسجيل السداد اليدوي يوثَّق بمرجع manual_* ويرفع تعليق المنشأة إن لم تبقَ متأخرات · الفواتير المسددة لا تُلغى (مسار الاسترداد خارج النطاق).",
            "Manual settlement is recorded with a manual_* reference and lifts facility suspension when no overdue remains · paid invoices cannot be voided (refunds are out of scope).")}
       </p>

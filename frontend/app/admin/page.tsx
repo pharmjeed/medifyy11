@@ -97,10 +97,10 @@ function AdminInner() {
   };
 
   const intStatus = integration === null || integration.last_test_at === null
-    ? { color: "#5B7280", label: L("غير مكوّن", "Not configured") }
+    ? { color: "#5c7096", label: L("غير مكوّن", "Not configured") }
     : integration.last_test_ok === true
-      ? { color: "#2E9E5B", label: L("متصل", "Connected") }
-      : { color: "#C0392B", label: L("فشل آخر اختبار", "Last test failed") };
+      ? { color: "#12a594", label: L("متصل", "Connected") }
+      : { color: "#d94b4b", label: L("فشل آخر اختبار", "Last test failed") };
 
   const seatsPct = sub !== null && sub.seats_total > 0
     ? Math.round((sub.seats_used / sub.seats_total) * 100)
@@ -127,17 +127,17 @@ function AdminInner() {
 
           {/* بانر التعليق W-207 */}
           {me !== null && me.facility_status === "suspended" ? (
-            <div className="card" style={{ border: "2px solid #B07D10", marginBottom: 16 }}>
+            <div className="card" style={{ border: "2px solid #9c6f00", marginBottom: 16 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                 <SpecBadge id="W-207" />
-                <bdi style={{ color: "#B07D10", fontWeight: 700, fontSize: 16 }}>MDF-4013</bdi>
-                <strong style={{ color: "#B07D10", fontSize: 16 }}>{L("إنشاء الزيارات موقوف مؤقتاً", "Visit creation is temporarily suspended")}</strong>
+                <bdi style={{ color: "#9c6f00", fontWeight: 700, fontSize: 16 }}>MDF-4013</bdi>
+                <strong style={{ color: "#9c6f00", fontSize: 16 }}>{L("إنشاء الزيارات موقوف مؤقتاً", "Visit creation is temporarily suspended")}</strong>
               </div>
               <p style={{ fontSize: 14, margin: "8px 0 12px" }}>
                 {L("منشأتك عليها فاتورة متأخرة — المراجعة والاعتماد للزيارات القائمة متاحان، ويبقى إنشاء الزيارات موقوفاً حتى السداد.",
                    "Your facility has an overdue invoice — review and approval of existing visits remain available, and visit creation stays suspended until payment.")}
               </p>
-              <Link href="/admin/subscription" className="btn" style={{ textDecoration: "none", background: "#B07D10" }}>
+              <Link href="/admin/subscription" className="btn" style={{ textDecoration: "none", background: "#9c6f00" }}>
                 {L("سداد الفواتير", "Pay invoices")}
               </Link>
             </div>
@@ -154,10 +154,10 @@ function AdminInner() {
                 <div className="stat-value">
                   <span className="num">{sub.seats_used}</span> {L("من", "of")} <span className="num">{sub.seats_total}</span>
                 </div>
-                <div style={{ height: 8, background: "#EAF6F7", borderRadius: 999, margin: "8px 0" }}>
-                  <div style={{ height: 8, width: `${seatsPct}%`, background: "#0E7C86", borderRadius: 999 }} />
+                <div style={{ height: 8, background: "#d6f5f2", borderRadius: 999, margin: "8px 0" }}>
+                  <div style={{ height: 8, width: `${seatsPct}%`, background: "#00736d", borderRadius: 999 }} />
                 </div>
-                <div style={{ fontSize: 12.5, color: "#5B7280" }}>
+                <div style={{ fontSize: 12.5, color: "#5c7096" }}>
                   {L("متاح الآن:", "Available now:")} <span className="num">{sub.seats_available}</span> — {L("كل دكتور نشط يستهلك مقعداً", "each active doctor consumes a seat")}
                 </div>
               </div>
@@ -173,12 +173,12 @@ function AdminInner() {
                   <span style={{ width: 10, height: 10, borderRadius: 999, background: intStatus.color, flexShrink: 0 }} />
                   <strong style={{ color: intStatus.color, fontSize: 16 }}>{intStatus.label}</strong>
                 </div>
-                <div style={{ fontSize: 12.5, color: "#5B7280" }}>
+                <div style={{ fontSize: 12.5, color: "#5c7096" }}>
                   {integration.last_test_at === null
                     ? L("لم يُجرَ أي اختبار بعد", "No test has been run yet")
                     : `${L("آخر اختبار:", "Last test:")} ${fmtDateTime(integration.last_test_at)} — ${integration.last_test_ok === true ? L("ناجح", "passed") : L("فاشل", "failed")}`}
                 </div>
-                <div style={{ fontSize: 12.5, color: "#5B7280" }}>
+                <div style={{ fontSize: 12.5, color: "#5c7096" }}>
                   {L("الوضع:", "Mode:")} <bdi>{integration.mode}</bdi> · {L("الرفع بصيغة", "Upload format")} <bdi>FHIR/NPHIES</bdi>
                 </div>
               </div>
@@ -197,7 +197,7 @@ function AdminInner() {
                     if (count === undefined || count === 0) return null;
                     return (
                       <span key={state} className="badge neutral">
-                        {visitStateLabel(state)} <span className="num">{count}</span>
+                        {visitStateLabel(state, lang)} <span className="num">{count}</span>
                       </span>
                     );
                   })}
@@ -210,7 +210,7 @@ function AdminInner() {
                 <span className="stat-label" style={{ flex: 1, marginBottom: 0 }}>{L("الرفع الفاشل", "Failed uploads")}</span>
                 <SpecBadge id="W-209" />
               </div>
-              <div className="stat-value" style={failedTotal > 0 ? { color: "#C0392B" } : undefined}>
+              <div className="stat-value" style={failedTotal > 0 ? { color: "#d94b4b" } : undefined}>
                 <span className="num">{failedTotal}</span>
               </div>
               <div style={{ margin: "8px 0" }}>
@@ -222,7 +222,7 @@ function AdminInner() {
                   {L("عرض القائمة", "View list")}
                 </button>
               </div>
-              <div style={{ fontSize: 12.5, color: "#5B7280" }}>{L("عدادات فقط — لا محتوى سريرياً للأدمن (DOC-06)", "Counters only — no clinical content for the admin (DOC-06)")}</div>
+              <div style={{ fontSize: 12.5, color: "#5c7096" }}>{L("عدادات فقط — لا محتوى سريرياً للأدمن (DOC-06)", "Counters only — no clinical content for the admin (DOC-06)")}</div>
             </div>
           </div>
 
@@ -254,7 +254,7 @@ function AdminInner() {
       {/* نافذة الرفع الفاشل W-209 */}
       {failModal ? (
         <Modal title={L("الرفع الفاشل — إعادة المحاولة", "Failed uploads — retry")} spec="W-209" wide onClose={() => setFailModal(false)}>
-          <p style={{ fontSize: 12.5, color: "#5B7280", margin: "0 0 12px" }}>
+          <p style={{ fontSize: 12.5, color: "#5c7096", margin: "0 0 12px" }}>
             {L("تُعاد المحاولة تلقائياً عند عودة اتصال الربط — هذه القائمة للتدخل اليدوي · بيانات وصفية فقط، لا محتوى سريرياً (DOC-06) · الاعتماد محفوظ ولا يتكرر (FR-803)",
                "Retries run automatically once the integration connection is restored — this list is for manual intervention · metadata only, no clinical content (DOC-06) · approval is preserved and never repeated (FR-803)")}
           </p>
@@ -265,7 +265,7 @@ function AdminInner() {
                   type="checkbox"
                   aria-label={L("تحديد الكل", "Select all")}
                   checked={allSelected}
-                  style={{ width: 16, height: 16, accentColor: "#0E7C86", cursor: "pointer" }}
+                  style={{ width: 16, height: 16, accentColor: "#00736d", cursor: "pointer" }}
                   onChange={() => {
                     if (allSelected) { setSelected({}); return; }
                     const next: Record<string, boolean> = {};
@@ -277,7 +277,7 @@ function AdminInner() {
               <div>{L("الزيارة", "Visit")}</div><div>{L("الدكتور", "Doctor")}</div><div>{L("المحاولات", "Attempts")}</div><div>{L("الخطأ", "Error")}</div><div>{L("الوقت", "Time")}</div>
             </div>
             {failed.length === 0 ? (
-              <div className="grid-empty" style={{ color: "#2E9E5B", fontWeight: 700 }}>{L("لا زيارات فاشلة — كل الرفع مؤكد ✓", "No failed visits — all uploads confirmed ✓")}</div>
+              <div className="grid-empty" style={{ color: "#12a594", fontWeight: 700 }}>{L("لا زيارات فاشلة — كل الرفع مؤكد ✓", "No failed visits — all uploads confirmed ✓")}</div>
             ) : (
               failed.map((row, index) => (
                 <div key={row.job_id} className={index % 2 ? "grid-row odd" : "grid-row"} style={{ gridTemplateColumns: FAILED_COLS }}>
@@ -286,14 +286,14 @@ function AdminInner() {
                       type="checkbox"
                       aria-label={L(`تحديد الزيارة ${row.visit_id.slice(0, 8)}`, `Select visit ${row.visit_id.slice(0, 8)}`)}
                       checked={selected[row.job_id] === true}
-                      style={{ width: 16, height: 16, accentColor: "#0E7C86", cursor: "pointer" }}
+                      style={{ width: 16, height: 16, accentColor: "#00736d", cursor: "pointer" }}
                       onChange={() => setSelected((prev) => ({ ...prev, [row.job_id]: !(prev[row.job_id] ?? false) }))}
                     />
                   </div>
                   <div><bdi style={{ fontSize: 12.5 }}>{row.visit_id.slice(0, 8)}</bdi></div>
                   <div>{row.doctor}</div>
                   <div><span className="num">{row.attempts_count}</span></div>
-                  <div><bdi style={{ color: "#C0392B", fontSize: 12.5 }}>{row.error_code ?? "—"}</bdi></div>
+                  <div><bdi style={{ color: "#d94b4b", fontSize: 12.5 }}>{row.error_code ?? "—"}</bdi></div>
                   <div style={{ fontSize: 12.5 }}>{fmtDateTime(row.failed_at)}</div>
                 </div>
               ))
@@ -304,7 +304,7 @@ function AdminInner() {
               <button className="btn-danger" onClick={() => void retrySelected()} disabled={retrying}>
                 {retrying ? <><span className="spinner" /> {L("يعيد المحاولة…", "Retrying…")}</> : <>{L("إعادة المحاولة للمحدد", "Retry selected")} (<span className="num">{selectedIds.length}</span>)</>}
               </button>
-              <span style={{ fontSize: 12.5, color: "#5B7280" }}>{L("كل إعادة تسجَّل في سجل التدقيق (upload.retry)", "Every retry is recorded in the audit log (upload.retry)")}</span>
+              <span style={{ fontSize: 12.5, color: "#5c7096" }}>{L("كل إعادة تسجَّل في سجل التدقيق (upload.retry)", "Every retry is recorded in the audit log (upload.retry)")}</span>
             </div>
           ) : null}
         </Modal>

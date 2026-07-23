@@ -137,6 +137,13 @@ function DoctorsInner() {
     }
   };
 
+  // التخصص مخزّن بقيمته العربية — يُعرض بلغة الواجهة عند وجوده في الكتالوج
+  const specialtyLabel = (value: string | null): string => {
+    if (value === null || value === "") return "—";
+    const option = SPECIALTIES.find((item) => item.ar === value);
+    return option === undefined ? value : L(option.ar, option.en);
+  };
+
   return (
     <main className="page-wrap">
       <SpecBar ids="W-103 · W-104" desc={L("الصفحة 6 — قائمة الدكاترة وحالة المقاعد + نموذج الإنشاء/التعديل (FR-202/204)",
@@ -166,9 +173,9 @@ function DoctorsInner() {
         ) : (
           doctors.map((doctor, index) => (
             <div key={doctor.id} className={index % 2 ? "grid-row odd" : "grid-row"} style={{ gridTemplateColumns: COLS }}>
-              <div style={{ fontWeight: 700, color: doctor.is_active ? undefined : "#5B7280" }}>{doctor.full_name}</div>
+              <div style={{ fontWeight: 700, color: doctor.is_active ? undefined : "#5c7096" }}>{doctor.full_name}</div>
               <div><bdi style={{ fontSize: 12.5 }}>{doctor.username}</bdi></div>
-              <div>{doctor.specialty ?? "—"}</div>
+              <div>{specialtyLabel(doctor.specialty)}</div>
               <div>{doctor.clinic_name ?? "—"}</div>
               <div>
                 {doctor.is_active
@@ -187,7 +194,7 @@ function DoctorsInner() {
         )}
       </div>
 
-      <p style={{ fontSize: 12.5, color: "#5B7280", marginTop: 10 }}>
+      <p style={{ fontSize: 12.5, color: "#5c7096", marginTop: 10 }}>
         {L("التعطيل يحرر المقعد فوراً لدكتور آخر — المقعد مملوك للمنشأة لا للشخص (DOC-09 §٢).",
            "Disabling frees the seat immediately for another doctor — the seat belongs to the facility, not the person (DOC-09 §2).")}
       </p>
@@ -195,13 +202,13 @@ function DoctorsInner() {
       {/* نافذة الإنشاء W-104 */}
       {modalOpen ? (
         <Modal title={L("دكتور جديد", "New doctor")} spec="W-104" onClose={() => setModalOpen(false)}>
-          <p style={{ fontSize: 12.5, color: "#5B7280", margin: "0 0 12px" }}>
+          <p style={{ fontSize: 12.5, color: "#5c7096", margin: "0 0 12px" }}>
             {L("كل دكتور نشط يستهلك مقعداً — المتاح الآن:", "Each active doctor consumes a seat — available now:")} <span className="num">{sub?.seats_available ?? 0}</span>
           </p>
 
           {seatError ? (
-            <div style={{ background: "#FDEEEE", border: "1.5px solid #C0392B", borderRadius: 10, padding: "10px 14px", marginBottom: 12 }}>
-              <div style={{ color: "#C0392B", fontWeight: 700 }}>
+            <div style={{ background: "#fbeaea", border: "1.5px solid #d94b4b", borderRadius: 10, padding: "10px 14px", marginBottom: 12 }}>
+              <div style={{ color: "#d94b4b", fontWeight: 700 }}>
                 {L("لا مقاعد متاحة (", "No seats available (")}<bdi>MDF-4221</bdi>{L(") — لا يمكن إنشاء الدكتور", ") — the doctor cannot be created")}
               </div>
               <div style={{ marginTop: 8 }}>
@@ -259,7 +266,7 @@ function DoctorsInner() {
           <div className="sub-box" style={{ textAlign: "center", fontSize: 22, fontWeight: 700 }}>
             <bdi>{tempPw.password}</bdi>
           </div>
-          <p style={{ fontSize: 12.5, color: "#B07D10", fontWeight: 700, margin: "10px 0 0" }}>
+          <p style={{ fontSize: 12.5, color: "#9c6f00", fontWeight: 700, margin: "10px 0 0" }}>
             {L("تُعرض مرة واحدة فقط — انسخها وسلّمها للدكتور الآن، ولن تظهر مجدداً.",
                "Shown only once — copy it and hand it to the doctor now; it will not appear again.")}
           </p>

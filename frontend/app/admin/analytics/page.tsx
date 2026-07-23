@@ -65,7 +65,7 @@ function UsageTab() {
         <div className="stat-label">{L("توزيع الحالات", "State distribution")}</div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", marginTop: 6 }}>
             {stateEntries.length === 0 ? (
-              <span style={{ fontSize: 14, color: "#5B7280" }}>{L("لا زيارات بعد", "No visits yet")}</span>
+              <span style={{ fontSize: 14, color: "#5c7096" }}>{L("لا زيارات بعد", "No visits yet")}</span>
             ) : (
               stateEntries.map(({ state, count }) => (
                 <span key={state} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
@@ -161,14 +161,14 @@ function QualityTab() {
         <div className="card">
           <div className="stat-label">{L("نسبة الاعتماد دون تعديل", "Approved without edits")}</div>
           <div className="stat-value num">{pct(data.approved_without_edit_pct)}</div>
-          <div style={{ fontSize: 12.5, color: "#5B7280" }}>
+          <div style={{ fontSize: 12.5, color: "#5c7096" }}>
             {L("من", "Of")} <span className="num">{data.summaries_total}</span> {L("ملخصاً", "summaries")} (<bdi>approved_without_edit_pct</bdi>)
           </div>
         </div>
         <div className="card">
           <div className="stat-label">{L("نسبة قبول الإرشادات", "Guidance acceptance rate")}</div>
           <div className="stat-value num">{pct(data.guidance_accept_rate_pct)}</div>
-          <div style={{ fontSize: 12.5, color: "#5B7280" }}>
+          <div style={{ fontSize: 12.5, color: "#5c7096" }}>
             {L("المقبول + المعدّل من المحسوم", "Accepted + modified out of resolved")} (<bdi>guidance_accept_rate_pct</bdi>)
           </div>
         </div>
@@ -228,7 +228,7 @@ function AnalyticsInner() {
         onChange={setTab}
       />
       {tab === "usage" ? <UsageTab /> : <QualityTab />}
-      <p style={{ fontSize: 12.5, color: "#5B7280", margin: "18px 0 0" }}>
+      <p style={{ fontSize: 12.5, color: "#5c7096", margin: "18px 0 0" }}>
         {L("تجميعات فقط — لا محتوى سريرياً في لوحات الأدمن (DOC-06)", "Aggregates only — no clinical content in admin dashboards (DOC-06)")}
       </p>
     </>

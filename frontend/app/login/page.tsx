@@ -28,13 +28,14 @@ function LoginInner() {
   const router = useRouter();
   const params = useSearchParams();
   const toast = useToast();
-  const { L, lang } = useLang();
+  const { L } = useLang();
 
   const [mode, setMode] = useState<Mode>("login");
   const [facility, setFacility] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  // الخطأ يُخزَّن ثنائي اللغة ليتبدّل فورياً مع تبديل اللغة (D-30)
+  const [error, setError] = useState<{ ar: string; en: string } | null>(null);
   const [busy, setBusy] = useState(false);
   // استعادة كلمة المرور (W-206)
   const [commercialReg, setCommercialReg] = useState("");
@@ -69,7 +70,9 @@ function LoginInner() {
               `Welcome ${body.data.user.full_name} — signed in as ${roleLabel}`));
       router.push(body.data.user.role === "admin" ? "/admin" : "/doctor");
     } catch (err) {
-      setError(err instanceof ApiError ? `${err.text(lang)} (${err.code})` : L("تعذر الاتصال بالخادم", "Could not reach the server"));
+      setError(err instanceof ApiError
+        ? { ar: `${err.text("ar")} (${err.code})`, en: `${err.text("en")} (${err.code})` }
+        : { ar: "تعذر الاتصال بالخادم", en: "Could not reach the server" });
     } finally {
       setBusy(false);
     }
@@ -103,7 +106,9 @@ function LoginInner() {
       toast(L("عُيّنت كلمة المرور الجديدة — سجّل الدخول", "New password set — please sign in"));
       setMode("login");
     } catch (err) {
-      setError(err instanceof ApiError ? `${err.text(lang)} (${err.code})` : L("تعذر الاتصال", "Connection failed"));
+      setError(err instanceof ApiError
+        ? { ar: `${err.text("ar")} (${err.code})`, en: `${err.text("en")} (${err.code})` }
+        : { ar: "تعذر الاتصال بالخادم", en: "Could not reach the server" });
       if (err instanceof ApiError && err.code === "MDF-4014") setMode("forgot");
     } finally {
       setBusy(false);
@@ -132,7 +137,7 @@ function LoginInner() {
       <LangToggle floating />
       <div style={{ textAlign: "center", marginBottom: 18 }}>
         <div style={{ transform: "scale(1.5)", transformOrigin: "center bottom" }}><Logo /></div>
-        <p style={{ color: "#5B7280", fontSize: 14, margin: "10px 0 0" }}>
+        <p style={{ color: "#5c7096", fontSize: 14, margin: "10px 0 0" }}>
           {L("التوثيق السريري الذكي — من الاستشارة إلى ملف المريض", "Intelligent clinical documentation — from consultation to patient record")}
         </p>
       </div>
@@ -141,7 +146,7 @@ function LoginInner() {
         {mode === "login" ? (
           <>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <h1 style={{ fontSize: 18, fontWeight: 700, color: "#0A5C64", margin: 0, flex: 1 }}>{L("تسجيل الدخول", "Sign in")}</h1>
+              <h1 style={{ fontSize: 18, fontWeight: 700, color: "#005a55", margin: 0, flex: 1 }}>{L("تسجيل الدخول", "Sign in")}</h1>
               <SpecBadge id="W-001" />
             </div>
             <form onSubmit={(event) => { event.preventDefault(); void doLogin(); }}>
@@ -155,7 +160,7 @@ function LoginInner() {
                 name="password" autoComplete="current-password"
                 onChange={(event) => setPassword(event.target.value)} required />
               {error !== null ? (
-                <p style={{ color: "#C0392B", fontSize: 12.5, fontWeight: 700, margin: "10px 0 0" }}>{error}</p>
+                <p style={{ color: "#d94b4b", fontSize: 12.5, fontWeight: 700, margin: "10px 0 0" }}>{L(error.ar, error.en)}</p>
               ) : null}
               <button type="submit" className="btn big" style={{ width: "100%", marginTop: 16 }} disabled={busy}>
                 {busy ? <span className="spinner" /> : null} {L("دخول", "Sign in")}
@@ -165,7 +170,7 @@ function LoginInner() {
               onClick={() => setMode("forgot")}>
               {L("نسيت كلمة المرور؟ (أدمن المنشأة)", "Forgot password? (facility admin)")}
             </button>
-            <p style={{ fontSize: 12.5, color: "#5B7280", textAlign: "center", margin: "14px 0 0" }}>
+            <p style={{ fontSize: 12.5, color: "#5c7096", textAlign: "center", margin: "14px 0 0" }}>
               {L("منشأة جديدة؟", "New facility?")} <Link href="/register">{L("سجّل منشأتك واحجز مقاعد دكاترتك", "Register your facility and reserve doctor seats")}</Link>
             </p>
           </>
@@ -174,11 +179,11 @@ function LoginInner() {
         {mode === "expired" ? (
           <div style={{ textAlign: "center" }}>
             <div style={{ position: "absolute", top: 12, insetInlineStart: 12 }}><SpecBadge id="W-006" /></div>
-            <div style={{ width: 52, height: 52, borderRadius: 999, background: "#FDF3E3", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#B07D10" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
+            <div style={{ width: 52, height: 52, borderRadius: 999, background: "#fdf4e0", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9c6f00" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
             </div>
-            <h1 style={{ fontSize: 18, fontWeight: 700, color: "#0A5C64", margin: "10px 0 6px" }}>{L("انتهت جلستك", "Your session has expired")}</h1>
-            <p style={{ fontSize: 14, color: "#5B7280", margin: "0 0 16px" }}>
+            <h1 style={{ fontSize: 18, fontWeight: 700, color: "#005a55", margin: "10px 0 6px" }}>{L("انتهت جلستك", "Your session has expired")}</h1>
+            <p style={{ fontSize: 14, color: "#5c7096", margin: "0 0 16px" }}>
               {L("انقضت مدة الرمز (30 دقيقة). يمكن تجديد الجلسة بصمت دون فقدان العمل الجاري — وفق",
                  "The token lifetime (30 minutes) elapsed. The session can renew silently without losing work — per")} <bdi>MDF-4012</bdi> {L("و", "and")} <bdi>/auth/refresh</bdi>.
             </p>
@@ -194,12 +199,12 @@ function LoginInner() {
         {mode === "forgot" ? (
           <>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <h1 style={{ fontSize: 18, fontWeight: 700, color: "#0A5C64", margin: 0, flex: 1 }}>
+              <h1 style={{ fontSize: 18, fontWeight: 700, color: "#005a55", margin: 0, flex: 1 }}>
                 {L("استعادة كلمة المرور — أدمن المنشأة", "Password recovery — facility admin")}
               </h1>
               <SpecBadge id="W-206" />
             </div>
-            <p style={{ fontSize: 12.5, color: "#5B7280", margin: "6px 0 0" }}>
+            <p style={{ fontSize: 12.5, color: "#5c7096", margin: "6px 0 0" }}>
               {L("يُرسل رابط استعادة صالح لمدة 30 دقيقة إلى بريد الأدمن المسجّل عند التسجيل.",
                  "A reset link valid for 30 minutes is sent to the admin email registered at sign-up.")}
             </p>
@@ -225,9 +230,9 @@ function LoginInner() {
         {mode === "forgot_sent" ? (
           <div style={{ textAlign: "center" }}>
             <div style={{ position: "absolute", top: 12, insetInlineStart: 12 }}><SpecBadge id="W-206" /></div>
-            <div style={{ width: 52, height: 52, borderRadius: 999, background: "#E8F6EE", display: "inline-flex", alignItems: "center", justifyContent: "center", color: "#2E9E5B", fontSize: 22, fontWeight: 800 }}>✓</div>
-            <h1 style={{ fontSize: 18, fontWeight: 700, color: "#0A5C64", margin: "10px 0 6px" }}>{L("أُرسل رابط الاستعادة", "Reset link sent")}</h1>
-            <p style={{ fontSize: 14, color: "#5B7280", margin: "0 0 16px" }}>
+            <div style={{ width: 52, height: 52, borderRadius: 999, background: "#e6f7f4", display: "inline-flex", alignItems: "center", justifyContent: "center", color: "#12a594", fontSize: 22, fontWeight: 800 }}>✓</div>
+            <h1 style={{ fontSize: 18, fontWeight: 700, color: "#005a55", margin: "10px 0 6px" }}>{L("أُرسل رابط الاستعادة", "Reset link sent")}</h1>
+            <p style={{ fontSize: 14, color: "#5c7096", margin: "0 0 16px" }}>
               {L("تحقق من بريد الأدمن — الرابط صالح 30 دقيقة ولاستخدام واحد، وتُسجّل العملية في سجل التدقيق.",
                  "Check the admin inbox — the link is valid for 30 minutes, single-use, and the operation is audit-logged.")}
             </p>
@@ -238,14 +243,14 @@ function LoginInner() {
         {mode === "reset" ? (
           <>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <h1 style={{ fontSize: 18, fontWeight: 700, color: "#0A5C64", margin: 0, flex: 1 }}>{L("تعيين كلمة مرور جديدة", "Set a new password")}</h1>
+              <h1 style={{ fontSize: 18, fontWeight: 700, color: "#005a55", margin: 0, flex: 1 }}>{L("تعيين كلمة مرور جديدة", "Set a new password")}</h1>
               <SpecBadge id="W-206" />
             </div>
             <form onSubmit={(event) => { event.preventDefault(); void doReset(); }}>
               <Field label={L("كلمة المرور الجديدة", "New password")} ltr type="password" placeholder="••••••••" minLength={8}
                 value={newPassword} onChange={(event) => setNewPassword(event.target.value)} required />
               {error !== null ? (
-                <p style={{ color: "#C0392B", fontSize: 12.5, fontWeight: 700, margin: "10px 0 0" }}>{error}</p>
+                <p style={{ color: "#d94b4b", fontSize: 12.5, fontWeight: 700, margin: "10px 0 0" }}>{L(error.ar, error.en)}</p>
               ) : null}
               <button type="submit" className="btn big" style={{ width: "100%", marginTop: 16 }} disabled={busy}>{L("حفظ ودخول", "Save & sign in")}</button>
             </form>

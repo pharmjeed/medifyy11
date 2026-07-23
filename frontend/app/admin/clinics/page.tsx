@@ -107,7 +107,7 @@ function ClinicsInner() {
             const archived = clinic.archived_at !== null;
             return (
               <div key={clinic.id} className={index % 2 ? "grid-row odd" : "grid-row"} style={{ gridTemplateColumns: COLS }}>
-                <div style={{ fontWeight: 700, color: archived ? "#5B7280" : undefined }}>{clinic.name}</div>
+                <div style={{ fontWeight: 700, color: archived ? "#5c7096" : undefined }}>{clinic.name}</div>
                 <div><span className="num">{clinic.doctors_count}</span></div>
                 <div>
                   {archived
@@ -126,7 +126,7 @@ function ClinicsInner() {
         )}
       </div>
 
-      <p style={{ fontSize: 12.5, color: "#5B7280", marginTop: 10 }}>
+      <p style={{ fontSize: 12.5, color: "#5c7096", marginTop: 10 }}>
         {L("الأرشفة حذف ناعم (", "Archiving is a soft delete (")}<bdi>archived_at</bdi>{L(") — لا حذف نهائياً للعيادات.", ") — clinics are never permanently deleted.")}
       </p>
 

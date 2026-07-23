@@ -18,15 +18,17 @@ ANALYTICS_EVENTS = {
     "guidance.shown",
     "guidance.resolved",
     "edit.applied",
-    "visit.approved",
+    "visit.note_approved",  # البوابة ① (توجيه المالك 2026-07-22)
+    "visit.approved",       # البوابة ②
     "upload.result",
     "template.reverse_built",
     "template.selected",
     "error.5xx",
     "session.daily_active",
+    "note.exported",        # تصدير PDF/نسخ — وضع الجسر قبل اكتمال التكامل
 }
 
-assert len(ANALYTICS_EVENTS) == 12, "DOC-14: 12 حدثاً لا غير"
+assert len(ANALYTICS_EVENTS) == 14, "12 (DOC-14) + visit.note_approved + note.exported (توجيه المالك 2026-07-22)"
 
 _FORBIDDEN_KEYS = {"patient_id", "display_name", "content", "text", "transcript", "summary", "mrn", "hospital_mrn"}
 

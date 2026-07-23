@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 
 from ...analytics import track
+from ...audit import audit
 from ...config import get_settings
 from ...deps import DoctorAuth, DB, pagination
 from ...envelope import ok, paginated
@@ -22,9 +23,12 @@ from ...models import (
     Template,
     Transcript,
     UploadJob,
+    User,
     Visit,
+    VisitConsent,
 )
 from ...pipelines.run import run_guidance, run_summary
+from ...services.consent import consent_document
 from ...services.visits import get_visit_for_doctor, transition
 
 router = APIRouter()
@@ -129,11 +133,77 @@ def create_visit(body: VisitCreateIn, ctx: DoctorAuth, db: DB):
     })
 
 
+# ===== بوابة موافقة المريض (A1 — توجيه المالك 2026-07-22) =====
+
+@router.get("/visits/{visit_id}/consent")
+def get_consent(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB):
+    """نص الموافقة ثنائي اللغة + هل وُثِّقت لهذه الزيارة — تعرضه الواجهة قبل أي تسجيل."""
+    visit = get_visit_for_doctor(db, visit_id)
+    consent = db.execute(select(VisitConsent).where(VisitConsent.visit_id == visit.id)).scalar_one_or_none()
+    captured = None
+    if consent is not None:
+        capturer = db.execute(select(User).where(User.id == consent.captured_by)).scalar_one_or_none()
+        captured = {
+            "captured_at": consent.captured_at.isoformat(),
+            "captured_by": capturer.full_name if capturer else "—",
+            "method": consent.method,
+            "consent_version": consent.consent_version,
+            "text_hash": consent.consent_text_hash,
+        }
+    return ok({"document": consent_document(), "captured": captured})
+
+
+class ConsentIn(BaseModel):
+    acknowledged: bool
+    method: str = "verbal_ack"  # verbal_ack | written
+
+
+@router.post("/visits/{visit_id}/consent", status_code=201)
+def record_consent(visit_id: uuid.UUID, body: ConsentIn, ctx: DoctorAuth, db: DB):
+    """توثيق الموافقة — سجل إلحاقي لا يقبل تعديلاً. بدونه يرفض trigger القاعدة بدء التسجيل."""
+    visit = get_visit_for_doctor(db, visit_id)
+    if not body.acknowledged:
+        raise MedifyError("MDF-4230", details={"reason": "not_acknowledged"})
+    if body.method not in ("verbal_ack", "written"):
+        raise MedifyError("MDF-4041", details={"method": body.method})
+    if visit.state != "draft":
+        raise MedifyError("MDF-4223", details={"state": visit.state, "reason": "consent_before_recording"})
+
+    existing = db.execute(select(VisitConsent).where(VisitConsent.visit_id == visit.id)).scalar_one_or_none()
+    if existing is not None:
+        # إلحاقي: لا يُعاد توثيقها ولا تُعدَّل
+        return ok({"consent_id": str(existing.id), "captured_at": existing.captured_at.isoformat(),
+                   "already_recorded": True})
+
+    document = consent_document()
+    consent = VisitConsent(
+        visit_id=visit.id,
+        facility_id=ctx.facility_id,
+        consent_version=document["version"],
+        consent_text_hash=document["text_hash"],
+        method=body.method,
+        captured_by=ctx.user_id,
+        captured_at=dt.datetime.now(dt.timezone.utc),
+    )
+    db.add(consent)
+    db.flush()
+    audit(db, ctx.facility_id, "visit.consent_recorded", "visit", visit.id, ctx.user_id,
+          {"consent_version": document["version"], "method": body.method})
+    return ok({"consent_id": str(consent.id), "captured_at": consent.captured_at.isoformat(),
+               "already_recorded": False})
+
+
 # ===== تحكم التسجيل (FR-603) =====
 
 @router.post("/visits/{visit_id}/recording/start")
 def recording_start(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB):
     visit = get_visit_for_doctor(db, visit_id)
+    # الحارس التطبيقي على المسار المشروع فقط (draft→recording)؛ الحالات الأخرى
+    # تتركها آلة الحالات لرسالة MDF-4223. الحارس النهائي trigger القاعدة — دفاع بطبقتين.
+    if visit.state == "draft":
+        consent = db.execute(select(VisitConsent).where(VisitConsent.visit_id == visit.id)).scalar_one_or_none()
+        if consent is None:
+            raise MedifyError("MDF-4230", details={"visit_id": str(visit.id)})
     transition(db, visit, "recording")
     settings = get_settings()
     storage_dir = Path(settings.recordings_dir)

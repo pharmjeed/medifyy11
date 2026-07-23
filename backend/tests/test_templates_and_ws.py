@@ -1,7 +1,7 @@
 """القوالب (بناء عكسي/معاينة/حفظ/افتراضي) + بروتوكول WebSocket للتفريغ — FR-500 / DOC-05 §٥."""
 from __future__ import annotations
 
-from tests.conftest import auth
+from tests.conftest import auth, record_consent
 
 
 # PNG صالح 1×1 بكسل (base64) — كافٍ للتحقق من مسار المرفق دون رفع ملف كبير
@@ -104,6 +104,7 @@ def test_websocket_transcribe_protocol(client, doctor_token):
         "patient_id": patients[0]["id"], "template_id": templates[0]["id"],
     }).json()["data"]
     visit_id = visit["id"]
+    record_consent(client, visit_id, headers)  # A1: لا تسجيل بلا موافقة موثّقة
     client.post(f"/api/v1/visits/{visit_id}/recording/start", headers=headers)
 
     with client.websocket_connect(f"/ws/visits/{visit_id}/transcribe?token={doctor_token}") as ws:

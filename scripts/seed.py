@@ -18,13 +18,16 @@ from sqlalchemy.orm import Session  # noqa: E402
 
 from app.config import get_settings  # noqa: E402
 from app.models import (  # noqa: E402
-    Approval, AuditLog, Clinic, CodingSystemConfig, Facility, GuidanceItem,
+    Approval, AuditLog, Clinic, CodingSystemConfig, Facility, GuidanceItem, NoteApproval,
     IntegrationConfig, Invoice, Notification, Patient, PatientContextSnapshot,
     Recording, SeatEvent, Subscription, Summary, SummarySection, Template,
-    Transcript, UploadAttempt, UploadJob, User, Visit,
+    Transcript, UploadAttempt, UploadJob, User, Visit, VisitConsent,
 )
 from app.pipelines.stt import MOCK_DIALOGUE  # noqa: E402
 from app.security import hash_password  # noqa: E402
+from app.services.consent import consent_document  # noqa: E402
+
+CONSENT_DOC = consent_document()
 
 NOW = dt.datetime.now(dt.timezone.utc)
 TODAY = NOW.replace(hour=6, minute=0, second=0, microsecond=0)
@@ -248,6 +251,14 @@ def seed(db: Session) -> None:
         visit.created_at = created
         db.add(visit)
         db.flush()
+        # لا تسجيل بلا موافقة موثّقة (A1) — كل زيارة تجاوزت المسودة تحمل موافقتها
+        if state != "draft":
+            db.add(VisitConsent(
+                visit_id=visit.id, facility_id=fid,
+                consent_version=CONSENT_DOC["version"], consent_text_hash=CONSENT_DOC["text_hash"],
+                method="verbal_ack", captured_by=ahmad.id, captured_at=created,
+            ))
+            db.flush()
         return visit
 
     def add_transcript(visit: Visit) -> None:
@@ -278,9 +289,16 @@ def seed(db: Session) -> None:
         return sections
 
     def approve_and_upload(visit: Visit, ok: bool, days: int) -> None:
+        summary_hash = "sha256:" + "1f6a09c2e"[:9] + str(visit.id)[:8]
+        note_approval = NoteApproval(visit_id=visit.id, facility_id=fid, approved_by=ahmad.id,
+                                     approved_at=visit.created_at + dt.timedelta(minutes=5),
+                                     summary_hash=summary_hash)
+        db.add(note_approval)
+        db.flush()
         approval = Approval(visit_id=visit.id, facility_id=fid, approved_by=ahmad.id,
+                            note_approval_id=note_approval.id,
                             approved_at=visit.created_at + dt.timedelta(minutes=6),
-                            summary_hash="sha256:" + "1f6a09c2e"[:9] + str(visit.id)[:8],
+                            summary_hash=summary_hash,
                             codes_hash="sha256:" + "88d307b1"[:8] + str(visit.id)[:8])
         db.add(approval)
         db.flush()
@@ -298,8 +316,12 @@ def seed(db: Session) -> None:
                 db.add(UploadAttempt(job_id=job.id,
                                      started_at=approval.approved_at + dt.timedelta(minutes=1 + attempt * 5),
                                      result="failed", error_code="MDF-5052"))
+        db.add(AuditLog(facility_id=fid, actor_user_id=ahmad.id, action="visit.note_approved",
+                        entity="visit", entity_id=str(visit.id), meta_json={"gate": 1},
+                        at=note_approval.approved_at))
         db.add(AuditLog(facility_id=fid, actor_user_id=ahmad.id, action="visit.approved",
-                        entity="visit", entity_id=str(visit.id), meta_json=None, at=approval.approved_at))
+                        entity="visit", entity_id=str(visit.id), meta_json={"gate": 2},
+                        at=approval.approved_at))
 
     # 11 زيارة مطابقة لسجل النموذج (VIS-xxxx تجريبية — المعرف الحقيقي UUID)
     v_draft = make_visit("1063327", "draft", d(0, 11, 0), "r1")                 # VIS-8B03

@@ -74,14 +74,14 @@ function DoctorHomeInner() {
       <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap", marginBottom: 18 }}>
         <div style={{ flex: 1, minWidth: 240 }}>
           <h1 className="page-title" style={{ marginBottom: 2 }}>
-            {greeting}{user !== null ? `، ${user.full_name}` : ""}
+            {greeting}{user !== null ? `${L("،", ",")} ${user.full_name}` : ""}
           </h1>
           <p className="page-desc" style={{ margin: 0 }}>
             {dateLine}{user !== null ? ` · ${L("عيادة الباطنة", "Internal medicine clinic")} — ${user.facility_name}` : ""}
           </p>
         </div>
         <Link href="/doctor/visits/new" className="btn hero" style={{ textDecoration: "none" }}>
-          <span style={{ width: 10, height: 10, borderRadius: 999, background: "#C0392B", flexShrink: 0, animation: "mBlink 1.1s ease infinite" }} />
+          <span style={{ width: 10, height: 10, borderRadius: 999, background: "#d94b4b", flexShrink: 0, animation: "mBlink 1.1s ease infinite" }} />
           + {L("بدء زيارة جديدة", "Start new visit")}
         </Link>
       </div>
@@ -94,15 +94,15 @@ function DoctorHomeInner() {
         </div>
         <div className="card">
           <div className="stat-label">{L("بانتظار المراجعة", "Awaiting review")}</div>
-          <div className="stat-value" style={{ color: "#B07D10" }}><span className="num">{inReviewCount}</span></div>
+          <div className="stat-value" style={{ color: "#9c6f00" }}><span className="num">{inReviewCount}</span></div>
         </div>
         <div className="card">
           <div className="stat-label">{L("مرفوعة ✓", "Uploaded ✓")}</div>
-          <div className="stat-value" style={{ color: "#2E9E5B" }}><span className="num">{uploadedCount}</span></div>
+          <div className="stat-value" style={{ color: "#12a594" }}><span className="num">{uploadedCount}</span></div>
         </div>
         <div className="card">
           <div className="stat-label">{L("قالبك الافتراضي", "Your default template")}</div>
-          <div style={{ fontSize: 16, fontWeight: 800, color: "#0A5C64", lineHeight: 1.6 }}>
+          <div style={{ fontSize: 16, fontWeight: 800, color: "#005a55", lineHeight: 1.6 }}>
             {defaultTemplate !== undefined ? defaultTemplate.name : "—"}
           </div>
           <Link href="/doctor/templates" className="btn-ghost" style={{ padding: 0 }}>{L("إدارة القوالب", "Manage templates")}</Link>
@@ -137,7 +137,7 @@ function DoctorHomeInner() {
                       {L(action.label.ar, action.label.en)}
                     </Link>
                   ) : (
-                    <span style={{ color: "#5B7280" }}>—</span>
+                    <span style={{ color: "#5c7096" }}>—</span>
                   )}
                 </div>
               </div>

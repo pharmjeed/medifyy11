@@ -40,22 +40,22 @@ function OverviewInner() {
       <h2 style={{ fontSize: 16, fontWeight: 700, margin: "0 0 10px" }}>{L("المنشآت", "Facilities")}</h2>
       <div className="stat-grid">
         <Link href="/sa/facilities" style={{ textDecoration: "none", color: "inherit" }}>
-          <div className="card" style={{ borderColor: "#C9A227" }}>
+          <div className="card" style={{ borderColor: "#00c2b8" }}>
             <div className="stat-label">{L("إجمالي المنشآت", "Total facilities")}</div>
             <div className="stat-value num">{data.facilities.total}</div>
           </div>
         </Link>
         <div className="card">
           <div className="stat-label">{L("نشطة", "Active")}</div>
-          <div className="stat-value num" style={{ color: "#2E9E5B" }}>{data.facilities.active}</div>
+          <div className="stat-value num" style={{ color: "#12a594" }}>{data.facilities.active}</div>
         </div>
         <div className="card">
           <div className="stat-label">{L("معلّقة", "Suspended")}</div>
-          <div className="stat-value num" style={{ color: "#B07D10" }}>{data.facilities.suspended}</div>
+          <div className="stat-value num" style={{ color: "#9c6f00" }}>{data.facilities.suspended}</div>
         </div>
         <div className="card">
           <div className="stat-label">{L("مؤرشفة", "Archived")}</div>
-          <div className="stat-value num" style={{ color: "#5B7280" }}>{data.facilities.archived}</div>
+          <div className="stat-value num" style={{ color: "#5c7096" }}>{data.facilities.archived}</div>
         </div>
       </div>
 
@@ -75,37 +75,37 @@ function OverviewInner() {
         </div>
         <div className="card">
           <div className="stat-label">{L("مقاعد مباعة", "Seats sold")}</div>
-          <div className="stat-value num" style={{ color: "#0A5C64" }}>{data.seats_sold}</div>
+          <div className="stat-value num" style={{ color: "#005a55" }}>{data.seats_sold}</div>
         </div>
       </div>
 
       <h2 style={{ fontSize: 16, fontWeight: 700, margin: "22px 0 10px" }}>{L("الفوترة والتحصيل", "Billing & collection")}</h2>
       <div className="stat-grid">
-        <div className="card" style={{ borderColor: "#C0392B" }}>
+        <div className="card" style={{ borderColor: "#d94b4b" }}>
           <div className="stat-label">{L("مستحق غير محصّل (شامل الضريبة)", "Outstanding incl. VAT")}</div>
           <div className="stat-value"><bdi className="num">{fmtSar(data.invoices.outstanding_sar)}</bdi> <span style={{ fontSize: 13 }}>SAR</span></div>
-          <div style={{ fontSize: 12.5, color: "#5B7280", marginTop: 4 }}>
-            {L("مستحقة:", "Due:")} <span className="num">{data.invoices.due}</span> · {L("متأخرة:", "Overdue:")} <span className="num" style={{ color: "#C0392B", fontWeight: 700 }}>{data.invoices.overdue}</span>
+          <div style={{ fontSize: 12.5, color: "#5c7096", marginTop: 4 }}>
+            {L("مستحقة:", "Due:")} <span className="num">{data.invoices.due}</span> · {L("متأخرة:", "Overdue:")} <span className="num" style={{ color: "#d94b4b", fontWeight: 700 }}>{data.invoices.overdue}</span>
           </div>
         </div>
-        <div className="card" style={{ borderColor: "#2E9E5B" }}>
+        <div className="card" style={{ borderColor: "#12a594" }}>
           <div className="stat-label">{L("محصّل هذا الشهر", "Collected this month")}</div>
           <div className="stat-value"><bdi className="num">{fmtSar(data.invoices.collected_this_month_sar)}</bdi> <span style={{ fontSize: 13 }}>SAR</span></div>
         </div>
         <div className="card">
           <div className="stat-label">{L("إجمالي المحصّل", "Total collected")}</div>
           <div className="stat-value"><bdi className="num">{fmtSar(data.invoices.collected_sar)}</bdi> <span style={{ fontSize: 13 }}>SAR</span></div>
-          <div style={{ fontSize: 12.5, color: "#5B7280", marginTop: 4 }}>
+          <div style={{ fontSize: 12.5, color: "#5c7096", marginTop: 4 }}>
             {L("فواتير مسددة:", "Paid invoices:")} <span className="num">{data.invoices.paid}</span>
           </div>
         </div>
         <Link href="/sa/invoices?status=overdue" style={{ textDecoration: "none", color: "inherit" }}>
           <div className="card">
             <div className="stat-label">{L("فواتير متأخرة", "Overdue invoices")}</div>
-            <div className="stat-value num" style={{ color: data.invoices.overdue > 0 ? "#C0392B" : "#2E9E5B" }}>
+            <div className="stat-value num" style={{ color: data.invoices.overdue > 0 ? "#d94b4b" : "#12a594" }}>
               {data.invoices.overdue}
             </div>
-            <div style={{ fontSize: 12.5, color: "#5B7280", marginTop: 4 }}>{L("فتح قائمة الفواتير ←", "Open invoices list →")}</div>
+            <div style={{ fontSize: 12.5, color: "#5c7096", marginTop: 4 }}>{L("فتح قائمة الفواتير ←", "Open invoices list →")}</div>
           </div>
         </Link>
       </div>

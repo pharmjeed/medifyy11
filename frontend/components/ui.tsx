@@ -17,11 +17,12 @@ export function SpecBadge({ id }: { id: string }) {
 }
 
 export function SpecBar({ ids, desc }: { ids: string; desc: string }) {
+  const { L } = useLang();
   if (!SHOW_SPEC_IDS) return null;
   return (
     <div className="spec-bar">
-      <span>نسخة التخطيط</span>
-      <span className="spec-badge" style={{ background: "#C9A227", color: "#0F2233", border: "none" }}>{ids}</span>
+      <span>{L("نسخة التخطيط", "Layout version")}</span>
+      <span className="spec-badge" style={{ background: "#00c2b8", color: "#0c1a36", border: "none" }}>{ids}</span>
       <span style={{ fontWeight: 400 }}>{desc}</span>
     </div>
   );
@@ -29,15 +30,15 @@ export function SpecBar({ ids, desc }: { ids: string; desc: string }) {
 
 /* ===== شارات حالة الزيارة (VSTATES حرفياً + الإنجليزية) ===== */
 const VSTATES: Record<VisitState, { ar: string; en: string; bg: string; fg: string }> = {
-  draft: { ar: "مسودة", en: "Draft", bg: "#F7FAFB", fg: "#5B7280" },
-  recording: { ar: "تسجيل", en: "Recording", bg: "#EAF6F7", fg: "#0A5C64" },
-  transcribed: { ar: "مفرّغة", en: "Transcribed", bg: "#EAF6F7", fg: "#0A5C64" },
-  summarized: { ar: "ملخّصة", en: "Summarized", bg: "rgba(42,111,151,.12)", fg: "#2A6F97" },
-  in_review: { ar: "قيد المراجعة", en: "In review", bg: "#FDF3E3", fg: "#B07D10" },
-  approved: { ar: "معتمدة", en: "Approved", bg: "#E8F6EE", fg: "#2E9E5B" },
-  uploaded: { ar: "مرفوعة ✓", en: "Uploaded ✓", bg: "#E8F6EE", fg: "#2E9E5B" },
-  upload_failed: { ar: "فشل الرفع", en: "Upload failed", bg: "#FDEEEE", fg: "#C0392B" },
-  cancelled: { ar: "ملغاة", en: "Cancelled", bg: "#F7FAFB", fg: "#5B7280" },
+  draft: { ar: "مسودة", en: "Draft", bg: "#f7f9fb", fg: "#5c7096" },
+  recording: { ar: "تسجيل", en: "Recording", bg: "#d6f5f2", fg: "#005a55" },
+  transcribed: { ar: "مفرّغة", en: "Transcribed", bg: "#d6f5f2", fg: "#005a55" },
+  summarized: { ar: "ملخّصة", en: "Summarized", bg: "rgba(42,111,151,.12)", fg: "#3b82c4" },
+  in_review: { ar: "قيد المراجعة", en: "In review", bg: "#fdf4e0", fg: "#9c6f00" },
+  approved: { ar: "معتمدة", en: "Approved", bg: "#e6f7f4", fg: "#12a594" },
+  uploaded: { ar: "مرفوعة ✓", en: "Uploaded ✓", bg: "#e6f7f4", fg: "#12a594" },
+  upload_failed: { ar: "فشل الرفع", en: "Upload failed", bg: "#fbeaea", fg: "#d94b4b" },
+  cancelled: { ar: "ملغاة", en: "Cancelled", bg: "#f7f9fb", fg: "#5c7096" },
 };
 
 export function VisitStateBadge({ state }: { state: VisitState }) {
@@ -59,15 +60,15 @@ export function visitStateLabel(state: VisitState, lang?: "ar" | "en"): string {
    الطبيب يحتفظ باللون الفيروزي المألوف؛ المريض بلون أزرق مميّز.
    عند تدنّي الثقة تُعرض الشارة باهتة مع "؟" لأن الإسناد استدلالي لا صوتي. */
 const SPEAKERS: Record<Speaker, { ar: string; en: string; bg: string; fg: string; dot: string }> = {
-  doctor: { ar: "الطبيب", en: "Doctor", bg: "#EAF6F7", fg: "#0A5C64", dot: "#0E7C86" },
-  patient: { ar: "المريض", en: "Patient", bg: "rgba(42,111,151,.12)", fg: "#2A6F97", dot: "#2A6F97" },
+  doctor: { ar: "الطبيب", en: "Doctor", bg: "#d6f5f2", fg: "#005a55", dot: "#00736d" },
+  patient: { ar: "المريض", en: "Patient", bg: "rgba(42,111,151,.12)", fg: "#3b82c4", dot: "#3b82c4" },
 };
 
 export function SpeakerBadge({ speaker, confidence }: { speaker?: Speaker; confidence?: number }) {
   const { L } = useLang();
   if (speaker === undefined) {
     // مقطع مؤقت (partial) لا يزال يُبثّ — لم يُسنَد بعد
-    return <span className="badge" style={{ background: "#F0F4F5", color: "#5B7280" }}>{L("كلام", "Speech")}</span>;
+    return <span className="badge" style={{ background: "#eef2f7", color: "#5c7096" }}>{L("كلام", "Speech")}</span>;
   }
   const meta = SPEAKERS[speaker];
   const uncertain = confidence !== undefined && confidence < 0.62;
@@ -132,7 +133,7 @@ export function ErrorScreenProvider({ children }: { children: ReactNode }) {
       {children}
       {current !== null ? (
         <div
-          style={{ position: "fixed", inset: 0, zIndex: 70, background: "rgba(15,34,51,.55)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}
+          style={{ position: "fixed", inset: 0, zIndex: 70, background: "rgba(12,26,54,.55)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}
           onClick={() => setCurrent(null)}
         >
           <div
@@ -140,22 +141,22 @@ export function ErrorScreenProvider({ children }: { children: ReactNode }) {
             onClick={(event) => event.stopPropagation()}
           >
             <div style={{ position: "absolute", top: 12, insetInlineStart: 12 }}><SpecBadge id="W-004" /></div>
-            <div style={{ width: 56, height: 56, borderRadius: 999, background: "#FDEEEE", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
-              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#C0392B" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <div style={{ width: 56, height: 56, borderRadius: 999, background: "#fbeaea", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#d94b4b" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" /><path d="M12 9v4" /><path d="M12 17h.01" />
               </svg>
             </div>
             <div style={{ marginTop: 10 }}>
-              <bdi style={{ fontSize: 22, fontWeight: 700, color: "#C0392B" }}>{current.code}</bdi>
+              <bdi style={{ fontSize: 22, fontWeight: 700, color: "#d94b4b" }}>{current.code}</bdi>
             </div>
-            <div style={{ fontSize: 18, fontWeight: 700, color: "#0A5C64", marginTop: 6 }}>{L("حدث خطأ", "An error occurred")}</div>
-            <p style={{ fontSize: 14, color: "#5B7280", margin: "8px 0 4px" }}>{current.messageAr}</p>
-            <p style={{ fontSize: 12.5, color: "#5B7280", margin: "0 0 16px" }}>{current.action}</p>
+            <div style={{ fontSize: 18, fontWeight: 700, color: "#005a55", marginTop: 6 }}>{L("حدث خطأ", "An error occurred")}</div>
+            <p style={{ fontSize: 14, color: "#5c7096", margin: "8px 0 4px" }}>{current.messageAr}</p>
+            <p style={{ fontSize: 12.5, color: "#5c7096", margin: "0 0 16px" }}>{current.action}</p>
             <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
               <button className="btn" onClick={() => { setCurrent(null); window.location.reload(); }}>{L("إعادة المحاولة", "Retry")}</button>
               <button className="btn-secondary" onClick={() => setCurrent(null)}>{L("إغلاق", "Close")}</button>
             </div>
-            <p style={{ fontSize: 12.5, color: "#5B7280", marginTop: 14, marginBottom: 0 }}>
+            <p style={{ fontSize: 12.5, color: "#5c7096", marginTop: 14, marginBottom: 0 }}>
               {L("كل رمز", "Every")} <bdi>MDF</bdi> {L("برسالتين عربية/إنجليزية — النظام حصري من", "code is bilingual (Arabic/English) — the registry is exclusive to")} <bdi>DOC-13</bdi>.
             </p>
           </div>
@@ -179,6 +180,7 @@ export function Modal({
   children: ReactNode;
   wide?: boolean;
 }) {
+  const { L } = useLang();
   useEffect(() => {
     const handler = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
     window.addEventListener("keydown", handler);
@@ -191,7 +193,7 @@ export function Modal({
         <div className="modal-head">
           <div className="modal-title">{title}</div>
           {spec !== undefined ? <SpecBadge id={spec} /> : null}
-          <button className="modal-close" aria-label="Close" onClick={onClose}>✕</button>
+          <button className="modal-close" aria-label={L("إغلاق", "Close")} onClick={onClose}>✕</button>
         </div>
         {children}
       </div>

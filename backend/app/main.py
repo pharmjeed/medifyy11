@@ -84,6 +84,7 @@ from .api.v1 import (  # noqa: E402
     approvals,
     auth,
     clinics_doctors,
+    export,
     facilities,
     notifications,
     summary,
@@ -102,6 +103,7 @@ app.include_router(templates.router, prefix=API, tags=["templates"])
 app.include_router(visits.router, prefix=API, tags=["visits"])
 app.include_router(summary.router, prefix=API, tags=["summary"])
 app.include_router(approvals.router, prefix=API, tags=["approvals"])
+app.include_router(export.router, prefix=API, tags=["export"])
 app.include_router(notifications.router, prefix=API, tags=["notifications"])
 app.include_router(superadmin.router, prefix=API, tags=["super-admin"])
 app.include_router(ws_transcribe.router, tags=["ws"])

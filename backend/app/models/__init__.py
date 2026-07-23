@@ -4,6 +4,7 @@ from .clinical import (
     Approval,
     EditEvent,
     GuidanceItem,
+    NoteApproval,
     Patient,
     PatientContextSnapshot,
     Recording,
@@ -14,6 +15,7 @@ from .clinical import (
     UploadAttempt,
     UploadJob,
     Visit,
+    VisitConsent,
 )
 from .platform import Plan, PlatformAdmin, PlatformAuditLog
 from .system import AuditLog, Notification
@@ -33,9 +35,9 @@ __all__ = [
     "Base",
     "Facility", "User", "Clinic", "Subscription", "SeatEvent", "Invoice",
     "PasswordResetToken", "IntegrationConfig", "CodingSystemConfig",
-    "Patient", "PatientContextSnapshot", "Template", "Visit", "Recording",
+    "Patient", "PatientContextSnapshot", "Template", "Visit", "VisitConsent", "Recording",
     "Transcript", "Summary", "SummarySection", "GuidanceItem", "EditEvent",
-    "Approval", "UploadJob", "UploadAttempt",
+    "NoteApproval", "Approval", "UploadJob", "UploadAttempt",
     "AuditLog", "Notification",
     "PlatformAdmin", "Plan", "PlatformAuditLog",
 ]

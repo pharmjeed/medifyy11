@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>Medify — B4 · ملخص حماية البيانات</title>
+<style>
+@page { size: A4; margin: 17mm 15mm 18mm; }
+:root{--teal:#0E7C86;--teal-dark:#0A5C64;--gold:#C9A227;--ok:#2E9E5B;--danger:#C0392B;--warn:#B07D10;--info:#2A6F97;--ink:#0F2233;--muted:#5B7280;--line:#D7E3E8;--sky:#EAF6F7;--bg:#F7FAFB}
+*{box-sizing:border-box}
+html{font-size:11pt}
+body{margin:0;font-family:"IBM Plex Sans Arabic","Segoe UI",Tahoma,Arial,sans-serif;color:var(--ink);direction:rtl;line-height:1.6;background:#fff}
+bdi,code,.ltr{direction:ltr;unicode-bidi:isolate}
+code{font-family:"IBM Plex Mono",Consolas,monospace;font-size:.88em;background:var(--sky);padding:1px 5px;border-radius:4px;color:var(--teal-dark)}
+.doc-head{border-bottom:3px solid var(--teal);padding-bottom:10px;margin-bottom:18px;display:flex;justify-content:space-between;align-items:flex-end;gap:16px}
+.brand{font-size:19pt;font-weight:700;color:var(--teal);letter-spacing:-.3px}
+.brand span{color:var(--gold)}
+.doc-meta{text-align:left;font-size:8.5pt;color:var(--muted);line-height:1.5}
+h1{font-size:17pt;margin:0 0 4px;color:var(--teal-dark)}
+.sub{font-size:10pt;color:var(--muted);margin:0 0 16px}
+h2{font-size:12.5pt;margin:20px 0 8px;color:var(--teal-dark);border-right:4px solid var(--gold);padding-right:9px;page-break-after:avoid}
+h3{font-size:11pt;margin:14px 0 6px;color:var(--ink);page-break-after:avoid}
+p{margin:0 0 9px}
+ul,ol{margin:0 0 10px;padding-right:20px}
+li{margin-bottom:4px}
+table{width:100%;border-collapse:collapse;margin:10px 0 14px;font-size:9.5pt;page-break-inside:avoid}
+th{background:var(--sky);color:var(--teal-dark);font-weight:700;text-align:right;padding:7px 9px;border:1px solid var(--line)}
+td{padding:7px 9px;border:1px solid var(--line);vertical-align:top}
+tbody tr:nth-child(even){background:#FBFDFD}
+.num{direction:ltr;text-align:center}
+.box{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:11px 13px;margin:10px 0;page-break-inside:avoid}
+.note{background:var(--sky);border-right:4px solid var(--teal);border-radius:6px;padding:10px 13px;margin:11px 0;font-size:10pt}
+.warn{background:#FDF6E7;border-right:4px solid var(--warn);border-radius:6px;padding:10px 13px;margin:11px 0;font-size:10pt}
+.fill{display:block;border-bottom:1px dotted #9AB3BC;min-height:20px;margin:5px 0 12px}
+.fill-lg{display:block;border:1px dotted #9AB3BC;border-radius:6px;min-height:58px;margin:5px 0 12px}
+.opt{display:inline-block;border:1.4px solid var(--muted);width:11px;height:11px;border-radius:3px;margin-left:6px;vertical-align:-1px}
+.chip{display:inline-block;background:var(--sky);color:var(--teal-dark);border:1px solid var(--line);border-radius:20px;padding:1px 10px;font-size:8.5pt;margin-left:4px}
+.chip.g{background:#EAF7EF;color:#1E7A45;border-color:#BFE4CE}
+.chip.w{background:#FDF6E7;color:#8A6208;border-color:#EEDCAE}
+.foot{margin-top:22px;padding-top:9px;border-top:1px solid var(--line);font-size:8pt;color:var(--muted);display:flex;justify-content:space-between}
+.pb{page-break-before:always}
+.avoid{page-break-inside:avoid}
+</style>
+</head>
+<body>
+
+<div class="doc-head"><div class="brand"><bdi>Medify<span>.</span></bdi></div><div class="doc-meta">وثيقة رقم <bdi>B4</bdi> · الإصدار <bdi>1.0</bdi><br>التاريخ: <bdi>2026-07-24</bdi><br>سري — للاستخدام مع فريق المنشأة</div></div>
+
+<h1>ملخص حماية البيانات</h1>
+<p class="sub">لمسؤول الامتثال وأمن المعلومات · ضمانات مفروضة بالكود لا بالسياسة · <span class="chip">مسلَّم</span> = جاهز في الإصدار المسلَّم.</p>
+
+<table class="avoid">
+<thead><tr><th>الضمانة</th><th>كيف تُفرض تقنياً</th></tr></thead>
+<tbody>
+<tr><td>إقامة البيانات وعزلها وتشفيرها</td><td>كل بيانات المرضى داخل المملكة · <bdi>RLS</bdi> على كل جدول يحمل <code><bdi>facility_id</bdi></code> (بلا سياق منشأة تُقرأ صفر صفوف) · تشفير عمودي تطبيقي (<bdi>Fernet</bdi>) لأعمدة الهوية والنصوص السريرية والأسرار.</td></tr>
+<tr><td>حجب الأدمن عن المحتوى السريري</td><td>منع بنيوي: عدادات وتجميعات وميتاداتا فقط — لا نص مذكرة ولا تفريغ ولا صوت، حتى في طابور فشل الرفع.</td></tr>
+<tr><td>إخفاء الهوية قبل كل نداء نموذج</td><td>الاسم و<bdi>MRN</bdi> يُستبدلان برموز جلسة قبل النداء وتُستعاد الهوية محلياً بعد الرد، مع كشف نمط الهوية الوطنية السعودية.</td></tr>
+<tr><td>بوابتا اعتماد بشريتان قبل أي خروج <span class="chip">مسلَّم</span></td><td><bdi>①</bdi> نص المذكرة ثم <bdi>②</bdi> الأكواد بنداً بنداً، ببصمة <bdi>SHA-256</bdi> وحدث تدقيق مستقل لكل بوابة. والرفع بلا اعتماد مستحيل بنيوياً: <code><bdi>upload_jobs.visit_id</bdi></code> مفتاح أجنبي إلى <code><bdi>approvals.visit_id</bdi></code>، وآلة حالات الزيارة مفروضة بمحفّز قاعدة.</td></tr>
+<tr><td>سجلات لا تُعدَّل ومذكرة مجمَّدة</td><td><code><bdi>approvals</bdi></code> و<code><bdi>audit_logs</bdi></code> إلحاقية: <bdi>REVOKE</bdi> + محفّزات ترفض <bdi>UPDATE</bdi>/<bdi>DELETE</bdi> حتى من مالك القاعدة. وأقسام الملخص تُقفل بعد الاعتماد؛ أي تعديل يستلزم دورة اعتماد جديدة.</td></tr>
+<tr><td>موافقة قبل التسجيل وحذف بعده <span class="chip">مسلَّم</span></td><td>بوابة موافقة مريض إلزامية قبل بدء التسجيل بسجل غير قابل للتعديل؛ وحذف صوت مجدول عند انتهاء مدة الاحتفاظ التي تحددها المنشأة، بحدث تدقيق لكل حذف.</td></tr>
+<tr><td>مسارا الخروج — لا ثالث لهما</td><td><bdi>①</bdi> حزمة <bdi>FHIR R4</bdi> بـ <bdi>POST</bdi> · <code><bdi>application/fhir+json</bdi></code> · <bdi>Bearer</bdi> إلى نقطة المنشأة المهيّأة وحدها (<bdi>test</bdi>/<bdi>live</bdi>، وسرّها مشفَّر عمودياً) · <bdi>②</bdi> تصدير <bdi>PDF</bdi> أو نسخ نصي بيد الطبيب <span class="chip">مسلَّم</span>.</td></tr>
+<tr><td>إدارة فشل الرفع</td><td>تمييز الرفض البنيوي (<bdi>MDF-5051</bdi>) عن تعذّر الوصول (<bdi>MDF-5052</bdi>)؛ محاولات آلية بحد أقصى وسجل محاولات وإعادة يدوية، وطابور فشل للأدمن بميتاداتا فقط.</td></tr>
+<tr><td>لا تخمين في الترميز <span class="chip">مسلَّم</span></td><td>لكل كود درجة ثقة وإصدار سجل مرجعي وتاريخ سريان؛ وما دون العتبة يُعرض خانة فارغة بعبارة «يتطلب إدخال الطبيب».</td></tr>
+<tr><td>الهوية والوصول</td><td><bdi>JWT</bdi> <bdi>30</bdi> دقيقة و<bdi>refresh</bdi> <bdi>7</bdi> أيام بكوكي <bdi>httpOnly</bdi>؛ قفل بعد <bdi>5</bdi> محاولات فاشلة؛ <bdi>TOTP 2FA</bdi> على طبقة المنصة وإعادة مصادقة للإجراءات الحساسة؛ تحديد معدل أشد على نقاط الذكاء الاصطناعي.</td></tr>
+</tbody>
+</table>
+
+<div class="note"><strong>حدود صريحة:</strong> لا نرفع إلى <bdi>NPHIES</bdi> ولا نتنبأ باحتمالية قبول المطالبة — المنشأة ترفع مطالبتها من نظامها، ومقياسنا «درجة اكتمال التوثيق». و<bdi>DRG</bdi> لا يُبنى إطلاقاً.</div>
+
+<div class="foot"><span><bdi>Medify</bdi> — كاتب طبي ذكي محيطي · وثيقة <bdi>B4</bdi></span><span>صفحة <bdi>__/__</bdi></span></div>
+
+</body>
+</html>

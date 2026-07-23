@@ -27,15 +27,18 @@ const DOCTOR_NAV = [
   { href: "/doctor/visits/new", ar: "زيارة جديدة", en: "New visit" },
 ];
 
-export function Logo() {
+/** الشعار الرسمي (wordmark الهوية) — يتبدّل مع اللغة: «ميدفاي» عربي / «Medify» لاتيني. */
+export function Logo({ height = 26 }: { height?: number }) {
+  const { lang, L } = useLang();
+  const src = lang === "ar" ? "/brand/medify-wordmark-ar.svg" : "/brand/medify-wordmark.svg";
   return (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
-      <svg viewBox="0 0 44 30" width="30" height="21" aria-hidden="true">
-        <path d="M3,26 C15,25 27,19 41,4" fill="none" stroke="#0E7C86" strokeWidth="3.6" strokeLinecap="round" />
-        <circle cx="41" cy="4" r="3" fill="#C9A227" />
-      </svg>
-      <bdi className="ui" style={{ fontSize: 18, fontWeight: 800, color: "#0A5C64" }}>Medify</bdi>
-    </span>
+    /* eslint-disable-next-line @next/next/no-img-element */
+    <img
+      src={src}
+      alt={L("ميدفاي", "Medify")}
+      /* inline-block ليحترم textAlign:center في صفحات الدخول، وverticalAlign يمنع فجوة الأساس */
+      style={{ height, width: "auto", display: "inline-block", verticalAlign: "middle" }}
+    />
   );
 }
 
@@ -70,9 +73,9 @@ const KIND_TITLE: Record<string, { ar: string; en: string }> = {
 };
 
 const PRIORITY_CHIP: Record<string, { ar: string; en: string; bg: string; fg: string }> = {
-  critical: { ar: "حرجة", en: "Critical", bg: "#FDEEEE", fg: "#C0392B" },
-  important: { ar: "مهمة", en: "Important", bg: "#FDF3E3", fg: "#B07D10" },
-  normal: { ar: "عادية", en: "Normal", bg: "rgba(42,111,151,.12)", fg: "#2A6F97" },
+  critical: { ar: "حرجة", en: "Critical", bg: "#fbeaea", fg: "#d94b4b" },
+  important: { ar: "مهمة", en: "Important", bg: "#fdf4e0", fg: "#9c6f00" },
+  normal: { ar: "عادية", en: "Normal", bg: "rgba(42,111,151,.12)", fg: "#3b82c4" },
 };
 
 function NotificationCenter({ open, onClose, onUnreadChange }: {
@@ -108,20 +111,20 @@ function NotificationCenter({ open, onClose, onUnreadChange }: {
 
   return (
     <>
-      <div style={{ position: "fixed", inset: 0, zIndex: 60, background: "rgba(15,34,51,.25)" }} onClick={onClose} />
+      <div style={{ position: "fixed", inset: 0, zIndex: 60, background: "rgba(12,26,54,.25)" }} onClick={onClose} />
       <div style={{
         position: "fixed", top: 70, insetInlineEnd: "auto", left: 18, zIndex: 61,
         width: "min(380px,92vw)", maxHeight: "74vh", overflowY: "auto", background: "#fff",
-        border: "1px solid #D7E3E8", borderRadius: 12, boxShadow: "0 18px 44px rgba(15,34,51,.22)", animation: "mIn .18s ease",
+        border: "1px solid #c7d1e0", borderRadius: 12, boxShadow: "0 18px 44px rgba(12,26,54,.22)", animation: "mIn .18s ease",
       }}>
-        <div style={{ padding: "14px 16px", borderBottom: "1px solid #D7E3E8", position: "sticky", top: 0, background: "#fff", display: "flex", alignItems: "center", gap: 8 }}>
+        <div style={{ padding: "14px 16px", borderBottom: "1px solid #c7d1e0", position: "sticky", top: 0, background: "#fff", display: "flex", alignItems: "center", gap: 8 }}>
           <strong style={{ fontSize: 16, flex: 1 }}>{L("مركز الإشعارات", "Notification center")}</strong>
           <SpecBadge id="W-003" />
           <button className="btn-ghost" onClick={async () => {
             for (const row of rows.filter((r) => r.read_at === null)) await markRead(row.id);
             toast(L("حُدّدت الإشعارات كمقروءة", "All notifications marked as read"));
           }}>{L("تحديد الكل كمقروء", "Mark all as read")}</button>
-          <button className="modal-close" aria-label="Close" onClick={onClose}>✕</button>
+          <button className="modal-close" aria-label={L("إغلاق", "Close")} onClick={onClose}>✕</button>
         </div>
         {rows.length === 0 ? <div className="grid-empty">{L("لا إشعارات", "No notifications")}</div> : rows.map((row) => {
           const priority = PRIORITY_CHIP[row.payload.priority ?? "normal"] ?? PRIORITY_CHIP["normal"]!;
@@ -130,16 +133,16 @@ function NotificationCenter({ open, onClose, onUnreadChange }: {
           const unread = row.read_at === null;
           return (
             <div key={row.id} style={{
-              display: "flex", gap: 10, padding: "12px 16px", borderBottom: "1px solid #EAF6F7",
-              background: unread ? "rgba(14,124,134,.05)" : "#fff",
+              display: "flex", gap: 10, padding: "12px 16px", borderBottom: "1px solid #d6f5f2",
+              background: unread ? "rgba(0,115,109,.05)" : "#fff",
             }}>
-              <span style={{ width: 9, height: 9, borderRadius: 999, marginTop: 8, flexShrink: 0, background: unread ? priority.fg : "#D7E3E8" }} />
+              <span style={{ width: 9, height: 9, borderRadius: 999, marginTop: 8, flexShrink: 0, background: unread ? priority.fg : "#c7d1e0" }} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                   <strong style={{ fontSize: 14 }}>{title !== undefined ? L(title.ar, title.en) : row.kind}</strong>
                   <span className="badge" style={{ background: priority.bg, color: priority.fg }}>{L(priority.ar, priority.en)}</span>
                 </div>
-                <div style={{ fontSize: 12.5, color: "#5B7280", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 2 }}>
+                <div style={{ fontSize: 12.5, color: "#5c7096", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 2 }}>
                   <bdi>{row.kind}</bdi>
                   <span>{fmtDateTime(row.created_at)}</span>
                   {action !== undefined ? (
@@ -155,7 +158,7 @@ function NotificationCenter({ open, onClose, onUnreadChange }: {
             </div>
           );
         })}
-        <div style={{ padding: "10px 16px", fontSize: 12.5, color: "#5B7280" }}>
+        <div style={{ padding: "10px 16px", fontSize: 12.5, color: "#5c7096" }}>
           {L("قناتا الإطلاق: داخل التطبيق + بريد للحرجة · لا محتوى سريرياً في الإشعارات (DOC-12).",
              "Channels: in-app + email for critical · no clinical content in notifications (DOC-12).")}
         </div>
@@ -221,13 +224,13 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
       <ErrorScreenProvider>
         <header className="topbar">
           <div className="topbar-inner">
-            <Link href={user.role === "admin" ? "/admin" : "/doctor"} aria-label="Medify"><Logo /></Link>
+            <Link href={user.role === "admin" ? "/admin" : "/doctor"} aria-label={L("ميدفاي — الصفحة الرئيسية", "Medify — Home")}><Logo /></Link>
             <span className="topbar-divider" />
             <span style={{ fontSize: 16, fontWeight: 700 }}>{title}</span>
             <span style={{ flex: 1 }} />
             <LangToggle />
             <button className="btn-icon" aria-label={L("الإشعارات", "Notifications")} onClick={() => setNotifOpen((value) => !value)}>
-              <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#0A5C64" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#005a55" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.7 21a2 2 0 0 1-3.4 0" />
               </svg>
               {unread > 0 ? <span className="bell-count">{unread}</span> : null}
@@ -235,19 +238,19 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
             <span className="user-chip">
               <span style={{ textAlign: "start" }}>
                 <span style={{ display: "block", fontSize: 14, fontWeight: 700, lineHeight: 1.3 }}>{user.full_name}</span>
-                <span style={{ display: "block", fontSize: 12.5, color: "#5B7280", lineHeight: 1.3 }}>{roleLabel}</span>
+                <span style={{ display: "block", fontSize: 12.5, color: "#5c7096", lineHeight: 1.3 }}>{roleLabel}</span>
               </span>
               <Link href="/profile" className="avatar" aria-label={L("الملف الشخصي", "Profile")} style={{ textDecoration: "none" }}>
                 {initials(user.full_name)}
               </Link>
             </span>
             <button className="btn-icon logout" aria-label={L("تسجيل الخروج", "Sign out")} onClick={() => void logout()}>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#C0392B" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#d94b4b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" />
               </svg>
             </button>
           </div>
-          <nav style={{ borderTop: "1px solid #EAF6F7", background: "#fff" }} aria-label={L("التنقل الرئيسي", "Main navigation")}>
+          <nav style={{ borderTop: "1px solid #d6f5f2", background: "#fff" }} aria-label={L("التنقل الرئيسي", "Main navigation")}>
             <div style={{ maxWidth: 1160, margin: "0 auto", padding: "0 20px", display: "flex", gap: 4, overflowX: "auto" }}>
               {nav.map((item) => {
                 const active = item.href === "/doctor/visits"
@@ -256,8 +259,8 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
                 return (
                   <Link key={item.href} href={item.href} style={{
                     padding: "9px 14px", fontSize: 14, fontWeight: 700, textDecoration: "none",
-                    color: active ? "#0A5C64" : "#5B7280",
-                    borderBottom: active ? "3px solid #0E7C86" : "3px solid transparent",
+                    color: active ? "#005a55" : "#5c7096",
+                    borderBottom: active ? "3px solid #00736d" : "3px solid transparent",
                     whiteSpace: "nowrap",
                   }}>{L(item.ar, item.en)}</Link>
                 );

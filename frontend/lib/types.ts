@@ -145,10 +145,24 @@ export interface CreatedVisit {
 
 export interface GuidanceItem {
   id: string;
-  kind: "clinical_dx" | "clinical_rx" | "clinical_procedure" | "coding_match";
+  kind:
+    | "clinical_dx"
+    | "clinical_rx"
+    | "clinical_procedure"
+    | "clinical_service"
+    | "clinical_device"
+    | "coding_match";
   suggestion_text: string;
   code_system: string | null;
   code_value: string | null;
+  code_secondary_system?: string | null;
+  code_secondary_value?: string | null;
+  code_registry_version?: string | null;
+  code_effective_date?: string | null;
+  confidence?: number | null;
+  requires_doctor_input?: boolean;
+  linked_dx_code?: string | null;
+  justification?: string | null;
   evidence_source: "patient_file" | "current_visit";
   evidence_ref: string | null;
   safety_flag: boolean;
@@ -172,6 +186,18 @@ export interface ApprovalRecord {
   codes_hash: string;
 }
 
+export interface GateStamp {
+  approved_by: string;
+  approved_at: string;
+  summary_hash?: string;
+  codes_hash?: string;
+}
+
+export interface ApprovalGates {
+  note: GateStamp | null;
+  codes: GateStamp | null;
+}
+
 export interface VisitSummary {
   visit_id: string;
   state: VisitState;
@@ -179,8 +205,32 @@ export interface VisitSummary {
   generated_at: string;
   sections: SummarySection[];
   pending_guidance_count: number;
+  awaiting_doctor_input_count: number;
   etag: string;
+  gates: ApprovalGates;
+  note_approved: boolean;
+  can_export: boolean;
   approval: ApprovalRecord | null;
+}
+
+export interface ConsentDocument {
+  version: string;
+  text_ar: string;
+  text_en: string;
+  ack_ar: string;
+  ack_en: string;
+  text_hash: string;
+}
+
+export interface ConsentState {
+  document: ConsentDocument;
+  captured: {
+    captured_at: string;
+    captured_by: string;
+    method: string;
+    consent_version: string;
+    text_hash: string;
+  } | null;
 }
 
 export type Speaker = "doctor" | "patient";

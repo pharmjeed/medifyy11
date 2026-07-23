@@ -1,0 +1,368 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>Medify — B2 مواصفة التكامل الإصدار 1.0</title>
+<style>
+@page { size: A4; margin: 17mm 15mm 18mm; }
+:root{--teal:#0E7C86;--teal-dark:#0A5C64;--gold:#C9A227;--ok:#2E9E5B;--danger:#C0392B;--warn:#B07D10;--info:#2A6F97;--ink:#0F2233;--muted:#5B7280;--line:#D7E3E8;--sky:#EAF6F7;--bg:#F7FAFB}
+*{box-sizing:border-box}
+html{font-size:11pt}
+body{margin:0;font-family:"IBM Plex Sans Arabic","Segoe UI",Tahoma,Arial,sans-serif;color:var(--ink);direction:rtl;line-height:1.6;background:#fff}
+bdi,code,.ltr{direction:ltr;unicode-bidi:isolate}
+code{font-family:"IBM Plex Mono",Consolas,monospace;font-size:.88em;background:var(--sky);padding:1px 5px;border-radius:4px;color:var(--teal-dark)}
+.doc-head{border-bottom:3px solid var(--teal);padding-bottom:10px;margin-bottom:18px;display:flex;justify-content:space-between;align-items:flex-end;gap:16px}
+.brand{font-size:19pt;font-weight:700;color:var(--teal);letter-spacing:-.3px}
+.brand span{color:var(--gold)}
+.doc-meta{text-align:left;font-size:8.5pt;color:var(--muted);line-height:1.5}
+h1{font-size:17pt;margin:0 0 4px;color:var(--teal-dark)}
+.sub{font-size:10pt;color:var(--muted);margin:0 0 16px}
+h2{font-size:12.5pt;margin:20px 0 8px;color:var(--teal-dark);border-right:4px solid var(--gold);padding-right:9px;page-break-after:avoid}
+h3{font-size:11pt;margin:14px 0 6px;color:var(--ink);page-break-after:avoid}
+p{margin:0 0 9px}
+ul,ol{margin:0 0 10px;padding-right:20px}
+li{margin-bottom:4px}
+table{width:100%;border-collapse:collapse;margin:10px 0 14px;font-size:9.5pt;page-break-inside:avoid}
+th{background:var(--sky);color:var(--teal-dark);font-weight:700;text-align:right;padding:7px 9px;border:1px solid var(--line)}
+td{padding:7px 9px;border:1px solid var(--line);vertical-align:top}
+tbody tr:nth-child(even){background:#FBFDFD}
+.num{direction:ltr;text-align:center}
+.box{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:11px 13px;margin:10px 0;page-break-inside:avoid}
+.note{background:var(--sky);border-right:4px solid var(--teal);border-radius:6px;padding:10px 13px;margin:11px 0;font-size:10pt}
+.warn{background:#FDF6E7;border-right:4px solid var(--warn);border-radius:6px;padding:10px 13px;margin:11px 0;font-size:10pt}
+.fill{display:block;border-bottom:1px dotted #9AB3BC;min-height:20px;margin:5px 0 12px}
+.fill-lg{display:block;border:1px dotted #9AB3BC;border-radius:6px;min-height:58px;margin:5px 0 12px}
+.opt{display:inline-block;border:1.4px solid var(--muted);width:11px;height:11px;border-radius:3px;margin-left:6px;vertical-align:-1px}
+.chip{display:inline-block;background:var(--sky);color:var(--teal-dark);border:1px solid var(--line);border-radius:20px;padding:1px 10px;font-size:8.5pt;margin-left:4px}
+.chip.g{background:#EAF7EF;color:#1E7A45;border-color:#BFE4CE}
+.chip.w{background:#FDF6E7;color:#8A6208;border-color:#EEDCAE}
+.foot{margin-top:22px;padding-top:9px;border-top:1px solid var(--line);font-size:8pt;color:var(--muted);display:flex;justify-content:space-between}
+.pb{page-break-before:always}
+.avoid{page-break-inside:avoid}
+</style>
+</head>
+<body>
+
+<div class="doc-head"><div class="brand"><bdi>Medify<span>.</span></bdi></div><div class="doc-meta">وثيقة رقم <bdi>B2</bdi> · الإصدار <bdi>1.0</bdi><br>التاريخ: <bdi>2026-07-24</bdi><br>سري — للاستخدام مع فريق المنشأة</div></div>
+
+<h1>مواصفة التكامل — <bdi>Medify</bdi> ↔ نظام المنشأة</h1>
+<p class="sub">وثيقة تسليم لفريق تقنية المعلومات في المنشأة: نطاق التكامل، الكيانات الصادرة والواردة، المسار البديل <bdi>HL7 v2</bdi>، الأمان، معالجة الأخطاء، وقالب <bdi>Field Mapping</bdi> يُملأ في الجلسة.</p>
+
+<div class="box">
+<p><strong>الغرض:</strong> هذه الوثيقة هي العقد التقني الذي يبني عليه فريقكم. كل بند فيها موسوم بأحد ثلاثة: <strong>مبنيّ اليوم</strong> في الكود، أو <strong>في الإصدار المسلَّم</strong> ملتزَم به لهذه المنشأة، أو <strong>مقترح</strong> يُحسم في الجلسة. ما لا يرد فيها ليس ضمن النطاق.</p>
+<p><strong>القارئ المستهدف:</strong> مسؤول تكامل الأنظمة، مهندس الشبكة والأمن، ومالك نظام السجل الطبي في المنشأة.</p>
+<p><strong>ما نطلبه من الجلسة:</strong> استكمال القسم <bdi>8</bdi> (قالب الربط) واعتماد المسار — <span class="opt"></span> <bdi>FHIR R4</bdi> &nbsp; <span class="opt"></span> <bdi>HL7 v2</bdi> &nbsp; <span class="opt"></span> كلاهما.</p>
+</div>
+
+<h2>١) نطاق ما نفعله وما لا نفعله</h2>
+
+<table class="avoid">
+<thead><tr><th>نفعل</th><th>لا نفعل</th></tr></thead>
+<tbody>
+<tr>
+<td>نلتقط الحوار السريري صوتاً وننتج مذكرة مهيكلة بأقسام القالب المعتمد في المنشأة.</td>
+<td>لا نرفع أي شيء إلى <bdi>NPHIES</bdi>. المنشأة ترفع المطالبة من نظامها كما تفعل اليوم.</td>
+</tr>
+<tr>
+<td>نقترح أكواداً مهيكلة لكل بند خطة: تشخيص <bdi>ICD-10-AM</bdi> · دواء <bdi>SFDA</bdi> + <bdi>GTIN</bdi> · إجراء <bdi>ACHI</bdi>/<bdi>SBS</bdi> · خدمة ومختبر وأشعة <bdi>SBS</bdi> · جهاز <bdi>GMDN</bdi> + <bdi>GTIN</bdi>.</td>
+<td>لا نتنبأ باحتمالية قبول المطالبة، ولا نصدر أي درجة «قبول متوقع». هذا قرار جهة الدفع لا قرارنا.</td>
+</tr>
+<tr>
+<td>نقيس <strong>درجة اكتمال التوثيق</strong> — هل المذكرة تحمل ما يبرر كل بند خطة بكوده وربطه بالتشخيص.</td>
+<td>لا نحسب <bdi>DRG</bdi> ولا نبني مجموعات تشخيصية مرتبطة إطلاقاً — لا اليوم ولا في خارطة الطريق.</td>
+</tr>
+<tr>
+<td>نكتب المذكرة المعتمدة إلى ملف المريض في نظامكم عبر <bdi>FHIR R4</bdi> أو <bdi>HL7 v2</bdi>.</td>
+<td>لا نُنشئ مرضى ولا نعدّل ديموغرافياهم. المرضى عندنا <strong>بالمزامنة حصراً</strong> ولا توجد واجهة إنشاء مريض.</td>
+</tr>
+<tr>
+<td>نوقف كل خروج للبيانات خلف بوابتَي اعتماد بشريتين مفروضتين على مستوى قاعدة البيانات.</td>
+<td>لا نطبّق أي اقتراح ذكاء اصطناعي تلقائياً. لا كتابة بلا فعل صريح من الطبيب.</td>
+</tr>
+<tr>
+<td>نُخرج كوداً فارغاً مع علامة «يتطلب إدخال الطبيب» عند نزول الثقة تحت العتبة.</td>
+<td>لا نخمّن كوداً ولا نملأ خانة ترميز باحتمال. الخانة تبقى فارغة صراحةً.</td>
+</tr>
+<tr>
+<td>نبني موصّلاً معيارياً لكل «نظام» سجل طبي — لا موصّلاً مخصصاً لكل مستشفى.</td>
+<td>لا نطلب تعديلاً على نظامكم ولا وحدة برمجية داخله. نتحدث معياره القائم.</td>
+</tr>
+<tr>
+<td>نحتفظ بسجل تدقيق إلحاقي وبصمة <bdi>SHA-256</bdi> لكل اعتماد.</td>
+<td>لا نمنح الأدمن — عندنا أو عندكم — أي وصول إلى نص سريري. عدادات وتجميعات فقط.</td>
+</tr>
+</tbody>
+</table>
+
+<div class="warn">
+<strong>قرار مالك مثبت:</strong> مقياس المنتج هو «درجة اكتمال التوثيق» وليس «احتمالية قبول المطالبة». أي طلب لاحق بربط المنتج بقرار الدفع يخرج عن هذه المواصفة ويحتاج نطاقاً جديداً.
+</div>
+
+<div class="pb"></div>
+
+<h2>٢) نظرة معمارية — مسار البيانات من الصوت إلى ملف المريض</h2>
+
+<p>المسار خطي وأحادي الاتجاه. لا فرع يتجاوز البوابتين، ولا مخرج جانبي للبيانات.</p>
+
+<ol>
+<li><strong>مزامنة المريض والزيارة (وارد).</strong> نستقبل من نظامكم الديموغرافيا و<bdi>MRN</bdi> والموعد. تُنشأ الزيارة عندنا بحالة <bdi>draft</bdi>.</li>
+<li><strong>بوابة موافقة المريض.</strong> لا يبدأ التسجيل قبل تسجيل موافقة صريحة في سجل غير قابل للتعديل. الرفض يُنهي المسار عند هذه النقطة.</li>
+<li><strong>الالتقاط.</strong> يبدأ تسجيل الحوار — الحالة <bdi>recording</bdi>. الصوت يُخزَّن داخل المملكة ولا يغادرها.</li>
+<li><strong>التفريغ.</strong> تحويل الصوت إلى نص — الحالة <bdi>transcribed</bdi>.</li>
+<li><strong>إخفاء الهوية.</strong> قبل أي نداء لنموذج ذكاء اصطناعي تُستبدل الهوية (الاسم و<bdi>MRN</bdi>) برموز جلسة، ويُكشف نمط الهوية الوطنية السعودية ويُحجب. الاستعادة تتم محلياً بعد الرد.</li>
+<li><strong>التلخيص والترميز.</strong> تُبنى أقسام المذكرة من بنية القالب، ويُقترح لكل بند خطة كيان مهيكل بكوده ودرجة ثقته وإصدار السجل المرجعي وتاريخ سريانه — الحالة <bdi>summarized</bdi> ثم <bdi>in_review</bdi>.</li>
+<li><strong>بوابة الاعتماد ① — نص المذكرة.</strong> يقرأ الطبيب النص ويعدّله ثم يعتمده. تُحسب بصمة <bdi>SHA-256</bdi> لما اعتُمد ويُسجَّل حدث تدقيق. الأقسام تُجمَّد بعد الاعتماد.</li>
+<li><strong>بوابة الاعتماد ② — الأكواد بنداً بنداً.</strong> يحسم الطبيب كل كود على حدة: قبول أو تعديل النص والرمز معاً أو رفض. البند الذي تنزل ثقته عن العتبة يُعرض بخانة كود فارغة وعلامة «يتطلب إدخال الطبيب». بصمة <bdi>SHA-256</bdi> وحدث تدقيق مستقلان لهذه البوابة.</li>
+<li><strong>بناء الحزمة.</strong> بعد اجتياز البوابتين فقط تُبنى حزمة <bdi>FHIR R4 Bundle</bdi> من نوع <bdi>transaction</bdi> من الموارد الخمسة المعتمدة.</li>
+<li><strong>الإرسال.</strong> <bdi>POST</bdi> بترويسة <code>Content-Type: application/fhir+json</code> و<bdi>Bearer token</bdi> إلى النقطة المهيّأة لهذه المنشأة — الحالة <bdi>uploaded</bdi> عند التأكيد.</li>
+<li><strong>الفشل.</strong> إن رفض النظام الحزمة أو تعذّر الوصول تنتقل الزيارة إلى <bdi>upload_failed</bdi>، ويُشعَر الطبيب والأدمن، ويدخل الطلب طابور فشل للأدمن <strong>بميتاداتا فقط</strong> بلا أي نص سريري.</li>
+<li><strong>حذف الصوت.</strong> يُحذف التسجيل وفق سياسة الاحتفاظ المتفق عليها بمهمة مجدولة، مع حدث تدقيق لكل عملية حذف.</li>
+</ol>
+
+<h3>البوابتان كنقطتَي توقف إلزاميتين</h3>
+
+<div class="note">
+<p>البوابتان ليستا خطوة واجهة يمكن تجاوزها برمجياً. الضمانة بنيوية على مستوى قاعدة البيانات:</p>
+<ul>
+<li><code>upload_jobs.visit_id</code> مفتاح أجنبي إلى <code>approvals.visit_id</code> — <strong>يستحيل إنشاء عملية رفع بلا اعتماد بشري مسجَّل</strong>.</li>
+<li>آلة حالات الزيارة مفروضة بمحفّز قاعدة بيانات: <bdi>draft → recording → transcribed → summarized → in_review → approved → uploaded | upload_failed</bdi>، و<bdi>cancelled</bdi> من <bdi>draft</bdi> أو <bdi>recording</bdi> فقط. أي انتقال خارج هذه الخريطة يُرفض على مستوى القاعدة لا على مستوى التطبيق.</li>
+<li>جدولا <code>approvals</code> و<code>audit_logs</code> إلحاقيان فقط: <bdi>REVOKE</bdi> ومحفّزات ترفض <bdi>UPDATE</bdi> و<bdi>DELETE</bdi> حتى من مالك القاعدة.</li>
+</ul>
+</div>
+
+<div class="pb"></div>
+
+<h2>٣) ما نكتبه — الكيانات الصادرة <bdi>(Outbound)</bdi></h2>
+
+<p>النواة: حزمة <bdi>FHIR R4 Bundle</bdi> نوع <bdi>transaction</bdi> لكل زيارة معتمدة. <strong>الحزمة الصادرة اليوم تضم خمسة موارد حصراً:</strong> <bdi>Encounter</bdi> · <bdi>Composition</bdi> · <bdi>Condition[]</bdi> · <bdi>MedicationRequest[]</bdi> · <bdi>Procedure[]</bdi>. ما عدا ذلك إما ملتزَم به في نسخة التسليم أو مقترح يُحسم معكم — والجداول أدناه تفصل الثلاثة حقلاً حقلاً:</p>
+
+<ul>
+<li><span class="chip g">مبنيّ اليوم</span> موجود في الكود الحالي وقابل للمعاينة على بيئة الاختبار فوراً.</li>
+<li><span class="chip w">في الإصدار المسلَّم</span> ملتزَم به في نسخة التسليم لهذه المنشأة، وغير موجود اليوم.</li>
+<li><span class="chip">مقترح</span> خارج الحزمة الحالية — شكله النهائي يُحسم في الجلسة، ولا نلتزم به قبل ذلك.</li>
+</ul>
+
+<div class="warn">
+<strong>قاعدتان تسريان على كل بند خطة بلا استثناء</strong> <span class="chip w">في الإصدار المسلَّم</span>:
+<ol>
+<li>كل بند يحمل <code>reasonReference</code> إلى الـ<bdi>Condition</bdi> المرتبط (<bdi>linked_dx</bdi>) — لا بند خطة بلا تشخيص مبرر.</li>
+<li>كل بند يحمل حالة <bdi>suggested</bdi> أو <bdi>confirmed</bdi>. لا يخرج إلى نظامكم إلا ما حسمه الطبيب. والبند دون عتبة الثقة يخرج بخانة كود فارغة وعلامة «يتطلب إدخال الطبيب» — <strong>لا تخمين</strong>.</li>
+</ol>
+</div>
+
+<h3>الموارد الخمسة في حزمة اليوم</h3>
+<table class="avoid">
+<thead><tr><th>المورد</th><th><span class="chip g">مبنيّ اليوم</span> الحقول والقيم الفعلية</th><th><span class="chip w">في الإصدار المسلَّم</span> ما يُضاف</th><th>الترميز</th></tr></thead>
+<tbody>
+<tr>
+<td><bdi>Encounter</bdi><br>الزيارة</td>
+<td><bdi>id = encounter-{visit_id}</bdi> · <bdi>status = finished</bdi> (لا نرسل زيارة غير منتهية) · <bdi>class = AMB</bdi> · <bdi>subject = Patient/{MRN}</bdi></td>
+<td><bdi>period</bdi> بدء الزيارة ونهايتها · <bdi>participant</bdi> الطبيب ورقم ترخيصه · <bdi>serviceProvider</bdi> العيادة أو القسم</td>
+<td><bdi>AMB</bdi> بلا <bdi>system URI</bdi> اليوم · <bdi>ISO 8601</bdi> بتوقيت المملكة مع إزاحة المنطقة</td>
+</tr>
+<tr>
+<td><bdi>Composition</bdi><br>المذكرة</td>
+<td><bdi>type = 11488-4 Consult note</bdi> · <bdi>status = final</bdi> (لا مسودة إطلاقاً) · <bdi>date</bdi> لحظة بناء الحزمة عقب الاعتماد · <bdi>section[]</bdi> عنوان كل قسم ونصه</td>
+<td><bdi>author</bdi> الطبيب المعتمِد لا هوية النظام · <bdi>attester</bdi> بصمة <bdi>SHA-256</bdi>؛ وسيلة حملها بند جلسة</td>
+<td><bdi>LOINC</bdi> (<code>http://loinc.org</code>) · نص القسم <bdi>XHTML</bdi> في <bdi>section.text.div</bdi>؛ الأقسام من القالب لا <bdi>S/O/A/P</bdi> مثبتة، وبلا رمز <bdi>LOINC</bdi> للقسم اليوم</td>
+</tr>
+<tr>
+<td><bdi>Condition</bdi><br>التشخيص</td>
+<td><bdi>code.coding</bdi> الكود ونصه · <bdi>encounter</bdi> · <bdi>subject</bdi></td>
+<td><bdi>category</bdi> أساسي أو ثانوي · <bdi>verificationStatus</bdi> من حسم الطبيب · درجة الثقة وإصدار السجل المرجعي وتاريخ السريان <span class="chip">مقترح</span> كامتداد إن قبِله نظامكم</td>
+<td><bdi>ICD-10-AM</bdi> — نظام لا يُعطَّل، مفروض بقيد <bdi>CHECK</bdi> في القاعدة</td>
+</tr>
+<tr>
+<td><bdi>MedicationRequest</bdi><br>الدواء</td>
+<td><bdi>medicationCodeableConcept</bdi> · <bdi>status = active</bdi> · <bdi>intent = proposal</bdi> · <bdi>subject</bdi></td>
+<td><bdi>GTIN</bdi> للعبوة في <bdi>coding[]</bdi> نفسه · <bdi>reasonReference</bdi> · <bdi>dosageInstruction</bdi> جرعة وتكرار ومدة وطريق كما نطقها الطبيب · حالة البند</td>
+<td><bdi>SFDA</bdi> اليوم، ثم <bdi>SFDA</bdi> + <bdi>GTIN</bdi>. قيمة <bdi>intent</bdi> النهائية بند جلسة</td>
+</tr>
+<tr>
+<td><bdi>Procedure</bdi><br>الإجراء والعملية</td>
+<td><bdi>code.coding</bdi> · <bdi>status = preparation</bdi> ثابتة · <bdi>subject</bdi></td>
+<td>الترميز المزدوج مع <bdi>SBS</bdi> · <bdi>reasonReference</bdi> · اشتقاق <bdi>completed</bdi> حسب توقيت التنفيذ · <bdi>performer</bdi> عند توفره</td>
+<td><bdi>ACHI</bdi> اليوم، ثم <bdi>ACHI</bdi> + <bdi>SBS</bdi> حيث ينطبقان</td>
+</tr>
+</tbody>
+</table>
+
+<p><strong>الـ<bdi>system URI</bdi>:</strong> نرسل اليوم معرّفاً داخلياً بالصيغة <code>urn:medify:coding:{system}</code> لكل الترميزات. الـ<bdi>URI</bdi> النهائي لكل نظام يُثبت في القسم <bdi>8</bdi> — وهو أول بند نحتاج حسمه معكم.</p>
+
+<h3>موارد خارج الحزمة الحالية <span class="chip">مقترح — يُحسم في الجلسة</span></h3>
+
+<p>بنود الخدمات والأجهزة والمرفق تُبنى عندنا ككيانات مهيكلة بأكوادها لكنها <strong>لا تخرج في حزمة اليوم</strong>. المورد المقابل اقتراحنا القياسي، ونقبل بديلاً يناسب نظامكم:</p>
+
+<table class="avoid">
+<thead><tr><th>المورد المقترح</th><th>البند عندنا</th><th>الترميز</th><th>ما يُحسم معكم</th></tr></thead>
+<tbody>
+<tr><td><bdi>ServiceRequest</bdi></td><td>المختبر والأشعة والخدمات — مورد واحد للثلاثة</td><td><bdi>SBS</bdi></td><td>مقابل <bdi>category</bdi> لتصنيفكم الداخلي · قيم <bdi>status</bdi>/<bdi>intent</bdi> · نقل الأولوية من نص الطبيب</td></tr>
+<tr><td><bdi>DeviceRequest</bdi></td><td>الأجهزة والمستلزمات بحقل مبرر إلزامي — لا يخرج طلب جهاز بلا مبرر مكتوب</td><td><bdi>GMDN</bdi> + <bdi>GTIN</bdi></td><td>موضع نص المبرر (<bdi>reasonCode</bdi> أم حقل عندكم) · حمل الكمية</td></tr>
+<tr><td><bdi>DocumentReference</bdi></td><td>المذكرة المعتمدة ببصمتها كمرفق مستند مرجعي</td><td><code>application/pdf</code> أو نص · <bdi>LOINC 11488-4</bdi></td><td>هل تريدون إيداعه أصلاً · شكل المرفق · <span class="opt"></span> <bdi>base64</bdi> مضمّناً &nbsp; <span class="opt"></span> برابط استرجاع · حمل البصمة في <bdi>attachment.hash</bdi></td></tr>
+</tbody>
+</table>
+
+<div class="pb"></div>
+
+<h2>٤) ما نقرأه — الكيانات الواردة <bdi>(Inbound)</bdi></h2>
+
+<p>هذا الجدول متطلب لا وصف لمبنيّ: قناة المزامنة تُبنى مقابل نظامكم بعد تثبيت القسم <bdi>8</bdi>، وحتى ذلك الحين يعمل المنتج ببيانات مريض مُدخلة من ملف مزامنة أولي.</p>
+
+<table class="avoid">
+<thead><tr><th>المورد</th><th>ما نقرأه</th><th class="num">إلزامي</th><th>الاستخدام عندنا</th></tr></thead>
+<tbody>
+<tr><td><bdi>Patient</bdi></td><td>الاسم · <bdi>MRN</bdi> · الهوية الوطنية · الجنس · تاريخ الميلاد</td><td class="num">نعم</td><td>إنشاء ملف المريض بالمزامنة وربط الزيارات به.</td></tr>
+<tr><td><bdi>Encounter</bdi> أو الموعد</td><td>معرّف الزيارة · تاريخها ووقتها · العيادة أو القسم · الطبيب</td><td class="num">نعم</td><td>بناء قائمة زيارات اليوم أمام الطبيب.</td></tr>
+<tr><td>قائمة الأدوية</td><td>الأدوية الفعالة</td><td class="num">لا</td><td>سياق للطبيب أثناء المراجعة — يُقرأ ولا يُعاد كتابته.</td></tr>
+<tr><td>الحساسيات</td><td><bdi>AllergyIntolerance</bdi></td><td class="num">لا</td><td>عرض تنبيهي للطبيب. لا قرار آلي.</td></tr>
+<tr><td>المشاكل النشطة</td><td>قائمة التشخيصات القائمة</td><td class="num">لا</td><td>سياق يقلل التكرار في المذكرة.</td></tr>
+</tbody>
+</table>
+
+<div class="warn">
+<strong>المرضى عندنا بالمزامنة حصراً.</strong> لا توجد واجهة ولا نقطة نهاية لإنشاء مريض أو تعديل ديموغرافياه في <bdi>Medify</bdi>. نظامكم هو مصدر الحقيقة الوحيد لهوية المريض، وأي تصحيح ديموغرافي يتم عندكم ثم يصل إلينا بالمزامنة. الثلاثة الأخيرة اختيارية: غيابها لا يعطّل التكامل بل يقلل السياق المعروض للطبيب فقط.
+</div>
+
+<h2>٥) المسار البديل — <bdi>HL7 v2</bdi></h2>
+
+<p>النواة المبنية اليوم هي <bdi>FHIR R4</bdi>. إن لم تكن واجهة <bdi>FHIR</bdi> متاحة لديكم فالبديل مهايئ <bdi>HL7 v2</bdi> فوق النواة نفسها — <strong>يُبنى عند اعتماد هذا المسار في الجلسة</strong>، ولا فرق في المحتوى السريري ولا في البوابتين؛ الفرق في الغلاف فقط. ما يلي ملف تعريف مقترح نبدأ منه، لا مواصفة مثبتة.</p>
+
+<h3>ملف تعريف الرسائل <span class="chip">مقترح — يُثبت في الجلسة</span></h3>
+<table class="avoid">
+<thead><tr><th>الرسالة</th><th>الاتجاه</th><th>الغرض</th><th>ملاحظات</th></tr></thead>
+<tbody>
+<tr><td><bdi>MDM^T02</bdi></td><td>صادر</td><td>إيداع المستند الأصلي مع نصه</td><td>المسار المفضل لإيداع المذكرة المعتمدة.</td></tr>
+<tr><td><bdi>ORU^R01</bdi></td><td>صادر</td><td>بديل لإيداع المذكرة كنتيجة نصية</td><td>يُستخدم إن لم يدعم نظامكم <bdi>MDM</bdi>.</td></tr>
+<tr><td><bdi>ADT^A04</bdi></td><td>وارد</td><td>تسجيل مريض عيادات خارجية</td><td>المسار الأساسي لحالتنا (<bdi>AMB</bdi>) — مصدر الديموغرافيا.</td></tr>
+<tr><td><bdi>ADT^A08</bdi></td><td>وارد</td><td>تحديث بيانات المريض</td><td>نطبّق التحديث كما يرد — لا نعدّله.</td></tr>
+<tr><td><bdi>ACK</bdi></td><td>وارد</td><td>تأكيد الاستلام</td><td><bdi>AA</bdi> نجاح · <bdi>AE</bdi>/<bdi>AR</bdi> يُعامَلان حسب القسم <bdi>7</bdi>.</td></tr>
+</tbody>
+</table>
+
+<h3>الحقول الأساسية — <bdi>Segments / Fields</bdi> <span class="chip">مقترح — يُثبت في الجلسة</span></h3>
+<table class="avoid">
+<thead><tr><th class="num"><bdi>Segment</bdi></th><th><bdi>Fields</bdi> والمحتوى</th><th>ملاحظات</th></tr></thead>
+<tbody>
+<tr><td class="num"><bdi>MSH</bdi></td><td><bdi>3-6</bdi> التطبيق والمنشأة المرسلة والمستقبلة · <bdi>7 / 9 / 10 / 12</bdi> الطابع الزمني ونوع الرسالة ومعرّفها وإصدار <bdi>HL7</bdi> · <bdi>18</bdi> ترميز المحارف</td><td>الإصدار المستهدف <span class="fill"></span> والترميز <strong><bdi>UNICODE UTF-8</bdi></strong> بلا بديل — المحتوى عربي.</td></tr>
+<tr><td class="num"><bdi>PID</bdi></td><td><bdi>3</bdi> معرّف المريض (<bdi>MRN</bdi>) مع <bdi>assigning authority</bdi> · <bdi>5 / 7 / 8</bdi> الاسم وتاريخ الميلاد والجنس · <bdi>19</bdi> أو تكرار <bdi>PID-3</bdi> الهوية الوطنية</td><td>الاسم العربي كما هو بلا تحويل. موضع الهوية الوطنية يُحسم في الجلسة.</td></tr>
+<tr><td class="num"><bdi>PV1</bdi></td><td><bdi>2 / 3 / 7 / 19</bdi> نوع الزيارة والعيادة والطبيب المعالج ورقم الزيارة · <bdi>44 / 45</bdi> وقت البدء والنهاية</td><td><bdi>PV1-2 = O</bdi> للعيادات الخارجية.</td></tr>
+<tr><td class="num"><bdi>TXA</bdi></td><td><bdi>2 / 4 / 5</bdi> نوع المستند وتاريخا الإنشاء والاعتماد · <bdi>9 / 12 / 17</bdi> المعتمِد ومعرّف المستند الفريد وحالته</td><td>النوع يقابل <bdi>LOINC 11488-4</bdi> · الحالة <bdi>AU</bdi> (معتمد) حصراً.</td></tr>
+<tr><td class="num"><bdi>OBX</bdi></td><td><bdi>2 / 3 / 5</bdi> نوع القيمة ومعرّف القسم ونصه · <bdi>11 / 14</bdi> حالة النتيجة ووقتها</td><td><bdi>OBX</bdi> لكل قسم مذكرة · <bdi>OBX-11 = F</bdi> · محتوى <bdi>OBX-5</bdi> هو نفسه محتوى <bdi>Composition.section[]</bdi>.</td></tr>
+</tbody>
+</table>
+
+<p><strong>النقل:</strong> <bdi>MLLP over TLS</bdi>، والعنوان والمنفذ يُحسمان في الجلسة: المنفذ <span class="fill"></span></p>
+
+<div class="pb"></div>
+
+<h2>٦) الأمان على حدود التكامل</h2>
+
+<p>ما يخص القناة نفسها فقط. الصورة الكاملة لحماية البيانات (التشفير العمودي، عزل المستأجرين، إخفاء الهوية، السجلات الإلحاقية، الجلسات والدخول) في وثيقة <bdi>B4</bdi> المرافقة.</p>
+
+<table class="avoid">
+<thead><tr><th>الضابط</th><th>ما هو مطبَّق</th></tr></thead>
+<tbody>
+<tr><td>تشفير النقل</td><td>كل اتصال صادر ووارد عبر <bdi>HTTPS</bdi>، والحد الأدنى المطلوب <bdi>TLS 1.2</bdi> — بلا استثناء لبيئة الاختبار.</td></tr>
+<tr><td>المصادقة</td><td><strong>الوضع الوحيد المدعوم اليوم:</strong> <bdi>Bearer token</bdi> لكل منشأة، يُخزَّن في <code>integration_configs.auth_secret_encrypted</code> <strong>مشفراً عمودياً</strong> ولا يظهر في أي واجهة أو سجل. البدائل التالية <strong>غير مبنية</strong>، وأي منها يدخل نطاق التسليم إن اشترطتموه: <span class="opt"></span> <bdi>mTLS</bdi> &nbsp; <span class="opt"></span> <bdi>OAuth2 client credentials</bdi> &nbsp; <span class="opt"></span> قائمة سماح <bdi>IP</bdi>.</td></tr>
+<tr><td>وجهة واحدة لكل منشأة</td><td><code>integration_configs</code> يحمل <code>endpoint_url</code> و<code>mode</code> (<bdi>test</bdi> أو <bdi>live</bdi>) للمنشأة وحدها — لا وجهة خروج ثانية، والعزل بين المنشآت مفروض في القاعدة بـ<bdi>RLS</bdi>.</td></tr>
+<tr><td>ما لا يغادر القناة</td><td>لا محتوى سريري في أي إشعار أو سجل أو تحليلات. طابور فشل الرفع عند الأدمن ميتاداتا فقط — الأدمن محجوب بنيوياً عن نص المذكرة.</td></tr>
+<tr><td>إقامة البيانات</td><td>كل بيانات المرضى داخل المملكة العربية السعودية، ولا يغادرها الصوت ولا التفريغ. الواجهة عربية <bdi>RTL</bdi> أصيلة ثنائية اللغة.</td></tr>
+<tr><td>الاحتفاظ وحذف الصوت</td><td>حذف التسجيل بمهمة مجدولة وفق سياسة الاحتفاظ، بحدث تدقيق لكل حذف. المدة تُحدَّد معكم: <span class="fill"></span></td></tr>
+</tbody>
+</table>
+
+<h2>٧) معالجة الأخطاء وإعادة المحاولة</h2>
+
+<table class="avoid">
+<thead><tr><th class="num">الرمز</th><th>المعنى</th><th>مصدره</th><th>السلوك</th></tr></thead>
+<tbody>
+<tr><td class="num"><bdi>MDF-5051</bdi></td><td>رفض بنيوي — الحزمة وصلت ورُفضت</td><td>رد <bdi>4xx</bdi> من نظامكم (أو <bdi>ACK</bdi> بـ<bdi>AE</bdi>/<bdi>AR</bdi>)</td><td><strong>لا إعادة محاولة آلية.</strong> إعادة الإرسال بلا تصحيح ستُرفض مجدداً. يدخل طابور فشل الأدمن ويحتاج تدخلاً.</td></tr>
+<tr><td class="num"><bdi>MDF-5052</bdi></td><td>تعذّر وصول — انقطاع أو مهلة أو خطأ خادم</td><td>رد <bdi>5xx</bdi> أو خطأ شبكة أو انتهاء مهلة</td><td><strong>إعادة محاولة آلية</strong> حتى الحد الأقصى المهيّأ، ثم فشل نهائي وإشعار.</td></tr>
+</tbody>
+</table>
+
+<h3>سياسة المحاولات</h3>
+<ul>
+<li>النجاح عندنا هو رد <bdi>200</bdi> أو <bdi>201</bdi> أو <bdi>202</bdi> حصراً؛ وما عداه فشل يُصنَّف بأحد الرمزين أعلاه.</li>
+<li>مهلة الطلب الصادر: <bdi>30</bdi> ثانية · مهلة اختبار الاتصال: <bdi>10</bdi> ثوانٍ.</li>
+<li>عدد المحاولات الآلية قابل للتهيئة لكل بيئة (الافتراضي <bdi>3</bdi>)؛ يتوقف فوراً عند النجاح أو عند <bdi>MDF-5051</bdi>.</li>
+<li>كل محاولة تُسجَّل في جدول محاولات مستقل: وقت البدء والنتيجة ورمز الخطأ — سجل كامل يفيد التشخيص المشترك.</li>
+<li>عند الفشل النهائي: الزيارة إلى <bdi>upload_failed</bdi>، وإشعار للطبيب والأدمن، ودخول طابور الفشل بميتاداتا فقط.</li>
+<li><strong>إعادة يدوية</strong> من لوحة الأدمن: محاولة واحدة لكل ضغطة، بلا تكرار آلي.</li>
+<li><strong>اختبار اتصال</strong> من لوحة الأدمن يسجّل <code>last_test_at</code> و<code>last_test_ok</code> — يُنفَّذ قبل تحويل المنشأة من <bdi>mode=test</bdi> إلى <bdi>mode=live</bdi>.</li>
+</ul>
+
+<div class="note">
+<strong>ما نحتاجه منكم هنا:</strong> تعريف واضح لما يعتبره نظامكم رفضاً بنيوياً، ونص رسالة الخطأ التي يعيدها. كلما كان الرد أوضح قلّ زمن التشخيص المشترك عند أول فشل حقيقي.
+</div>
+
+<div class="pb"></div>
+
+<h2>٨) قالب <bdi>Field Mapping</bdi> — يُملأ في الجلسة</h2>
+
+<p>هذا القسم هو مخرج الجلسة الأساسي. عمودا «حقل <bdi>Medify</bdi>» و«مورد/حقل <bdi>FHIR</bdi> المقترح» مملوءان من طرفنا. الأعمدة الثلاثة الباقية يملؤها فريقكم بالقلم أثناء الجلسة. الصفوف الموسومة «مقترح» تعتمد على قرار الجلسة أولاً.</p>
+
+<table class="avoid">
+<thead><tr><th>حقل <bdi>Medify</bdi></th><th>مورد/حقل <bdi>FHIR</bdi> المقترح</th><th>الحقل المقابل في نظامكم</th><th>نظام الترميز</th><th class="num">إلزامي؟</th><th>ملاحظات</th></tr></thead>
+<tbody>
+<tr><td>معرّف المريض و<bdi>MRN</bdi></td><td><bdi>Patient.id</bdi> · <bdi>Patient.identifier</bdi> (<bdi>type=MR</bdi>)</td><td><span class="fill"></span></td><td><span class="fill"></span></td><td><span class="fill"></span></td><td><span class="fill"></span></td></tr>
+<tr><td>الهوية الوطنية</td><td><bdi>Patient.identifier</bdi> (<bdi>NI</bdi>)</td><td><span class="fill"></span></td><td><span class="fill"></span></td><td><span class="fill"></span></td><td><span class="fill"></span></td></tr>
+<tr><td>اسم المريض</td><td><bdi>Patient.name</bdi></td><td><span class="fill"></span></td><td><span class="fill"></span></td><td><span class="fill"></span></td><td><span class="fill"></span></td></tr>
+<tr><td>معرّف الزيارة وتاريخها</td><td><bdi>Encounter.identifier</bdi> + <bdi>period</bdi></td><td><span class="fill"></span></td><td><span class="fill"></span></td><td><span class="fill"></span></td><td><span class="fill"></span></td></tr>
+<tr><td>نوع الزيارة</td><td><bdi>Encounter.class</bdi> (<bdi>AMB</bdi>)</td><td><span class="fill"></span></td><td><span class="fill"></span></td><td><span class="fill"></span></td><td><span class="fill"></span></td></tr>
+<tr><td>الطبيب ورقم ترخيصه</td><td><bdi>Encounter.participant.individual</bdi> · <bdi>Practitioner.identifier</bdi></td><td><span class="fill"></span></td><td><span class="fill"></span></td><td><span class="fill"></span></td><td><span class="fill"></span></td></tr>
+<tr><td>العيادة / القسم</td><td><bdi>Encounter.serviceProvider</bdi></td><td><span class="fill"></span></td><td><span class="fill"></span></td><td><span class="fill"></span></td><td><span class="fill"></span></td></tr>
+<tr><td>نوع المذكرة وأقسامها</td><td><bdi>Composition.type</bdi> (<bdi>LOINC 11488-4</bdi>) · <bdi>section[]</bdi></td><td><span class="fill"></span></td><td><span class="fill"></span></td><td><span class="fill"></span></td><td><span class="fill"></span></td></tr>
+<tr><td>التشخيص الأساسي والثانوي</td><td><bdi>Condition.code</bdi> + <bdi>category</bdi></td><td><span class="fill"></span></td><td><span class="fill"></span></td><td><span class="fill"></span></td><td><span class="fill"></span></td></tr>
+<tr><td>ربط البند بالتشخيص</td><td><bdi>*.reasonReference</bdi> (<bdi>linked_dx</bdi>)</td><td><span class="fill"></span></td><td><span class="fill"></span></td><td><span class="fill"></span></td><td><span class="fill"></span></td></tr>
+<tr><td>الأدوية</td><td><bdi>MedicationRequest</bdi></td><td><span class="fill"></span></td><td><span class="fill"></span></td><td><span class="fill"></span></td><td><span class="fill"></span></td></tr>
+<tr><td>الإجراءات والعمليات</td><td><bdi>Procedure.code</bdi></td><td><span class="fill"></span></td><td><span class="fill"></span></td><td><span class="fill"></span></td><td><span class="fill"></span></td></tr>
+<tr><td>الخدمات والمختبر والأشعة <span class="chip">مقترح</span></td><td><bdi>ServiceRequest.code</bdi></td><td><span class="fill"></span></td><td><span class="fill"></span></td><td><span class="fill"></span></td><td><span class="fill"></span></td></tr>
+<tr><td>الأجهزة ومبرر صرفها <span class="chip">مقترح</span></td><td><bdi>DeviceRequest.codeCodeableConcept</bdi> + <bdi>reasonCode</bdi></td><td><span class="fill"></span></td><td><span class="fill"></span></td><td><span class="fill"></span></td><td><span class="fill"></span></td></tr>
+<tr><td>حالة البند</td><td><bdi>suggested</bdi> / <bdi>confirmed</bdi></td><td><span class="fill"></span></td><td><span class="fill"></span></td><td><span class="fill"></span></td><td><span class="fill"></span></td></tr>
+<tr><td>المرفق <bdi>PDF</bdi> <span class="chip">مقترح</span></td><td><bdi>DocumentReference.content.attachment</bdi></td><td><span class="fill"></span></td><td><span class="fill"></span></td><td><span class="fill"></span></td><td><span class="fill"></span></td></tr>
+<tr><td>الاعتماد: وقته ومعتمِده وبصمته</td><td><bdi>Composition.date</bdi> + <bdi>author</bdi> + <bdi>attester</bdi> · <bdi>attachment.hash</bdi></td><td><span class="fill"></span></td><td><span class="fill"></span></td><td><span class="fill"></span></td><td><span class="fill"></span></td></tr>
+</tbody>
+</table>
+
+<div class="box">
+<p><strong>الـ<bdi>system URI</bdi> النهائي لكل نظام ترميز</strong> — يُثبت هنا:</p>
+<p><bdi>ICD-10-AM</bdi> <span class="fill"></span> <bdi>ACHI</bdi> <span class="fill"></span> <bdi>SBS</bdi> <span class="fill"></span> <bdi>SFDA</bdi> <span class="fill"></span> <bdi>GMDN</bdi> <span class="fill"></span> <bdi>GTIN</bdi> <span class="fill"></span></p>
+</div>
+
+<div class="pb"></div>
+
+<h2>٩) متطلباتنا منكم للبدء</h2>
+
+<ul>
+<li><strong>بيانات اعتماد بيئة <bdi>sandbox</bdi></strong> — الحساب والسر، ونمط تجديدهما إن كان له انتهاء.</li>
+<li><strong>عنوان النقطة</strong> — <bdi>endpoint URL</bdi> للـ<bdi>FHIR</bdi>، أو عنوان ومنفذ <bdi>MLLP</bdi> للمسار البديل، لبيئتَي الاختبار والإنتاج.</li>
+<li><strong>أذونات الشبكة</strong> — فتح المسار من عناوين خروجنا إلى نقطتكم، وقائمة سماح <bdi>IP</bdi> إن وُجدت، وشهادة <bdi>TLS</bdi> إن كانت داخلية.</li>
+<li><strong>عيّنة رسالة أو مورد حقيقي مجهَّل</strong> — رسالة <bdi>ADT</bdi> ومورد <bdi>Patient</bdi> فعليان بعد إزالة الهوية. هذه أسرع طريقة لضبط القسم <bdi>8</bdi> بدقة.</li>
+<li><strong>مسؤول تكامل مسمّى</strong> — شخص واحد بالاسم لديه صلاحية القرار التقني، لا مجموعة بريدية.</li>
+<li><strong>قرارات تُحسم في الجلسة</strong> — المسار المعتمد، الـ<bdi>system URI</bdi> لكل ترميز، آلية المصادقة، شكل مرفق المستند وطريقة إيداعه إن اعتُمد، ومدة الاحتفاظ بالصوت.</li>
+</ul>
+
+<h3>جهات الاتصال</h3>
+<table class="avoid">
+<thead><tr><th>الدور</th><th>الاسم</th><th>القناة</th></tr></thead>
+<tbody>
+<tr><td>مسؤول التكامل — المنشأة</td><td><span class="fill"></span></td><td><span class="fill"></span></td></tr>
+<tr><td>مسؤول الشبكة والأمن — المنشأة</td><td><span class="fill"></span></td><td><span class="fill"></span></td></tr>
+<tr><td>مالك نظام السجل الطبي — المنشأة</td><td><span class="fill"></span></td><td><span class="fill"></span></td></tr>
+<tr><td>مسؤول التكامل — <bdi>Medify</bdi></td><td><span class="fill"></span></td><td><span class="fill"></span></td></tr>
+</tbody>
+</table>
+
+<h3>ملاحظات الجلسة وقرارات مفتوحة</h3>
+<span class="fill-lg"></span>
+<span class="fill-lg"></span>
+
+<div class="note">
+<strong>الخطوة التالية بعد الجلسة:</strong> نصدر الإصدار <bdi>1.1</bdi> من هذه الوثيقة بعمود «الحقل المقابل في نظامكم» مملوءاً، ويصبح هو المرجع المعتمد للبناء والاختبار على بيئة <bdi>sandbox</bdi>.
+</div>
+
+<div class="foot"><span><bdi>Medify</bdi> — كاتب طبي ذكي محيطي · وثيقة <bdi>B2</bdi></span><span>صفحة <bdi>__/__</bdi></span></div>
+
+</body>
+</html>

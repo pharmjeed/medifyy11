@@ -84,7 +84,7 @@ function InviteModal({ onClose, onDone }: { onClose: () => void; onDone: () => P
             <option key={key} value={key}>{L(ROLE_META[key].ar, ROLE_META[key].en)} — {L(ROLE_META[key].desc_ar, ROLE_META[key].desc_en)}</option>
           ))}
         </select>
-        {error !== null ? <p style={{ color: "#C0392B", fontSize: 12.5, fontWeight: 700, margin: "10px 0 0" }}>{error}</p> : null}
+        {error !== null ? <p style={{ color: "#d94b4b", fontSize: 12.5, fontWeight: 700, margin: "10px 0 0" }}>{error}</p> : null}
         <button type="submit" className="btn" style={{ width: "100%", marginTop: 14 }} disabled={busy}>
           {busy ? <span className="spinner" /> : null} {L("إنشاء الحساب", "Create account")}
         </button>
@@ -147,7 +147,7 @@ function AdminsInner() {
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
         <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0, flex: 1 }}>
           {L("حسابات السوبر أدمن", "Super admin accounts")}{" "}
-          <span style={{ color: "#5B7280", fontWeight: 400, fontSize: 13 }}>(<span className="num">{rows.length}</span>)</span>
+          <span style={{ color: "#5c7096", fontWeight: 400, fontSize: 13 }}>(<span className="num">{rows.length}</span>)</span>
         </h2>
         <button className="btn h40" onClick={() => setInviting(true)}>{L("+ حساب جديد", "+ New account")}</button>
       </div>
@@ -199,7 +199,7 @@ function AdminsInner() {
           ))
         )}
       </div>
-      <p style={{ fontSize: 12.5, color: "#5B7280", margin: "10px 0 0" }}>
+      <p style={{ fontSize: 12.5, color: "#5c7096", margin: "10px 0 0" }}>
         {L("آخر حساب مالك فعّال محمي من التعطيل والتخفيض (MDF-4229) · كل تغيير يُدوَّن في سجل المنصة الموحّد.",
            "The last active owner account cannot be disabled or downgraded (MDF-4229) · every change is recorded in the unified platform audit.")}
       </p>

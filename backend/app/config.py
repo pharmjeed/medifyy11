@@ -46,6 +46,10 @@ class Settings(BaseSettings):
 
     upload_max_auto_attempts: int = 3  # FR-805
 
+    # توجيه المالك 2026-07-22 — «لا تخمين»: كود دون العتبة يُحجب ويُطلب إدخال الطبيب
+    code_confidence_threshold: float = 0.80
+    consent_version: str = "CONSENT-AR-EN@1.0"
+
     frontend_origin: str = "http://localhost:3000"
 
 

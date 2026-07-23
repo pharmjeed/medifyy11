@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..analytics import track
+from ..config import get_settings
 from ..errors import MedifyError
 from ..models import (
     CodingSystemConfig,
@@ -30,7 +31,7 @@ logger = logging.getLogger("medify.pipelines")
 
 PROMPT_VERSIONS = {
     "P2-summary": "1.0",
-    "P3-guidance": "1.0",
+    "P3-guidance": "1.1",  # بنود خطة مهيكلة + ثقة + provenance (توجيه المالك 2026-07-22)
     "P4-reverse-template": "1.0",
     "P5-edit-chat": "1.0",
 }
@@ -170,8 +171,25 @@ def run_guidance(db: Session, visit: Visit, summary: Summary) -> bool:
         safety = bool(item.get("safety_flag"))
         safety_flags += 1 if safety else 0
         code_system = item.get("code_system")
-        if code_system is not None and code_system not in systems:
-            code_system = systems[0]  # الصياغة بمصطلحات النظام النشط حصراً
+        # التشخيص/المطابقة تُصاغ بالنظام التشخيصي النشط حصراً؛ أما بنود الخطة المهيكلة
+        # (دواء SFDA/GTIN · إجراء ACHI/SBS · خدمة SBS · جهاز GMDN/GTIN) فأنظمتها مقررة
+        # بتوجيه المالك ولا تُقسر على النظام التشخيصي.
+        if kind in ("clinical_dx", "coding_match") and code_system is not None and code_system not in systems:
+            code_system = systems[0]
+
+        # «لا تخمين» (توجيه المالك 2026-07-22): دون العتبة يُحجب الكود ويُطلب إدخال الطبيب
+        try:
+            confidence = float(item["confidence"]) if item.get("confidence") is not None else None
+        except (TypeError, ValueError):
+            confidence = None
+        threshold = get_settings().code_confidence_threshold
+        has_code = bool(item.get("code_value"))
+        requires_input = has_code and (confidence is None or confidence < threshold)
+
+        justification = item.get("justification")
+        if kind == "clinical_device" and not justification:
+            continue  # الجهاز بلا مبرر مرفوض (CHECK القاعدة يرفضه أصلاً)
+
         db.add(
             GuidanceItem(
                 section_id=section.id,
@@ -180,6 +198,14 @@ def run_guidance(db: Session, visit: Visit, summary: Summary) -> bool:
                 suggestion_text=deid.restore(str(item.get("suggestion_text", ""))),
                 code_system=code_system,
                 code_value=item.get("code_value"),
+                code_secondary_system=item.get("code_secondary_system"),
+                code_secondary_value=item.get("code_secondary_value"),
+                code_registry_version=item.get("code_registry_version"),
+                code_effective_date=item.get("code_effective_date"),
+                confidence=confidence,
+                requires_doctor_input=requires_input,
+                linked_dx_code=item.get("linked_dx_code"),
+                justification=justification,
                 evidence_source=str(item.get("evidence_source")),
                 evidence_ref={"ref": deid.restore(str(item.get("evidence_ref", ""))), "safety_flag": safety},
                 status="pending",

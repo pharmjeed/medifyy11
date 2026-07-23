@@ -117,6 +117,13 @@ def auth(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
+def record_consent(client: TestClient, visit_id: str, headers: dict[str, str]) -> None:
+    """A1: لا تسجيل قبل موافقة موثّقة — تُستدعى قبل recording/start في كل اختبار رحلة."""
+    response = client.post(f"/api/v1/visits/{visit_id}/consent", headers=headers,
+                           json={"acknowledged": True, "method": "verbal_ack"})
+    assert response.status_code == 201, response.text
+
+
 @pytest.fixture(scope="session")
 def owner_engine():
     engine = create_engine(os.environ["MIGRATIONS_DATABASE_URL"])

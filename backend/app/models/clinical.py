@@ -6,8 +6,10 @@ import uuid
 from typing import Any
 
 from sqlalchemy import (
+    CheckConstraint,
     DateTime,
     Enum,
+    Float,
     ForeignKey,
     Integer,
     Text,
@@ -25,7 +27,13 @@ VISIT_STATE = Enum(
     "approved", "uploaded", "upload_failed", "cancelled",
     name="visit_state",
 )
-GUIDANCE_KIND = Enum("clinical_dx", "clinical_rx", "clinical_procedure", "coding_match", name="guidance_kind")
+# توجيه المالك 2026-07-22: كل بند خطة كيان مهيكل بكوده — أُضيف نوعا الخدمة والجهاز
+GUIDANCE_KIND = Enum(
+    "clinical_dx", "clinical_rx", "clinical_procedure", "coding_match",
+    "clinical_service", "clinical_device",
+    name="guidance_kind",
+)
+CONSENT_METHOD = Enum("verbal_ack", "written", name="consent_method")
 EVIDENCE_SOURCE = Enum("patient_file", "current_visit", name="evidence_source")
 GUIDANCE_STATUS = Enum("pending", "accepted", "rejected", "modified", name="guidance_status")
 EDIT_CHANNEL = Enum("typing", "voice", "ai_chat", name="edit_channel")
@@ -100,6 +108,21 @@ class Recording(Base, TimestampMixin):
     deleted_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class VisitConsent(Base, TimestampMixin):
+    """موافقة المريض الموثّقة — إلحاقي فقط. لا تسجيل قبلها (trigger القاعدة يرفض draft→recording)."""
+
+    __tablename__ = "visit_consents"
+
+    id: Mapped[uuid.UUID] = pk()
+    visit_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("visits.id"), unique=True, nullable=False)
+    facility_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("facilities.id"), nullable=False, index=True)
+    consent_version: Mapped[str] = mapped_column(Text, nullable=False)   # CONSENT-AR-EN@1.0
+    consent_text_hash: Mapped[str] = mapped_column(Text, nullable=False)  # بصمة النص المعروض بالضبط
+    method: Mapped[str] = mapped_column(CONSENT_METHOD, nullable=False, default="verbal_ack")
+    captured_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)  # هوية الملتقط
+    captured_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class Transcript(Base, TimestampMixin):
     __tablename__ = "transcripts"
 
@@ -133,7 +156,19 @@ class SummarySection(Base, TimestampMixin):
 
 
 class GuidanceItem(Base, TimestampMixin):
+    """بند خطة مهيكل بكوده (توجيه المالك 2026-07-22):
+    دواء SFDA+GTIN · إجراء ACHI+SBS · خدمة/مختبر/أشعة SBS · جهاز GMDN+GTIN بمبرر إلزامي.
+    كل بند يحمل linked_dx_code لتشخيص ICD-10-AM، ودرجة ثقة مع إصدار السجل المرجعي وتاريخ سريانه.
+    """
+
     __tablename__ = "guidance_items"
+    __table_args__ = (
+        # الجهاز بلا مبرر مرفوض على مستوى القاعدة
+        CheckConstraint(
+            "kind::text <> 'clinical_device' OR justification IS NOT NULL",
+            name="ck_guidance_device_justification",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = pk()
     section_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("summary_sections.id"), nullable=False, index=True)
@@ -142,6 +177,17 @@ class GuidanceItem(Base, TimestampMixin):
     suggestion_text: Mapped[str] = mapped_column(Text, nullable=False)
     code_system: Mapped[str | None] = mapped_column(Text, nullable=True)
     code_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # الكود الثانوي: GTIN مع SFDA للدواء · SBS مع ACHI للإجراء · GTIN مع GMDN للجهاز
+    code_secondary_system: Mapped[str | None] = mapped_column(Text, nullable=True)
+    code_secondary_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # provenance الكود — يُعرض كما ورد من السجل المرجعي بلا تحويل
+    code_registry_version: Mapped[str | None] = mapped_column(Text, nullable=True)
+    code_effective_date: Mapped[str | None] = mapped_column(Text, nullable=True)
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)  # 0..1
+    # دون العتبة: الكود يُحجب ويُعرض «يتطلب إدخال الطبيب» — لا تخمين
+    requires_doctor_input: Mapped[bool] = mapped_column(default=False, nullable=False)
+    linked_dx_code: Mapped[str | None] = mapped_column(Text, nullable=True)  # ICD-10-AM
+    justification: Mapped[str | None] = mapped_column(Text, nullable=True)   # إلزامي للجهاز
     evidence_source: Mapped[str] = mapped_column(EVIDENCE_SOURCE, nullable=False)
     evidence_ref: Mapped[Any] = mapped_column(JSONB, nullable=False)  # {ref, excerpt?, safety_flag}
     status: Mapped[str] = mapped_column(GUIDANCE_STATUS, nullable=False, default="pending")
@@ -161,18 +207,41 @@ class EditEvent(Base, TimestampMixin):
     actor_user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
 
 
-class Approval(Base, TimestampMixin):
-    """إلحاقي فقط — لا UPDATE/DELETE (REVOKE + trigger). بصمة ما اعتُمد (NFR-10)."""
+class NoteApproval(Base, TimestampMixin):
+    """بوابة الاعتماد ① — اعتماد نص المذكرة. إلحاقي فقط.
 
-    __tablename__ = "approvals"
+    توجيه المالك 2026-07-22: بوابتان منفصلتان لا بوابة واحدة. الأكواد (②) لا تُعتمد إلا بعدها،
+    ويُفرض ذلك بمفتاح أجنبي: approvals.note_approval_id → note_approvals.id (NOT NULL).
+    """
+
+    __tablename__ = "note_approvals"
 
     id: Mapped[uuid.UUID] = pk()
     visit_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("visits.id"), unique=True, nullable=False)
     facility_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("facilities.id"), nullable=False, index=True)
     approved_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
     approved_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    summary_hash: Mapped[str] = mapped_column(Text, nullable=False)  # بصمة البوابة ①
+
+
+class Approval(Base, TimestampMixin):
+    """بوابة الاعتماد ② — اعتماد الأكواد. إلحاقي فقط (REVOKE + trigger). بصمة ما اعتُمد (NFR-10).
+
+    لا تُنشأ إلا بوجود note_approval (①)، ولا رفع/تصدير إلا بوجودها هي (upload_jobs FK).
+    """
+
+    __tablename__ = "approvals"
+
+    id: Mapped[uuid.UUID] = pk()
+    visit_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("visits.id"), unique=True, nullable=False)
+    facility_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("facilities.id"), nullable=False, index=True)
+    note_approval_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("note_approvals.id"), nullable=False
+    )
+    approved_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
+    approved_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     summary_hash: Mapped[str] = mapped_column(Text, nullable=False)
-    codes_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    codes_hash: Mapped[str] = mapped_column(Text, nullable=False)  # بصمة البوابة ②
 
 
 class UploadJob(Base, TimestampMixin):

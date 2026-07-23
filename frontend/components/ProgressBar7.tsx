@@ -26,12 +26,12 @@ export function ProgressBar7({ current, failStage }: { current: number; failStag
   const dash = done ? 100 : DASH[Math.max(0, Math.min(6, current - 1))] ?? 0;
   const rtl = lang === "ar"; // المنحنى يصعد باتجاه القراءة: RTL يمين→يسار، LTR يسار→يمين
   return (
-    <div style={{ background: "#fff", borderBottom: "1px solid #D7E3E8" }}>
+    <div style={{ background: "#fff", borderBottom: "1px solid #c7d1e0" }}>
       <div style={{ maxWidth: 960, margin: "0 auto", position: "relative", height: 128, padding: "0 10px" }}>
         <svg viewBox="0 0 1000 90" preserveAspectRatio="none"
           style={{ position: "absolute", top: 14, right: 0, left: 0, width: "100%", height: 90, transform: rtl ? undefined : "scaleX(-1)" }}>
-          <path d="M985,78 C700,72 300,55 15,8" fill="none" stroke="#D7E3E8" strokeWidth="3" />
-          <path d="M985,78 C700,72 300,55 15,8" fill="none" stroke="#2E9E5B" strokeWidth="3.5"
+          <path d="M985,78 C700,72 300,55 15,8" fill="none" stroke="#c7d1e0" strokeWidth="3" />
+          <path d="M985,78 C700,72 300,55 15,8" fill="none" stroke="#12a594" strokeWidth="3.5"
             pathLength={100} strokeDasharray={`${dash} 100`} strokeLinecap="round" />
         </svg>
         {STAGES.map((stageDef, index) => {
@@ -42,10 +42,10 @@ export function ProgressBar7({ current, failStage }: { current: number; failStag
           const failed = failStage === stage;
           const completed = done || stage < current;
           const isCurrent = !done && stage === current && !failed;
-          let border = "#D7E3E8"; let background = "#fff"; let color = "#5B7280"; let labelColor = "#5B7280";
-          if (failed) { border = "#C0392B"; background = "#C0392B"; color = "#fff"; labelColor = "#C0392B"; }
-          else if (completed) { border = "#2E9E5B"; background = "#2E9E5B"; color = "#fff"; labelColor = "#2E9E5B"; }
-          else if (isCurrent) { border = "#0E7C86"; background = "#0E7C86"; color = "#fff"; labelColor = "#0A5C64"; }
+          let border = "#c7d1e0"; let background = "#fff"; let color = "#5c7096"; let labelColor = "#5c7096";
+          if (failed) { border = "#d94b4b"; background = "#d94b4b"; color = "#fff"; labelColor = "#d94b4b"; }
+          else if (completed) { border = "#12a594"; background = "#12a594"; color = "#fff"; labelColor = "#12a594"; }
+          else if (isCurrent) { border = "#00736d"; background = "#00736d"; color = "#fff"; labelColor = "#005a55"; }
           return (
             <div key={label} style={{
               position: "absolute", left: `${position.left}%`, top: position.top,

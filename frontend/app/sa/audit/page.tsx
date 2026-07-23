@@ -67,7 +67,7 @@ function AuditInner() {
           placeholder={L("تصفية بالفاعل…", "Filter by actor…")}
           onChange={(event) => setActorFilter(event.target.value)} />
         <button type="submit" className="btn h40">{L("تصفية", "Filter")}</button>
-        <span style={{ alignSelf: "center", fontSize: 13, color: "#5B7280" }}>
+        <span style={{ alignSelf: "center", fontSize: 13, color: "#5c7096" }}>
           {L("الإجمالي:", "Total:")} <span className="num">{total}</span>
         </span>
       </form>
@@ -94,11 +94,11 @@ function AuditInner() {
                 {row.facility_id !== null ? (
                   <Link href={`/sa/facilities/${row.facility_id}`}>{row.facility_name ?? L("فتح", "Open")}</Link>
                 ) : (
-                  <span style={{ color: "#5B7280" }}>{L("المنصة", "Platform")}</span>
+                  <span style={{ color: "#5c7096" }}>{L("المنصة", "Platform")}</span>
                 )}
               </div>
               <div><bdi style={{ fontSize: 12 }}>{row.entity}</bdi></div>
-              <div style={{ fontSize: 11.5, color: "#5B7280", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              <div style={{ fontSize: 11.5, color: "#5c7096", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 <bdi title={row.meta ? JSON.stringify(row.meta) : ""}>
                   {row.meta ? JSON.stringify(row.meta) : "—"}
                 </bdi>
@@ -113,7 +113,7 @@ function AuditInner() {
           <button className="btn-secondary" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}>
             {L("السابق", "Previous")}
           </button>
-          <span style={{ fontSize: 13, color: "#5B7280" }}>
+          <span style={{ fontSize: 13, color: "#5c7096" }}>
             <span className="num">{page}</span> / <span className="num">{pages}</span>
           </span>
           <button className="btn-secondary" disabled={page >= pages} onClick={() => setPage((value) => value + 1)}>
@@ -122,7 +122,7 @@ function AuditInner() {
         </div>
       ) : null}
 
-      <p style={{ fontSize: 12.5, color: "#5B7280", margin: "10px 0 0" }}>
+      <p style={{ fontSize: 12.5, color: "#5c7096", margin: "10px 0 0" }}>
         {L("السجل إلحاقي — لا تعديل ولا حذف حتى للمالك · تدوين مزدوج: هنا وفي سجل تدقيق المنشأة المعنية.",
            "Append-only — no edits or deletions even for the owner · dual-recorded here and in the target facility's audit log.")}
       </p>

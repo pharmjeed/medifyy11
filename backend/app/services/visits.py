@@ -21,6 +21,9 @@ def transition(db: Session, visit: Visit, new_state: str) -> None:
     except (IntegrityError, DBAPIError) as exc:
         message = str(exc.orig or exc)
         db.rollback()
+        # حارس الموافقة يسبق حارس آلة الحالات: بلا موافقة موثّقة لا يبدأ التسجيل
+        if "MDF-4230" in message:
+            raise MedifyError("MDF-4230", details={"visit_id": visit_id}) from exc
         if "MDF-4223" in message:
             raise MedifyError("MDF-4223", details={"visit_id": visit_id, "to": new_state}) from exc
         raise

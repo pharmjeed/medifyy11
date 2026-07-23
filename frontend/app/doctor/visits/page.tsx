@@ -42,7 +42,7 @@ function actionFor(row: VisitRow): { label: { ar: string; en: string }; href: st
 function SectionKeyBox({ sectionKey }: { sectionKey: string }) {
   return (
     <span style={{
-      width: 30, height: 30, borderRadius: 8, background: "#0A5C64", color: "#fff",
+      width: 30, height: 30, borderRadius: 8, background: "#005a55", color: "#fff",
       display: "inline-flex", alignItems: "center", justifyContent: "center", fontWeight: 800, flexShrink: 0,
     }}>
       <bdi className="ui">{sectionKey}</bdi>
@@ -97,22 +97,22 @@ function VisitDetail({ visitId, row }: { visitId: string; row: VisitRow | undefi
       <div className="card" style={{ marginTop: 14, display: "flex", gap: 20, flexWrap: "wrap", alignItems: "center" }}>
         <div style={{ flex: 1, minWidth: 220 }}>
           <div style={{ fontSize: 16, fontWeight: 800 }}>{row !== undefined ? row.patient_name : "—"}</div>
-          <div style={{ fontSize: 12.5, color: "#5B7280" }}>
+          <div style={{ fontSize: 12.5, color: "#5c7096" }}>
             {L("ملف", "MRN")} {row !== undefined ? <bdi>{row.patient_mrn}</bdi> : "—"}
           </div>
         </div>
         <div style={{ fontSize: 14 }}>
-          <span style={{ color: "#5B7280" }}>{L("القالب: ", "Template: ")}</span>
+          <span style={{ color: "#5c7096" }}>{L("القالب: ", "Template: ")}</span>
           {row !== undefined ? row.template_name : "—"}
         </div>
         <div style={{ fontSize: 14 }}>
-          <span style={{ color: "#5B7280" }}>{L("الوقت: ", "Time: ")}</span>
+          <span style={{ color: "#5c7096" }}>{L("الوقت: ", "Time: ")}</span>
           {row !== undefined ? fmtDateTime(row.created_at) : "—"}
         </div>
       </div>
 
       {summary === null ? (
-        <div className="card" style={{ marginTop: 12, textAlign: "center", color: "#5B7280" }}>{L("جارٍ التحميل…", "Loading…")}</div>
+        <div className="card" style={{ marginTop: 12, textAlign: "center", color: "#5c7096" }}>{L("جارٍ التحميل…", "Loading…")}</div>
       ) : (
         <>
           {/* بطاقات الأقسام */}
@@ -129,7 +129,7 @@ function VisitDetail({ visitId, row }: { visitId: string; row: VisitRow | undefi
                 </div>
                 <div className="clinical" style={{ marginTop: 8 }}>{section.content_current}</div>
                 {resolved.length > 0 ? (
-                  <div style={{ borderTop: "1px dashed #D7E3E8", marginTop: 10, paddingTop: 10, display: "flex", gap: 10, flexWrap: "wrap" }}>
+                  <div style={{ borderTop: "1px dashed #c7d1e0", marginTop: 10, paddingTop: 10, display: "flex", gap: 10, flexWrap: "wrap" }}>
                     {resolved.map((item) => (
                       <span key={item.id} style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
                         {item.code_system !== null && item.code_value !== null ? (
@@ -146,15 +146,15 @@ function VisitDetail({ visitId, row }: { visitId: string; row: VisitRow | undefi
 
           {/* سجل الاعتماد — إلحاقي غير قابل للتعديل */}
           {summary.approval !== null ? (
-            <div className="card" style={{ marginTop: 12, border: "1px solid #2E9E5B" }}>
-              <strong style={{ color: "#2E9E5B", fontSize: 14 }}>{L("سجل الاعتماد — إلحاقي غير قابل للتعديل", "Approval record — append-only, immutable")}</strong>
+            <div className="card" style={{ marginTop: 12, border: "1px solid #12a594" }}>
+              <strong style={{ color: "#12a594", fontSize: 14 }}>{L("سجل الاعتماد — إلحاقي غير قابل للتعديل", "Approval record — append-only, immutable")}</strong>
               <div style={{ fontSize: 14, marginTop: 6 }}>
                 {L("اعتمدها:", "Approved by:")} {summary.approval.approved_by} · {fmtDateTime(summary.approval.approved_at)}
               </div>
-              <div style={{ fontSize: 12.5, color: "#5B7280", marginTop: 2 }}>
+              <div style={{ fontSize: 12.5, color: "#5c7096", marginTop: 2 }}>
                 {L("بصمة الملخص:", "Summary hash:")} <bdi>sha256:{summary.approval.summary_hash.slice(0, 8)}…</bdi>
               </div>
-              <div style={{ fontSize: 12.5, color: "#5B7280", marginTop: 2 }}>
+              <div style={{ fontSize: 12.5, color: "#5c7096", marginTop: 2 }}>
                 {L("بصمة الرموز:", "Codes hash:")} <bdi>sha256:{summary.approval.codes_hash.slice(0, 8)}…</bdi>
               </div>
             </div>
@@ -271,7 +271,7 @@ function VisitsInner() {
                       {L(action.label.ar, action.label.en)}
                     </Link>
                   ) : (
-                    <span style={{ color: "#5B7280" }}>—</span>
+                    <span style={{ color: "#5c7096" }}>—</span>
                   )}
                 </div>
               </div>
@@ -280,7 +280,7 @@ function VisitsInner() {
         )}
       </div>
 
-      <p style={{ fontSize: 12.5, color: "#5B7280", marginTop: 12 }}>
+      <p style={{ fontSize: 12.5, color: "#5c7096", marginTop: 12 }}>
         {L("آلة الحالات أحادية الاتجاه:", "One-way state machine:")} <bdi>draft → recording → transcribed → summarized → in_review → approved → uploaded | upload_failed</bdi> · {L("الإلغاء حالة نهائية", "Cancellation is a terminal state")} <bdi>cancelled</bdi> {L("متاحة قبل الاعتماد فقط", "available only before approval")}
       </p>
     </>

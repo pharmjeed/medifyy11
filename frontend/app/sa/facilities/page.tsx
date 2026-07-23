@@ -97,7 +97,7 @@ function FacilitiesInner() {
                 <div><bdi>{row.plan ?? "—"}</bdi></div>
                 <div className="num">{row.seats_total}</div>
                 <div className="num">{row.doctors_active}</div>
-                <div className="num" style={{ color: row.overdue_count > 0 ? "#C0392B" : "#5B7280", fontWeight: row.overdue_count > 0 ? 700 : 400 }}>
+                <div className="num" style={{ color: row.overdue_count > 0 ? "#d94b4b" : "#5c7096", fontWeight: row.overdue_count > 0 ? 700 : 400 }}>
                   {row.overdue_count}
                 </div>
                 <div><span className={meta.cls}>{L(meta.ar, meta.en)}</span></div>
@@ -112,7 +112,7 @@ function FacilitiesInner() {
           <button className="btn-secondary" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}>
             {L("السابق", "Previous")}
           </button>
-          <span style={{ fontSize: 13, color: "#5B7280" }}>
+          <span style={{ fontSize: 13, color: "#5c7096" }}>
             <span className="num">{page}</span> / <span className="num">{pages}</span>
           </span>
           <button className="btn-secondary" disabled={page >= pages} onClick={() => setPage((value) => value + 1)}>

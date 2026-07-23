@@ -46,7 +46,7 @@ function AuditInner() {
 
       <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 14 }}>
         <h1 className="page-title" style={{ margin: 0 }}>{L("سجل التدقيق", "Audit log")}</h1>
-        <span className="badge" style={{ background: "#EAF6F7", color: "#0A5C64" }}>
+        <span className="badge" style={{ background: "#d6f5f2", color: "#005a55" }}>
           {L("إلحاقي فقط — لا تعديل ولا حذف", "Append-only — no edits, no deletions")}
         </span>
         <span style={{ flex: 1 }} />
@@ -89,7 +89,7 @@ function AuditInner() {
                 {row.entity_id !== null && row.entity_id !== "" ? (
                   <bdi title={row.entity_id}>{row.entity_id.slice(0, 8)}</bdi>
                 ) : (
-                  <span style={{ color: "#5B7280" }}>—</span>
+                  <span style={{ color: "#5c7096" }}>—</span>
                 )}
               </div>
             </div>
@@ -104,7 +104,7 @@ function AuditInner() {
           disabled={page <= 1 || loading}
           onClick={() => setPage((value) => Math.max(1, value - 1))}
         >{L("السابق", "Previous")}</button>
-        <span style={{ fontSize: 12.5, color: "#5B7280" }}>
+        <span style={{ fontSize: 12.5, color: "#5c7096" }}>
           {L("صفحة", "Page")} <span className="num">{page}</span> {L("من", "of")} <span className="num">{totalPages}</span>
         </span>
         <button
@@ -114,12 +114,12 @@ function AuditInner() {
           onClick={() => setPage((value) => Math.min(totalPages, value + 1))}
         >{L("التالي", "Next")}</button>
         <span style={{ flex: 1 }} />
-        <span style={{ fontSize: 12.5, color: "#5B7280" }}>
+        <span style={{ fontSize: 12.5, color: "#5c7096" }}>
           {L("عدد السجلات:", "Total records:")} <span className="num">{total}</span>
         </span>
       </div>
 
-      <p style={{ fontSize: 12.5, color: "#5B7280", margin: "14px 0 0" }}>
+      <p style={{ fontSize: 12.5, color: "#5c7096", margin: "14px 0 0" }}>
         {L("سجل إلحاقي غير قابل للتعديل (NFR-10) — إدخاله آلي من النظام",
            "Append-only, immutable log (NFR-10) — entries are written automatically by the system")}
       </p>

@@ -72,8 +72,8 @@ function SeatsTab({ info, reload }: { info: SubscriptionInfo; reload: () => Prom
   };
 
   const stepBtn = {
-    width: 40, height: 40, border: "1.5px solid #0E7C86", borderRadius: 10,
-    background: "#fff", color: "#0A5C64", fontSize: 18, fontWeight: 700, cursor: "pointer",
+    width: 40, height: 40, border: "1.5px solid #00736d", borderRadius: 10,
+    background: "#fff", color: "#005a55", fontSize: 18, fontWeight: 700, cursor: "pointer",
   } as const;
 
   const clampSeats = (value: number) => Math.min(500, Math.max(1, Math.round(value)));
@@ -81,16 +81,16 @@ function SeatsTab({ info, reload }: { info: SubscriptionInfo; reload: () => Prom
   return (
     <>
       <div className="stat-grid">
-        <div className="card" style={{ borderColor: "#0E7C86" }}>
+        <div className="card" style={{ borderColor: "#00736d" }}>
           <div className="stat-label">{L("عدد الدكاترة — اكتب العدد أو استخدم العدّاد", "Doctors count — type or use the counter")}</div>
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 6 }}>
             <button type="button" aria-label={L("إنقاص", "Decrease")} style={stepBtn} onClick={() => setNewTotal((value) => clampSeats(value - 1))}>−</button>
             <input aria-label={L("عدد الدكاترة", "Doctors count")} className="field num" type="number" min={1} max={500} dir="ltr"
-              value={newTotal} style={{ margin: 0, width: 84, textAlign: "center", fontSize: 22, fontWeight: 800, color: "#0A5C64", height: 40 }}
+              value={newTotal} style={{ margin: 0, width: 84, textAlign: "center", fontSize: 22, fontWeight: 800, color: "#005a55", height: 40 }}
               onChange={(event) => setNewTotal(clampSeats(Number(event.target.value) || 1))} />
             <button type="button" aria-label={L("زيادة", "Increase")} style={stepBtn} onClick={() => setNewTotal((value) => clampSeats(value + 1))}>+</button>
           </div>
-          <div style={{ fontSize: 12.5, color: "#5B7280", margin: "6px 0 10px" }}>
+          <div style={{ fontSize: 12.5, color: "#5c7096", margin: "6px 0 10px" }}>
             {L("الحالي:", "Current:")} <span className="num">{info.seats_total}</span> {L("— كل دكتور نشط يستهلك اشتراكاً (FR-202)", "— each active doctor consumes one subscription (FR-202)")}
           </div>
           <button className="btn h40" onClick={() => void apply()} disabled={busy}>
@@ -103,7 +103,7 @@ function SeatsTab({ info, reload }: { info: SubscriptionInfo; reload: () => Prom
         </div>
         <div className="card">
           <div className="stat-label">{L("متاح للإضافة", "Available to add")}</div>
-          <div className="stat-value num" style={{ color: "#2E9E5B" }}>{info.seats_available}</div>
+          <div className="stat-value num" style={{ color: "#12a594" }}>{info.seats_available}</div>
         </div>
         <div className="card">
           <div className="stat-label">{L("دورة الفوترة", "Billing cycle")}</div>
@@ -135,7 +135,7 @@ function SeatsTab({ info, reload }: { info: SubscriptionInfo; reload: () => Prom
                   {reason !== undefined ? L(reason.ar, reason.en) : event.reason}
                   <span className="tech-badge">{event.reason}</span>
                 </div>
-                <div className="num" style={{ fontWeight: 700, color: event.delta > 0 ? "#2E9E5B" : event.delta < 0 ? "#B07D10" : "#5B7280" }}>
+                <div className="num" style={{ fontWeight: 700, color: event.delta > 0 ? "#12a594" : event.delta < 0 ? "#9c6f00" : "#5c7096" }}>
                   {event.delta > 0 ? `+${event.delta}` : event.delta}
                 </div>
               </div>
@@ -186,16 +186,16 @@ function PayModal({ invoice, onClose, onPaid }: { invoice: Invoice; onClose: () 
     <Modal title={L("سداد الفاتورة", "Pay invoice")} spec="W-208" onClose={onClose}>
       {stage === "paid" ? (
         <div style={{ textAlign: "center" }}>
-          <div style={{ width: 56, height: 56, borderRadius: 999, background: "#E8F6EE", display: "inline-flex", alignItems: "center", justifyContent: "center", color: "#2E9E5B", fontSize: 24, fontWeight: 800 }}>✓</div>
-          <h3 style={{ fontSize: 18, fontWeight: 700, color: "#0A5C64", margin: "12px 0 6px" }}>{L("تم السداد بنجاح", "Payment successful")}</h3>
-          <p style={{ fontSize: 14, color: "#5B7280", margin: "0 0 14px" }}>
+          <div style={{ width: 56, height: 56, borderRadius: 999, background: "#e6f7f4", display: "inline-flex", alignItems: "center", justifyContent: "center", color: "#12a594", fontSize: 24, fontWeight: 800 }}>✓</div>
+          <h3 style={{ fontSize: 18, fontWeight: 700, color: "#005a55", margin: "12px 0 6px" }}>{L("تم السداد بنجاح", "Payment successful")}</h3>
+          <p style={{ fontSize: 14, color: "#5c7096", margin: "0 0 14px" }}>
             {L("الإيصال:", "Receipt:")} <bdi>{receipt}</bdi> {L("— سُجّلت العملية في سجل التدقيق", "— the operation was recorded in the audit log")} (<bdi>invoice.paid</bdi>)
           </p>
           <button className="btn" onClick={onClose}>{L("إغلاق", "Close")}</button>
         </div>
       ) : (
         <>
-          <p style={{ fontSize: 12.5, color: "#5B7280", margin: "0 0 10px" }}>{L("الفاتورة", "Invoice")} <bdi>{invoice.number}</bdi></p>
+          <p style={{ fontSize: 12.5, color: "#5c7096", margin: "0 0 10px" }}>{L("الفاتورة", "Invoice")} <bdi>{invoice.number}</bdi></p>
           <div className="sub-box" style={{ fontSize: 14 }}>
             <div style={{ ...line, marginTop: 0 }}>
               <span>{L("المبلغ قبل الضريبة", "Amount before VAT")}</span>
@@ -214,7 +214,7 @@ function PayModal({ invoice, onClose, onPaid }: { invoice: Invoice; onClose: () 
             {L("مزود دفع محلي بالريال —", "Local SAR payment provider —")} <bdi>Moyasar</bdi>/<bdi>Tap</bdi> {L("يُقفل بعد اختبار حقيقي (DOC-09 §٣)", "finalized after a live test (DOC-09 §3)")}
           </div>
           {error !== null ? (
-            <p style={{ color: "#C0392B", fontSize: 12.5, fontWeight: 700, margin: "12px 0 0" }}>{error}</p>
+            <p style={{ color: "#d94b4b", fontSize: 12.5, fontWeight: 700, margin: "12px 0 0" }}>{error}</p>
           ) : null}
           <button
             className="btn-success"
@@ -279,7 +279,7 @@ function InvoicesTab() {
                   {payable ? (
                     <button className="btn-row" onClick={() => setPaying(invoice)}>{L("سداد", "Pay")}</button>
                   ) : (
-                    <span style={{ color: "#5B7280" }}>—</span>
+                    <span style={{ color: "#5c7096" }}>—</span>
                   )}
                 </div>
               </div>
@@ -287,7 +287,7 @@ function InvoicesTab() {
           })
         )}
       </div>
-      <p style={{ fontSize: 12.5, color: "#5B7280", margin: "10px 0 0" }}>
+      <p style={{ fontSize: 12.5, color: "#5c7096", margin: "10px 0 0" }}>
         {L("كل تغيّر مقاعد يظهر في فاتورة الدورة · الأسعار توضيحية — تُقفل بعد التحقق الميداني (DOC-09 §٤).",
            "Every seat change appears on the cycle invoice · prices are illustrative — finalized after field validation (DOC-09 §4).")}
       </p>

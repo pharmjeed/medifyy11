@@ -17,6 +17,7 @@ from ...models import (
     Approval,
     EditEvent,
     GuidanceItem,
+    NoteApproval,
     Summary,
     SummarySection,
     Visit,
@@ -36,9 +37,20 @@ def _get_summary(db, visit: Visit) -> Summary:
 
 
 def _guard_not_approved(db, visit: Visit) -> None:
+    """حسم الأكواد مفتوح حتى البوابة ② — يُغلق بعدها فقط."""
     approval = db.execute(select(Approval).where(Approval.visit_id == visit.id)).scalar_one_or_none()
     if approval is not None or visit.state in ("approved", "uploaded", "upload_failed"):
         raise MedifyError("MDF-4226")
+
+
+def _guard_note_open(db, visit: Visit) -> None:
+    """تحرير نص المذكرة يُغلق عند البوابة ① — وإلا بطلت بصمة ما اعتُمد (trigger القاعدة يفرضها)."""
+    _guard_not_approved(db, visit)
+    note_approval = db.execute(
+        select(NoteApproval).where(NoteApproval.visit_id == visit.id)
+    ).scalar_one_or_none()
+    if note_approval is not None:
+        raise MedifyError("MDF-4226", details={"reason": "note_approved_gate_1"})
 
 
 def _check_etag(request: Request, db, visit: Visit) -> None:
@@ -78,8 +90,17 @@ def get_summary(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB, response: Response
                     "id": str(item.id),
                     "kind": item.kind,
                     "suggestion_text": item.suggestion_text,
-                    "code_system": item.code_system,
-                    "code_value": item.code_value,
+                    # «لا تخمين»: دون العتبة لا يخرج الكود إطلاقاً — خانة فارغة وتنبيه
+                    "code_system": None if item.requires_doctor_input else item.code_system,
+                    "code_value": None if item.requires_doctor_input else item.code_value,
+                    "code_secondary_system": None if item.requires_doctor_input else item.code_secondary_system,
+                    "code_secondary_value": None if item.requires_doctor_input else item.code_secondary_value,
+                    "code_registry_version": item.code_registry_version,
+                    "code_effective_date": item.code_effective_date,
+                    "confidence": item.confidence,
+                    "requires_doctor_input": item.requires_doctor_input,
+                    "linked_dx_code": item.linked_dx_code,
+                    "justification": item.justification,
                     "evidence_source": item.evidence_source,
                     "evidence_ref": (item.evidence_ref or {}).get("ref"),
                     "safety_flag": bool((item.evidence_ref or {}).get("safety_flag")),
@@ -91,17 +112,42 @@ def get_summary(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB, response: Response
     etag = summary_etag(db, visit)
     response.headers["ETag"] = f'"{etag}"'
     # سجل الاعتماد الإلحاقي — يلزم عرض W-221 (قراءة فقط بعد الاعتماد)
+    from ...models import User
+
+    def _actor(user_id) -> str:
+        row = db.execute(select(User).where(User.id == user_id)).scalar_one_or_none()
+        return row.full_name if row else "—"
+
+    note_approval = db.execute(
+        select(NoteApproval).where(NoteApproval.visit_id == visit.id)
+    ).scalar_one_or_none()
     approval = db.execute(select(Approval).where(Approval.visit_id == visit.id)).scalar_one_or_none()
     approval_out = None
     if approval is not None:
-        from ...models import User
-        approver = db.execute(select(User).where(User.id == approval.approved_by)).scalar_one_or_none()
         approval_out = {
-            "approved_by": approver.full_name if approver else "—",
+            "approved_by": _actor(approval.approved_by),
             "approved_at": approval.approved_at.isoformat(),
             "summary_hash": approval.summary_hash,
             "codes_hash": approval.codes_hash,
         }
+    # بوابتان منفصلتان ببصمة لكل واحدة (توجيه المالك 2026-07-22)
+    gates = {
+        "note": None if note_approval is None else {
+            "approved_by": _actor(note_approval.approved_by),
+            "approved_at": note_approval.approved_at.isoformat(),
+            "summary_hash": note_approval.summary_hash,
+        },
+        "codes": None if approval is None else {
+            "approved_by": approval_out["approved_by"],
+            "approved_at": approval_out["approved_at"],
+            "codes_hash": approval.codes_hash,
+        },
+    }
+    awaiting_input = sum(
+        1 for section in out_sections for item in section["guidance"]
+        if item["requires_doctor_input"] and item["status"] in ("accepted", "modified")
+        and not item["code_value"]
+    )
     return ok({
         "visit_id": str(visit.id),
         "state": visit.state,
@@ -109,7 +155,11 @@ def get_summary(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB, response: Response
         "generated_at": summary.generated_at.isoformat(),
         "sections": out_sections,
         "pending_guidance_count": pending_total,
+        "awaiting_doctor_input_count": awaiting_input,
         "etag": etag,
+        "gates": gates,
+        "note_approved": note_approval is not None,
+        "can_export": approval is not None,
         "approval": approval_out,
     })
 
@@ -126,7 +176,7 @@ def patch_section(section_id: uuid.UUID, body: SectionPatchIn, ctx: DoctorAuth, 
         raise MedifyError("MDF-4041")
     summary = db.execute(select(Summary).where(Summary.id == section.summary_id)).scalar_one()
     visit = get_visit_for_doctor(db, summary.visit_id)
-    _guard_not_approved(db, visit)
+    _guard_note_open(db, visit)
     _check_etag(request, db, visit)
 
     old_content = section.content_current
@@ -161,7 +211,7 @@ def dictate_section(section_id: uuid.UUID, body: DictateIn, ctx: DoctorAuth, db:
         raise MedifyError("MDF-4041")
     summary = db.execute(select(Summary).where(Summary.id == section.summary_id)).scalar_one()
     visit = get_visit_for_doctor(db, summary.visit_id)
-    _guard_not_approved(db, visit)
+    _guard_note_open(db, visit)
     _check_etag(request, db, visit)
 
     dictated_text = get_stt().transcribe_file("dictation.opus")
@@ -216,6 +266,12 @@ def resolve_guidance(item_id: uuid.UUID, body: GuidancePatchIn, ctx: DoctorAuth,
             item.code_system = body.modified_code_system
         if body.modified_code_value is not None:
             item.code_value = body.modified_code_value
+        # الطبيب أدخل الكود بنفسه — الحجب دون العتبة يسقط بفعل واعٍ منه لا آلياً
+        if item.requires_doctor_input and item.code_value:
+            item.requires_doctor_input = False
+            item.confidence = None  # الكود صار مُدخلاً بشرياً لا مقترحاً بثقة
+            item.code_registry_version = None
+            item.code_effective_date = None
     item.status = body.status
     item.resolved_by = ctx.user_id
     item.resolved_at = dt.datetime.now(dt.timezone.utc)
@@ -229,6 +285,8 @@ def resolve_guidance(item_id: uuid.UUID, body: GuidancePatchIn, ctx: DoctorAuth,
         "suggestion_text": item.suggestion_text,
         "code_system": item.code_system,
         "code_value": item.code_value,
+        "requires_doctor_input": item.requires_doctor_input,
+        "confidence": item.confidence,
     })
 
 
@@ -241,7 +299,7 @@ class AiChatIn(BaseModel):
 def ai_chat(visit_id: uuid.UUID, body: AiChatIn, ctx: DoctorAuth, db: DB, response: Response):
     """محادثة التعديل الختامية (FR-707) — رد + فروقات مطبقة، يسجل edit_event(ai_chat)."""
     visit = get_visit_for_doctor(db, visit_id)
-    _guard_not_approved(db, visit)
+    _guard_note_open(db, visit)
     result = run_edit_chat(db, visit, body.message, body.history)
     if result["patches"]:
         for patch in result["patches"]:

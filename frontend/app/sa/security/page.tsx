@@ -81,11 +81,11 @@ function TwoFactorCard() {
   };
 
   return (
-    <div className="card" style={{ padding: 18, borderColor: "#C9A227" }}>
+    <div className="card" style={{ padding: 18, borderColor: "#00c2b8" }}>
       <h2 style={{ fontSize: 16, fontWeight: 700, margin: "0 0 6px" }}>
         {L("المصادقة الثنائية (TOTP)", "Two-factor authentication (TOTP)")}
       </h2>
-      <p style={{ fontSize: 13, color: "#5B7280", margin: "0 0 12px" }}>
+      <p style={{ fontSize: 13, color: "#5c7096", margin: "0 0 12px" }}>
         {L("إلزامية على الإنتاج قبل فتح الكونسول — رمز من تطبيق مصادقة (Google Authenticator / Authy / 1Password).",
            "Mandatory on production before the console opens — codes from an authenticator app (Google Authenticator / Authy / 1Password).")}
       </p>
@@ -113,11 +113,11 @@ function TwoFactorCard() {
           <div className="sub-box" style={{ fontSize: 13.5 }}>
             <p style={{ margin: "0 0 8px", fontWeight: 700 }}>{L("١ — أضف الحساب لتطبيق المصادقة:", "1 — Add the account to your authenticator app:")}</p>
             <p style={{ margin: "0 0 4px" }}>{L("المفتاح اليدوي:", "Manual key:")}</p>
-            <bdi className="num" style={{ display: "block", fontWeight: 800, fontSize: 15, letterSpacing: 1, wordBreak: "break-all", background: "#fff", border: "1px solid #D7E3E8", borderRadius: 8, padding: "8px 10px" }}>
+            <bdi className="num" style={{ display: "block", fontWeight: 800, fontSize: 15, letterSpacing: 1, wordBreak: "break-all", background: "#fff", border: "1px solid #c7d1e0", borderRadius: 8, padding: "8px 10px" }}>
               {setup.secret}
             </bdi>
             <p style={{ margin: "10px 0 4px" }}>{L("أو رابط otpauth (انسخه في التطبيق):", "Or the otpauth link (paste into the app):")}</p>
-            <bdi style={{ display: "block", fontSize: 11.5, color: "#5B7280", wordBreak: "break-all" }}>{setup.otpauth_uri}</bdi>
+            <bdi style={{ display: "block", fontSize: 11.5, color: "#5c7096", wordBreak: "break-all" }}>{setup.otpauth_uri}</bdi>
           </div>
           <form style={{ marginTop: 12 }} onSubmit={(event) => { event.preventDefault(); void enable(); }}>
             <Field label={L("٢ — أدخل أول رمز يظهر في التطبيق", "2 — Enter the first code shown in the app")} ltr
@@ -131,8 +131,8 @@ function TwoFactorCard() {
       )}
 
       {recoveryCodes !== null ? (
-        <div className="danger" style={{ borderInlineStart: "4px solid #B02A2A", background: "#FDECEC", borderRadius: 8, padding: "12px 16px", marginTop: 14 }}>
-          <p style={{ fontWeight: 800, margin: "0 0 8px", color: "#8F1F1F" }}>
+        <div className="danger" style={{ borderInlineStart: "4px solid #a33636", background: "#fbeaea", borderRadius: 8, padding: "12px 16px", marginTop: 14 }}>
+          <p style={{ fontWeight: 800, margin: "0 0 8px", color: "#a33636" }}>
             {L("رموز الاسترداد — تُعرض مرة واحدة فقط. احفظها في مكان آمن:", "Recovery codes — shown only once. Store them somewhere safe:")}
           </p>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 6 }}>
@@ -194,7 +194,7 @@ export default function SaSecurityPage() {
       <main className="page-wrap narrow">
         <TwoFactorCard />
         <PasswordCard />
-        <p style={{ fontSize: 12.5, color: "#5B7280", margin: "12px 0 0" }}>
+        <p style={{ fontSize: 12.5, color: "#5c7096", margin: "12px 0 0" }}>
           {L("الإجراءات الحسّاسة (تغيير تكلفة الدكتور، تعليق منشأة، إدارة حسابات المنصة) تطلب رمز مصادقة حياً إضافياً عند تفعيل 2FA (DOC-20 §١.٣).",
              "Sensitive actions (doctor-price change, facility suspension, platform account management) require an extra live code once 2FA is enabled (DOC-20 §1.3).")}
         </p>

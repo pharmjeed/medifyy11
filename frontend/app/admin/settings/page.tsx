@@ -91,7 +91,7 @@ function CodingTab() {
             return (
               <div key={row.id} style={{
                 display: "flex", alignItems: "center", gap: 14, padding: "14px 18px",
-                borderTop: i > 0 ? "1px solid #EAF6F7" : "none",
+                borderTop: i > 0 ? "1px solid #d6f5f2" : "none",
               }}>
                 <button
                   type="button"
@@ -107,8 +107,8 @@ function CodingTab() {
                 </button>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                    <bdi style={{ fontWeight: 700, fontSize: 14, color: "#0A5C64" }}>{meta.display}</bdi>
-                    <span style={{ fontSize: 12.5, color: "#5B7280" }}>{L("الإصدار", "Version")} <bdi>{row.version}</bdi></span>
+                    <bdi style={{ fontWeight: 700, fontSize: 14, color: "#005a55" }}>{meta.display}</bdi>
+                    <span style={{ fontSize: 12.5, color: "#5c7096" }}>{L("الإصدار", "Version")} <bdi>{row.version}</bdi></span>
                     {locked ? (
                       <span className="badge warn">
                         {L("لا يُعطَّل — نظام التشخيص الأساسي (قرار مالك 2026-07-14)",
@@ -116,7 +116,7 @@ function CodingTab() {
                       </span>
                     ) : null}
                   </div>
-                  <div style={{ fontSize: 12.5, color: "#5B7280" }}>{L(meta.usage.ar, meta.usage.en)}</div>
+                  <div style={{ fontSize: 12.5, color: "#5c7096" }}>{L(meta.usage.ar, meta.usage.en)}</div>
                 </div>
                 <span className={row.is_active ? "badge success" : "badge neutral"}>
                   {row.is_active ? L("نشط", "Active") : L("غير نشط", "Inactive")}
@@ -228,7 +228,7 @@ function IntegrationTab() {
           value={secret}
           onChange={(event) => setSecret(event.target.value)}
         />
-        <p style={{ fontSize: 12.5, color: "#5B7280", margin: "4px 0 0" }}>
+        <p style={{ fontSize: 12.5, color: "#5c7096", margin: "4px 0 0" }}>
           {L("مشفّر عموداً", "Column-level encrypted")} (<bdi>auth_secret_encrypted</bdi>) {L("— لا يُعرض بعد الحفظ.", "— never displayed after saving.")}
         </p>
         <label className="field-label" htmlFor="integration-mode">{L("الوضع", "Mode")}</label>
@@ -251,7 +251,7 @@ function IntegrationTab() {
             {testing ? <><span className="spinner dark" /> {L("جارٍ الاختبار…", "Testing…")}</> : L("اختبار الاتصال", "Test connection")}
           </button>
           <span style={{ flex: 1 }} />
-          <span style={{ fontSize: 12.5, color: "#5B7280" }}>
+          <span style={{ fontSize: 12.5, color: "#5c7096" }}>
             {L("آخر اختبار:", "Last test:")} {info.last_test_at !== null ? fmtDateTime(info.last_test_at) : "—"} (<bdi>last_test_at</bdi>)
           </span>
         </div>
@@ -379,7 +379,7 @@ function TemplatesTab() {
           ))
         )}
       </div>
-      <p style={{ fontSize: 12.5, color: "#5B7280", margin: "10px 0 0" }}>
+      <p style={{ fontSize: 12.5, color: "#5c7096", margin: "10px 0 0" }}>
         {L("الأدمن يدير البنية دون رؤية محتوى سريري (DOC-06 §٣).", "The admin manages structure without seeing clinical content (DOC-06 §3).")}
       </p>
 
@@ -428,7 +428,7 @@ function TemplatesTab() {
           >{L("+ إضافة قسم", "+ Add section")}</button>
 
           {modalError !== null ? (
-            <p style={{ color: "#C0392B", fontSize: 12.5, fontWeight: 700, margin: "12px 0 0" }}>{modalError}</p>
+            <p style={{ color: "#d94b4b", fontSize: 12.5, fontWeight: 700, margin: "12px 0 0" }}>{modalError}</p>
           ) : null}
 
           <div className="modal-actions">

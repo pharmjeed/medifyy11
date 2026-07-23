@@ -115,8 +115,8 @@ function StatusSubscriptionTab({ detail, plans, reload }: {
   };
 
   const stepBtn = {
-    width: 36, height: 36, border: "1.5px solid #0E7C86", borderRadius: 10,
-    background: "#fff", color: "#0A5C64", fontSize: 17, fontWeight: 700, cursor: "pointer",
+    width: 36, height: 36, border: "1.5px solid #00736d", borderRadius: 10,
+    background: "#fff", color: "#005a55", fontSize: 17, fontWeight: 700, cursor: "pointer",
   } as const;
 
   const meta = FACILITY_STATUS_META[facility.status];
@@ -125,7 +125,7 @@ function StatusSubscriptionTab({ detail, plans, reload }: {
   return (
     <>
       <div className="stat-grid">
-        <div className="card" style={{ borderColor: "#C9A227" }}>
+        <div className="card" style={{ borderColor: "#00c2b8" }}>
           <div className="stat-label">{L("حالة المنشأة", "Facility status")}</div>
           <div style={{ margin: "6px 0 10px" }}><span className={meta.cls}>{L(meta.ar, meta.en)}</span></div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -147,7 +147,7 @@ function StatusSubscriptionTab({ detail, plans, reload }: {
         <div className="card">
           <div className="stat-label">{L("السجل التجاري", "Commercial registration")}</div>
           <div className="stat-value"><bdi className="num" style={{ fontSize: 20 }}>{facility.commercial_reg}</bdi></div>
-          <div style={{ fontSize: 12.5, color: "#5B7280", marginTop: 4 }}>
+          <div style={{ fontSize: 12.5, color: "#5c7096", marginTop: 4 }}>
             {L("سُجّلت:", "Registered:")} {fmtDateTime(facility.created_at)}
           </div>
         </div>
@@ -159,7 +159,7 @@ function StatusSubscriptionTab({ detail, plans, reload }: {
           <div className="stat-label">{L("دورة الفوترة وتكلفة الدكتور", "Billing cycle & doctor cost")}</div>
           <div className="stat-value">{sub?.plan_info ? (lang === "ar" ? sub.plan_info.name_ar : sub.plan_info.name_en) : sub?.plan ?? "—"}</div>
           {sub?.plan_info ? (
-            <div style={{ fontSize: 12.5, color: "#5B7280", marginTop: 4 }}>
+            <div style={{ fontSize: 12.5, color: "#5c7096", marginTop: 4 }}>
               <bdi>{fmtSar(sub.plan_info.seat_price_sar)} SAR</bdi> {L("لكل دكتور /", "per doctor /")} {sub.plan_info.billing_cycle === "monthly" ? L("شهرياً", "month") : L("سنوياً", "year")}
             </div>
           ) : null}
@@ -185,7 +185,7 @@ function StatusSubscriptionTab({ detail, plans, reload }: {
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                 <button type="button" aria-label={L("إنقاص", "Decrease")} style={stepBtn} onClick={() => setSeats((value) => Math.max(1, Math.min(500, value - 1)))}>−</button>
                 <input aria-label={L("عدد الدكاترة", "Doctors count")} className="field num" type="number" min={1} max={500} dir="ltr"
-                  value={seats} style={{ margin: 0, width: 80, textAlign: "center", fontSize: 20, fontWeight: 800, color: "#0A5C64", height: 38 }}
+                  value={seats} style={{ margin: 0, width: 80, textAlign: "center", fontSize: 20, fontWeight: 800, color: "#005a55", height: 38 }}
                   onChange={(event) => setSeats(Math.min(500, Math.max(1, Math.round(Number(event.target.value) || 1))))} />
                 <button type="button" aria-label={L("زيادة", "Increase")} style={stepBtn} onClick={() => setSeats((value) => Math.max(1, Math.min(500, value + 1)))}>+</button>
               </div>
@@ -194,7 +194,7 @@ function StatusSubscriptionTab({ detail, plans, reload }: {
               {busy ? <span className="spinner" /> : null} {L("تطبيق", "Apply")}
             </button>
             {selectedPlan ? (
-              <div style={{ fontSize: 12.5, color: "#5B7280" }}>
+              <div style={{ fontSize: 12.5, color: "#5c7096" }}>
                 {L("تقدير الدورة حسب الدكاترة النشطين:", "Cycle estimate by active doctors:")}{" "}
                 <bdi style={{ fontWeight: 700 }}>{fmtSar(String(Number(selectedPlan.seat_price_sar) * (sub.seats_used || 0)))} SAR</bdi> + {L("ضريبة 15%", "VAT 15%")}
               </div>
@@ -221,12 +221,12 @@ function StatusSubscriptionTab({ detail, plans, reload }: {
               <div key={event.id} className={i % 2 ? "grid-row odd" : "grid-row"} style={{ gridTemplateColumns: "1fr 1.6fr .6fr .8fr" }}>
                 <div>{fmtDateTime(event.at)}</div>
                 <div>{reason !== undefined ? L(reason.ar, reason.en) : event.reason}</div>
-                <div className="num" style={{ fontWeight: 700, color: event.delta > 0 ? "#2E9E5B" : event.delta < 0 ? "#B07D10" : "#5B7280" }}>
+                <div className="num" style={{ fontWeight: 700, color: event.delta > 0 ? "#12a594" : event.delta < 0 ? "#9c6f00" : "#5c7096" }}>
                   {event.delta > 0 ? `+${event.delta}` : event.delta}
                 </div>
                 <div>
                   {event.by_platform
-                    ? <span className="badge" style={{ background: "#C9A227", color: "#0F2233" }}>{L("المنصة", "Platform")}</span>
+                    ? <span className="badge" style={{ background: "#00c2b8", color: "#0c1a36" }}>{L("المنصة", "Platform")}</span>
                     : <span className="badge neutral">{L("المنشأة", "Facility")}</span>}
                 </div>
               </div>
@@ -280,7 +280,7 @@ function UsersTab({ detail, reload }: { detail: SaFacilityDetail; reload: () => 
   const renderRows = (users: SaFacilityUser[]) => users.map((user, i) => (
     <div key={user.id} className={i % 2 ? "grid-row odd" : "grid-row"} style={{ gridTemplateColumns: COLS }}>
       <div>
-        <span className="badge" style={user.role === "admin" ? { background: "rgba(42,111,151,.12)", color: "#2A6F97" } : { background: "#EAF6F7", color: "#0A5C64" }}>
+        <span className="badge" style={user.role === "admin" ? { background: "rgba(42,111,151,.12)", color: "#3b82c4" } : { background: "#d6f5f2", color: "#005a55" }}>
           {user.role === "admin" ? L("أدمن", "Admin") : L("دكتور", "Doctor")}
         </span>
       </div>
@@ -310,7 +310,7 @@ function UsersTab({ detail, reload }: { detail: SaFacilityDetail; reload: () => 
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
         <h3 style={{ fontSize: 15, fontWeight: 700, margin: 0, flex: 1 }}>
           {L("مستخدمو المنشأة", "Facility users")}{" "}
-          <span style={{ color: "#5B7280", fontWeight: 400, fontSize: 13 }}>
+          <span style={{ color: "#5c7096", fontWeight: 400, fontSize: 13 }}>
             (<span className="num">{admins.length}</span> {L("أدمن ·", "admin ·")} <span className="num">{doctors.length}</span> {L("دكتور", "doctor")})
           </span>
         </h3>
@@ -331,7 +331,7 @@ function UsersTab({ detail, reload }: { detail: SaFacilityDetail; reload: () => 
           </>
         )}
       </div>
-      <p style={{ fontSize: 12.5, color: "#5B7280", margin: "10px 0 0" }}>
+      <p style={{ fontSize: 12.5, color: "#5c7096", margin: "10px 0 0" }}>
         {L("تعطيل دكتور يحرر مقعده فوراً · تفعيله يتطلب مقعداً متاحاً (MDF-4221) · كل الإجراءات تُدوَّن في تدقيق المنشأة.",
            "Deactivating a doctor frees the seat immediately · activation requires an available seat (MDF-4221) · all actions are audit-logged.")}
       </p>
@@ -419,12 +419,12 @@ function AddUserModal({ detail, onClose, onDone }: {
               {detail.clinics.length === 0 ? <option value="">{L("لا عيادات — أنشئها من حساب أدمن المنشأة", "No clinics — create from the facility admin account")}</option> : null}
               {detail.clinics.map((clinic) => <option key={clinic.id} value={clinic.id}>{clinic.name}</option>)}
             </select>
-            <p style={{ fontSize: 12.5, color: "#5B7280", margin: "6px 0 0" }}>
+            <p style={{ fontSize: 12.5, color: "#5c7096", margin: "6px 0 0" }}>
               {L("إنشاء دكتور يستهلك مقعداً — يفشل إن لا مقاعد متاحة (MDF-4221).", "Creating a doctor consumes a seat — fails if none available (MDF-4221).")}
             </p>
           </>
         )}
-        {error !== null ? <p style={{ color: "#C0392B", fontSize: 12.5, fontWeight: 700, margin: "10px 0 0" }}>{error}</p> : null}
+        {error !== null ? <p style={{ color: "#d94b4b", fontSize: 12.5, fontWeight: 700, margin: "10px 0 0" }}>{error}</p> : null}
         <button type="submit" className="btn" style={{ width: "100%", marginTop: 14 }} disabled={busy || (role === "doctor" && clinicId === "")}>
           {busy ? <span className="spinner" /> : null} {L("إنشاء الحساب", "Create account")}
         </button>
@@ -517,7 +517,7 @@ function InvoicesTab({ detail, reload }: { detail: SaFacilityDetail; reload: () 
                       </button>
                     </>
                   ) : (
-                    <span style={{ color: "#5B7280", fontSize: 12.5 }}>
+                    <span style={{ color: "#5c7096", fontSize: 12.5 }}>
                       {invoice.paid_at !== null ? fmtDateTime(invoice.paid_at) : "—"}
                     </span>
                   )}
@@ -527,7 +527,7 @@ function InvoicesTab({ detail, reload }: { detail: SaFacilityDetail; reload: () 
           })
         )}
       </div>
-      <p style={{ fontSize: 12.5, color: "#5B7280", margin: "10px 0 0" }}>
+      <p style={{ fontSize: 12.5, color: "#5c7096", margin: "10px 0 0" }}>
         {L("المبلغ = عدد الدكاترة النشطين × سعر مقعد الباقة + ضريبة 15% مفصولة · تسجيل السداد اليدوي يرفع تعليق المنشأة إن لم تبقَ متأخرات.",
            "Amount = active doctors × plan seat price + itemized 15% VAT · manual settlement lifts suspension when no overdue invoices remain.")}
       </p>
@@ -567,7 +567,7 @@ function FacilityDetailInner({ facilityId }: { facilityId: string }) {
   return (
     <>
       <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "0 0 12px", flexWrap: "wrap" }}>
-        <h1 style={{ fontSize: 20, fontWeight: 800, color: "#0A5C64", margin: 0, flex: 1 }}>{detail.facility.name}</h1>
+        <h1 style={{ fontSize: 20, fontWeight: 800, color: "#005a55", margin: 0, flex: 1 }}>{detail.facility.name}</h1>
         <span className={FACILITY_STATUS_META[detail.facility.status].cls}>
           {L(FACILITY_STATUS_META[detail.facility.status].ar, FACILITY_STATUS_META[detail.facility.status].en)}
         </span>

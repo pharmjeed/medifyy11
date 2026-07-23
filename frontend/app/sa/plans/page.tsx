@@ -100,7 +100,7 @@ function PlanModal({ plan, onClose, onDone }: {
         <Field label={L("الاسم بالإنجليزية", "English name")} ltr value={nameEn} onChange={(event) => setNameEn(event.target.value)} required minLength={2} />
         <Field label={L("تكلفة الدكتور (SAR — قبل الضريبة)", "Cost per doctor (SAR — before VAT)")} ltr type="number" min={0} step="0.01"
           value={price} onChange={(event) => setPrice(event.target.value)} required />
-        {error !== null ? <p style={{ color: "#C0392B", fontSize: 12.5, fontWeight: 700, margin: "10px 0 0" }}>{error}</p> : null}
+        {error !== null ? <p style={{ color: "#d94b4b", fontSize: 12.5, fontWeight: 700, margin: "10px 0 0" }}>{error}</p> : null}
         <button type="submit" className="btn" style={{ width: "100%", marginTop: 14 }} disabled={busy}>
           {busy ? <span className="spinner" /> : null} {plan === null ? L("إنشاء الباقة", "Create plan") : L("حفظ التعديلات", "Save changes")}
         </button>
@@ -184,7 +184,7 @@ function PlansInner() {
           ))
         )}
       </div>
-      <p style={{ fontSize: 12.5, color: "#5B7280", margin: "10px 0 0" }}>
+      <p style={{ fontSize: 12.5, color: "#5c7096", margin: "10px 0 0" }}>
         {L("الفاتورة = عدد الدكاترة النشطين × تكلفة الدكتور + ضريبة 15% مفصولة · تعديل التكلفة لا يمس الفواتير الصادرة ويظهر فوراً في صفحة تسجيل المنشآت.",
            "Invoice = active doctors × cost per doctor + itemized 15% VAT · cost changes never touch issued invoices and appear immediately on the facility signup page.")}
       </p>

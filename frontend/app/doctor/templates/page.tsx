@@ -28,7 +28,7 @@ interface SampleFile {
   size: number;
 }
 
-const GOLD_BADGE = { background: "rgba(201,162,39,.15)", color: "#C9A227", border: "1px solid #C9A227" } as const;
+const GOLD_BADGE = { background: "rgba(0,194,184,.15)", color: "#00c2b8", border: "1px solid #00c2b8" } as const;
 
 // مثال الملاحظة المرفق: صورة أو PDF يقرؤه النموذج ليستنتج القالب (FR-502)
 const ALLOWED_SAMPLE_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif", "application/pdf"];
@@ -37,7 +37,7 @@ const MAX_SAMPLE_BYTES = 12 * 1024 * 1024;
 function SectionKeyBox({ sectionKey }: { sectionKey: string }) {
   return (
     <span style={{
-      width: 30, height: 30, borderRadius: 8, background: "#0A5C64", color: "#fff",
+      width: 30, height: 30, borderRadius: 8, background: "#005a55", color: "#fff",
       display: "inline-flex", alignItems: "center", justifyContent: "center", fontWeight: 800, flexShrink: 0,
     }}>
       <bdi className="ui">{sectionKey}</bdi>
@@ -227,7 +227,7 @@ function TemplatesInner() {
       className="card"
       style={{
         display: "flex", flexDirection: "column", gap: 10,
-        border: tpl.is_default ? "1.5px solid #C9A227" : undefined,
+        border: tpl.is_default ? "1.5px solid #00c2b8" : undefined,
       }}
     >
       <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
@@ -239,7 +239,7 @@ function TemplatesInner() {
           onClick={() => void setDefault(tpl)}
           style={{
             border: "none", background: "none", cursor: "pointer", padding: 0,
-            fontSize: 20, lineHeight: 1, color: tpl.is_default ? "#C9A227" : "#5B7280",
+            fontSize: 20, lineHeight: 1, color: tpl.is_default ? "#00c2b8" : "#5c7096",
           }}
         >
           {tpl.is_default ? "★" : "☆"}
@@ -276,9 +276,9 @@ function TemplatesInner() {
 
         <h2 style={{ fontSize: 16, fontWeight: 800, margin: "0 0 10px" }}>{L("قوالب المنشأة الجاهزة", "Facility preset templates")}</h2>
         {templates === null ? (
-          <div className="card" style={{ textAlign: "center", color: "#5B7280" }}>{L("جارٍ التحميل…", "Loading…")}</div>
+          <div className="card" style={{ textAlign: "center", color: "#5c7096" }}>{L("جارٍ التحميل…", "Loading…")}</div>
         ) : systemTemplates.length === 0 ? (
-          <div className="card" style={{ textAlign: "center", color: "#5B7280" }}>{L("لا قوالب جاهزة", "No preset templates")}</div>
+          <div className="card" style={{ textAlign: "center", color: "#5c7096" }}>{L("لا قوالب جاهزة", "No preset templates")}</div>
         ) : (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 14 }}>
             {systemTemplates.map(renderCard)}
@@ -287,7 +287,7 @@ function TemplatesInner() {
 
         <h2 style={{ fontSize: 16, fontWeight: 800, margin: "22px 0 10px" }}>{L("قوالبي الشخصية", "My personal templates")}</h2>
         {templates === null ? null : personalTemplates.length === 0 ? (
-          <div className="card" style={{ textAlign: "center", color: "#5B7280" }}>
+          <div className="card" style={{ textAlign: "center", color: "#5c7096" }}>
             {L("لا قوالب شخصية بعد — أنشئ أول قالب بالمنشئ العكسي", "No personal templates yet — create your first with the reverse builder")}
           </div>
         ) : (
@@ -299,11 +299,11 @@ function TemplatesInner() {
         {structureTpl !== null ? (
           <Modal title={`${L("معاينة البنية", "Structure preview")} — ${structureTpl.name}`} spec="W-203" onClose={() => setStructureTpl(null)} wide>
             {structureTpl.structure.sections.map((section) => (
-              <div key={section.section_key} style={{ display: "flex", gap: 10, alignItems: "flex-start", padding: "10px 0", borderBottom: "1px solid #EAF6F7" }}>
+              <div key={section.section_key} style={{ display: "flex", gap: 10, alignItems: "flex-start", padding: "10px 0", borderBottom: "1px solid #d6f5f2" }}>
                 <SectionKeyBox sectionKey={section.section_key} />
                 <div>
                   <strong style={{ fontSize: 14 }}>{section.title}</strong>
-                  <p style={{ fontSize: 12.5, color: "#5B7280", margin: "2px 0 0" }}>{section.instructions}</p>
+                  <p style={{ fontSize: 12.5, color: "#5c7096", margin: "2px 0 0" }}>{section.instructions}</p>
                 </div>
               </div>
             ))}
@@ -332,19 +332,19 @@ function TemplatesInner() {
         <div className="card pad24">
           <label className="field-label">
             {L("نص المثال — كما تحب أن تبدو ملاحظتك", "Sample text — how you want your note to look")}
-            <span style={{ fontWeight: 400, color: "#5B7280" }}> {L("(اختياري إن أرفقت ملفاً)", "(optional if you attach a file)")}</span>
+            <span style={{ fontWeight: 400, color: "#5c7096" }}> {L("(اختياري إن أرفقت ملفاً)", "(optional if you attach a file)")}</span>
           </label>
           <textarea
             className="field clinical"
             dir="ltr"
             rows={7}
-            placeholder="Paste an example of your ideal note structure…"
+            placeholder={L("الصق مثالاً لملاحظتك كما تحب أن تبدو بنيتها…", "Paste an example of your ideal note structure…")}
             value={sampleText}
             onChange={(event) => setSampleText(event.target.value)}
           />
 
           <label className="field-label">{L("أو أرفق صورة/PDF لمثال ملاحظتك", "Or attach an image/PDF of your note example")}</label>
-          <p style={{ fontSize: 12.5, color: "#5B7280", margin: "0 0 8px" }}>
+          <p style={{ fontSize: 12.5, color: "#5c7096", margin: "0 0 8px" }}>
             {L("يقرأ الذكاء الاصطناعي المرفق ويستنتج القالب المستخدم فيه ثم يبني مثله (FR-502).",
                "The AI reads the attachment, infers the template it uses, and builds one like it (FR-502).")}
           </p>
@@ -356,9 +356,9 @@ function TemplatesInner() {
               onDrop={(event) => { event.preventDefault(); setDragging(false); pickFile(event.dataTransfer.files?.[0] ?? null); }}
               style={{
                 display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
-                border: `1.5px dashed ${dragging ? "#0A5C64" : "#9CC6CA"}`, borderRadius: 12,
-                padding: "22px 16px", cursor: "pointer", color: "#0A5C64", textAlign: "center",
-                background: dragging ? "#E6F5F6" : "#F3FBFC", transition: "background .15s, border-color .15s",
+                border: `1.5px dashed ${dragging ? "#005a55" : "#8fe0da"}`, borderRadius: 12,
+                padding: "22px 16px", cursor: "pointer", color: "#005a55", textAlign: "center",
+                background: dragging ? "#d6f5f2" : "#f7f9fb", transition: "background .15s, border-color .15s",
               }}
             >
               <input
@@ -373,7 +373,7 @@ function TemplatesInner() {
               </span>
             </label>
           ) : (
-            <div style={{ display: "flex", alignItems: "center", gap: 12, padding: 12, borderRadius: 12, background: "#F3FBFC", border: "1px solid #D6EBED" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, padding: 12, borderRadius: 12, background: "#f7f9fb", border: "1px solid #d6f5f2" }}>
               {sampleFile.media_type === "application/pdf" ? (
                 <span style={{ fontSize: 26 }} aria-hidden>📄</span>
               ) : (
@@ -388,7 +388,7 @@ function TemplatesInner() {
                 <strong style={{ fontSize: 13.5, display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   <bdi>{sampleFile.name}</bdi>
                 </strong>
-                <span style={{ fontSize: 12, color: "#5B7280" }}>
+                <span style={{ fontSize: 12, color: "#5c7096" }}>
                   {sampleFile.media_type === "application/pdf" ? "PDF" : L("صورة", "Image")}
                   {" · "}<span className="num">{Math.max(1, Math.round(sampleFile.size / 1024))}</span> KB
                 </span>
@@ -399,14 +399,14 @@ function TemplatesInner() {
             </div>
           )}
           {fileError !== null ? (
-            <p style={{ color: "#C0392B", fontSize: 12.5, fontWeight: 700, margin: "8px 0 0" }}>{fileError}</p>
+            <p style={{ color: "#d94b4b", fontSize: 12.5, fontWeight: 700, margin: "8px 0 0" }}>{fileError}</p>
           ) : null}
 
           <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginTop: 16 }}>
             <button className="btn" onClick={() => void generate()} disabled={building}>
               {building ? <><span className="spinner" /> {L("يولّد البنية…", "Generating structure…")}</> : L("ولّد القالب", "Generate template")}
             </button>
-            <span style={{ fontSize: 12.5, color: "#5B7280" }}>
+            <span style={{ fontSize: 12.5, color: "#5c7096" }}>
               {L("لا يُحفظ شيء تلقائياً — المعاينة أولاً ثم الحفظ بفعلك (FR-503)",
                  "Nothing is saved automatically — preview first, then save by your own action (FR-503)")}
             </span>
@@ -432,7 +432,7 @@ function TemplatesInner() {
       </p>
 
       {generated === null ? (
-        <div className="card" style={{ textAlign: "center", color: "#5B7280" }}>
+        <div className="card" style={{ textAlign: "center", color: "#5c7096" }}>
           {L("لا بنية مولّدة — عد للمنشئ وولّد القالب أولاً.", "No generated structure — go back to the builder and generate the template first.")}
         </div>
       ) : (
@@ -445,14 +445,14 @@ function TemplatesInner() {
             <div
               key={section.section_key}
               className="card"
-              style={{ marginTop: 10, border: section.section_key === "E" ? "1.5px solid #C9A227" : undefined }}
+              style={{ marginTop: 10, border: section.section_key === "E" ? "1.5px solid #00c2b8" : undefined }}
             >
               <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                 <SectionKeyBox sectionKey={section.section_key} />
                 <strong style={{ fontSize: 14 }}>{section.title}</strong>
                 {section.section_key === "E" ? <span className="badge" style={GOLD_BADGE}>{L("قسم مستنتج جديد", "New inferred section")}</span> : null}
               </div>
-              <p style={{ fontSize: 13, color: "#5B7280", margin: "8px 0 0" }}>{section.instructions}</p>
+              <p style={{ fontSize: 13, color: "#5c7096", margin: "8px 0 0" }}>{section.instructions}</p>
             </div>
           ))}
 
@@ -465,7 +465,7 @@ function TemplatesInner() {
               </button>
             </div>
             {runSections === null ? (
-              <p style={{ fontSize: 12.5, color: "#5B7280", margin: "10px 0 0" }}>
+              <p style={{ fontSize: 12.5, color: "#5c7096", margin: "10px 0 0" }}>
                 {L("اضغط «تشغيل المعاينة» لعرض ناتج القالب على النص التجريبي القياسي.",
                    "Press “Run preview” to see the template output on the standard test text.")}
               </p>
@@ -484,7 +484,7 @@ function TemplatesInner() {
             <label className="field-label">{L("اسم القالب", "Template name")}</label>
             <input className="field" value={tplName} onChange={(event) => setTplName(event.target.value)} />
             {saveError !== null ? (
-              <p style={{ color: "#C0392B", fontSize: 12.5, fontWeight: 700, margin: "10px 0 0" }}>
+              <p style={{ color: "#d94b4b", fontSize: 12.5, fontWeight: 700, margin: "10px 0 0" }}>
                 {saveError} <bdi>(MDF-4225)</bdi>
               </p>
             ) : null}

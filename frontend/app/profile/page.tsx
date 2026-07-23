@@ -87,7 +87,7 @@ function ProfileInner() {
               <span className="avatar" style={{ width: 52, height: 52, fontSize: 18 }}>{initials(me.full_name)}</span>
               <div>
                 <div style={{ fontSize: 18, fontWeight: 700 }}>{me.full_name}</div>
-                <div style={{ fontSize: 12.5, color: "#5B7280" }}>
+                <div style={{ fontSize: 12.5, color: "#5c7096" }}>
                   {me.facility_name} · {L("الجلسة", "Session")} <bdi>JWT</bdi> {L("30 دقيقة مع تجديد", "30 minutes with renewal")}
                 </div>
               </div>
@@ -96,7 +96,7 @@ function ProfileInner() {
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 10, marginTop: 16 }}>
               <div className="sub-box">
                 <div className="stat-label">{L("اسم المستخدم", "Username")}</div>
-                <bdi style={{ color: "#0E7C86", fontWeight: 700 }}>{me.username}</bdi>
+                <bdi style={{ color: "#00736d", fontWeight: 700 }}>{me.username}</bdi>
               </div>
               <div className="sub-box">
                 <div className="stat-label">{L("الدور", "Role")}</div>
@@ -113,7 +113,7 @@ function ProfileInner() {
             </div>
 
             <div className="info-box" style={{ marginTop: 14, display: "flex", gap: 8, alignItems: "flex-start" }}>
-              <span aria-hidden="true" style={{ color: "#2A6F97", fontWeight: 700, flexShrink: 0 }}>ℹ</span>
+              <span aria-hidden="true" style={{ color: "#3b82c4", fontWeight: 700, flexShrink: 0 }}>ℹ</span>
               <span>{L("الاسم والتخصص والعيادة يديرها أدمن المنشأة — تعديلك الذاتي محصور بكلمة المرور (DOC-06 §٢).",
                       "Name, specialty, and clinic are managed by the facility admin — self-service changes are limited to your password (DOC-06 §2).")}</span>
             </div>
@@ -121,7 +121,7 @@ function ProfileInner() {
 
           {/* بطاقة تغيير كلمة المرور */}
           <div className="card pad24" style={{ marginTop: 16 }}>
-            <h2 style={{ fontSize: 18, fontWeight: 700, color: "#0A5C64", margin: "0 0 12px" }}>{L("تغيير كلمة المرور", "Change password")}</h2>
+            <h2 style={{ fontSize: 18, fontWeight: 700, color: "#005a55", margin: "0 0 12px" }}>{L("تغيير كلمة المرور", "Change password")}</h2>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
               <div>
                 <Field label={L("الحالية", "Current password")} ltr type="password" placeholder="••••••••" value={current}
@@ -137,7 +137,7 @@ function ProfileInner() {
               </div>
             </div>
             {pwError !== null ? (
-              <p style={{ color: "#C0392B", fontSize: 12.5, fontWeight: 700, margin: "10px 0 0" }}>{pwError}</p>
+              <p style={{ color: "#d94b4b", fontSize: 12.5, fontWeight: 700, margin: "10px 0 0" }}>{pwError}</p>
             ) : null}
             <div style={{ marginTop: 16 }}>
               <button className="btn" onClick={() => void savePassword()} disabled={saving}>

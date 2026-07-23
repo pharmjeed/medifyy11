@@ -1,0 +1,100 @@
+<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>B5 — أجندة الجلسة التقنية</title>
+<style>
+@page { size: A4; margin: 17mm 15mm 18mm; }
+:root{--teal:#0E7C86;--teal-dark:#0A5C64;--gold:#C9A227;--ok:#2E9E5B;--danger:#C0392B;--warn:#B07D10;--info:#2A6F97;--ink:#0F2233;--muted:#5B7280;--line:#D7E3E8;--sky:#EAF6F7;--bg:#F7FAFB}
+*{box-sizing:border-box}
+html{font-size:11pt}
+body{margin:0;font-family:"IBM Plex Sans Arabic","Segoe UI",Tahoma,Arial,sans-serif;color:var(--ink);direction:rtl;line-height:1.6;background:#fff}
+bdi,code,.ltr{direction:ltr;unicode-bidi:isolate}
+code{font-family:"IBM Plex Mono",Consolas,monospace;font-size:.88em;background:var(--sky);padding:1px 5px;border-radius:4px;color:var(--teal-dark)}
+.doc-head{border-bottom:3px solid var(--teal);padding-bottom:10px;margin-bottom:18px;display:flex;justify-content:space-between;align-items:flex-end;gap:16px}
+.brand{font-size:19pt;font-weight:700;color:var(--teal);letter-spacing:-.3px}
+.brand span{color:var(--gold)}
+.doc-meta{text-align:left;font-size:8.5pt;color:var(--muted);line-height:1.5}
+h1{font-size:17pt;margin:0 0 4px;color:var(--teal-dark)}
+.sub{font-size:10pt;color:var(--muted);margin:0 0 16px}
+h2{font-size:12.5pt;margin:20px 0 8px;color:var(--teal-dark);border-right:4px solid var(--gold);padding-right:9px;page-break-after:avoid}
+h3{font-size:11pt;margin:14px 0 6px;color:var(--ink);page-break-after:avoid}
+p{margin:0 0 9px}
+ul,ol{margin:0 0 10px;padding-right:20px}
+li{margin-bottom:4px}
+table{width:100%;border-collapse:collapse;margin:10px 0 14px;font-size:9.5pt;page-break-inside:avoid}
+th{background:var(--sky);color:var(--teal-dark);font-weight:700;text-align:right;padding:7px 9px;border:1px solid var(--line)}
+td{padding:7px 9px;border:1px solid var(--line);vertical-align:top}
+tbody tr:nth-child(even){background:#FBFDFD}
+.num{direction:ltr;text-align:center}
+.box{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:11px 13px;margin:10px 0;page-break-inside:avoid}
+.note{background:var(--sky);border-right:4px solid var(--teal);border-radius:6px;padding:10px 13px;margin:11px 0;font-size:10pt}
+.warn{background:#FDF6E7;border-right:4px solid var(--warn);border-radius:6px;padding:10px 13px;margin:11px 0;font-size:10pt}
+.fill{display:block;border-bottom:1px dotted #9AB3BC;min-height:20px;margin:5px 0 12px}
+.fill-lg{display:block;border:1px dotted #9AB3BC;border-radius:6px;min-height:58px;margin:5px 0 12px}
+.opt{display:inline-block;border:1.4px solid var(--muted);width:11px;height:11px;border-radius:3px;margin-left:6px;vertical-align:-1px}
+.chip{display:inline-block;background:var(--sky);color:var(--teal-dark);border:1px solid var(--line);border-radius:20px;padding:1px 10px;font-size:8.5pt;margin-left:4px}
+.chip.g{background:#EAF7EF;color:#1E7A45;border-color:#BFE4CE}
+.chip.w{background:#FDF6E7;color:#8A6208;border-color:#EEDCAE}
+.foot{margin-top:22px;padding-top:9px;border-top:1px solid var(--line);font-size:8pt;color:var(--muted);display:flex;justify-content:space-between}
+.pb{page-break-before:always}
+.avoid{page-break-inside:avoid}
+</style>
+</head><body>
+
+<div class="doc-head"><div class="brand"><bdi>Medify<span>.</span></bdi></div><div class="doc-meta">وثيقة <bdi>B5</bdi> · الإصدار <bdi>1.0</bdi> · <bdi>2026-07-24</bdi> · سري<br>المنشأة: <bdi>___________</bdi> · تاريخ الجلسة: <bdi>_________</bdi></div></div>
+
+<h1>أجندة الجلسة التقنية</h1>
+<p class="sub">جلسة واحدة مع فريق المنشأة، <bdi>60</bdi> دقيقة · الأوقات تراكمية من لحظة البدء · <span class="chip w">في الإصدار المسلَّم</span> = مبنيّ ويُسلَّم مع الإصدار الأول.</p>
+
+<table class="avoid">
+<thead><tr><th class="num">الوقت</th><th>البند — الهدف والمخرج المطلوب</th><th>المسؤول</th></tr></thead>
+<tbody>
+<tr>
+<td class="num"><bdi>00–15</bdi></td>
+<td>عرض <bdi>demo</bdi> حي — زيارة عيادة خارجية ببيانات اصطناعية: تسجيل ← تفريغ ← مذكرة ← أكواد بدرجة ثقة ← بوابة <bdi>①</bdi> نص المذكرة ← بوابة <bdi>②</bdi> الأكواد <span class="chip w">في الإصدار المسلَّم</span> ← حزمة <bdi>FHIR R4</bdi> الصادرة والملخص المعتمد ثنائي اللغة؛ لتوحيد فهم المخرج ومواضع الاعتماد البشري. <strong>المخرج:</strong> ملاحظات الأطباء مدوَّنة.</td>
+<td><bdi>Medify</bdi> + أطباء المنشأة</td>
+</tr>
+<tr>
+<td class="num"><bdi>15–35</bdi></td>
+<td>تعبئة استبيان استكشاف التكامل <bdi>B1</bdi> بنداً بنداً — نظام الـ<bdi>HIS/EMR</bdi> وإصداره وقدراته وطريقة المصادقة. <strong>المخرج:</strong> <bdi>B1</bdi> مكتمل ومعتمد.</td>
+<td>المنشأة + <bdi>Medify</bdi></td>
+</tr>
+<tr>
+<td class="num"><bdi>35–50</bdi></td>
+<td>مراجعة مواصفة التكامل <bdi>B2</bdi> وملء قالب <bdi>Field Mapping</bdi> — مطابقة موارد الحزمة الصادرة (<bdi>Encounter</bdi> · <bdi>Composition</bdi> · <bdi>Condition</bdi> · <bdi>MedicationRequest</bdi> · <bdi>Procedure</bdi>) على حقول نظامكم، وتثبيت <bdi>endpoint</bdi> ووضع <bdi>test</bdi>. <strong>المخرج:</strong> القالب معبّأ · الفجوات بمالك · نقطة <bdi>test</bdi> جاهزة لاختبار الاتصال من لوحة الأدمن.</td>
+<td>مسؤول التكامل + <bdi>Medify</bdi></td>
+</tr>
+<tr>
+<td class="num"><bdi>50–55</bdi></td>
+<td>أسئلة أمن المعلومات على ملخص حماية البيانات <bdi>B4</bdi> — إقامة البيانات داخل المملكة · <bdi>RLS</bdi> وتشفير عمودي · حجب الأدمن عن المحتوى السريري · سجلات إلحاقية · تسليم سرّ <bdi>Bearer</bdi> وتخزينه مشفَّراً. <strong>المخرج:</strong> أسئلة الامتثال مغلقة أو مسجّلة بمالك ومهلة.</td>
+<td>أمن المعلومات + <bdi>Medify</bdi></td>
+</tr>
+<tr>
+<td class="num"><bdi>55–60</bdi></td>
+<td>اتفاق الخطوات التالية والملكيات — تحويل الاتفاق إلى التزامات باسم ومهلة. <strong>المخرج:</strong> الجدول أدناه معبّأ.</td>
+<td>مالك القرار التقني</td>
+</tr>
+</tbody>
+</table>
+
+<div class="note"><strong>المخرج الأهم من الجلسة: استكمال <bdi>B1</bdi>.</strong> اسم نظام الـ<bdi>HIS/EMR</bdi> وقدراته هما ما يحدّدان أول موصّل عميق نبنيه؛ فالتكامل معياري — نواة <bdi>FHIR R4</bdi> + مهايئ <bdi>HL7 v2</bdi> (<bdi>MDM</bdi>/<bdi>ORU</bdi> للرفع و<bdi>ADT</bdi> للديموغرافيا)، وموصّل لكل «نظام» لا لكل «مستشفى». تُقرأ <bdi>B2</bdi>–<bdi>B4</bdi> قبل الجلسة: الجلسة للحسم لا للقراءة.</div>
+
+<table class="avoid">
+<thead><tr><th>ما نطلب حضوره من فريقكم</th><th>ما نحضره معنا</th></tr></thead>
+<tbody><tr>
+<td><span class="opt"></span> مسؤول التكامل/الواجهات · <span class="opt"></span> أمن المعلومات · <span class="opt"></span> ممثل الأطباء المستخدمين · <span class="opt"></span> مالك قرار تقني</td>
+<td><span class="opt"></span> الوثائق <bdi>B1</bdi>–<bdi>B5</bdi> مطبوعة · <span class="opt"></span> قالب <bdi>Field Mapping</bdi> · <span class="opt"></span> بيئة عرض ببيانات اصطناعية بلا وصول لأي نظام إنتاجي</td>
+</tr></tbody>
+</table>
+
+<div class="warn"><strong>حدود النطاق:</strong> لا رفع إلى <bdi>NPHIES</bdi> ولا تنبؤ بقبول المطالبات — المنشأة ترفع مطالبتها من نظامها، ومقياسنا «درجة اكتمال التوثيق»، و<bdi>DRG</bdi> لا يُبنى. كل بند خطة يخرج كياناً مهيكلاً بكوده (دواء <bdi>SFDA</bdi>+<bdi>GTIN</bdi> · إجراء <bdi>ACHI</bdi>+<bdi>SBS</bdi> · خدمة ومختبر وأشعة <bdi>SBS</bdi> · جهاز <bdi>GMDN</bdi>+<bdi>GTIN</bdi> بمبرر) مربوطاً بتشخيص <bdi>ICD-10-AM</bdi>؛ وكود دون عتبة الثقة يُعرض خانة فارغة «يتطلب إدخال الطبيب» — لا تخمين.</div>
+
+<table class="avoid">
+<thead><tr><th>الخطوات التالية — تُملأ بالقلم في آخر <bdi>5</bdi> دقائق</th><th>المسؤول</th><th>الموعد</th></tr></thead>
+<tbody>
+<tr><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr>
+<tr><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr>
+<tr><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr>
+</tbody>
+</table>
+
+<div class="foot"><span><bdi>Medify</bdi> — كاتب طبي ذكي محيطي · وثيقة <bdi>B5</bdi></span><span>صفحة <bdi>__/__</bdi></span></div>
+
+</body></html>

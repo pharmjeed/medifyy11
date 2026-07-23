@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from tests.conftest import auth
+from tests.conftest import auth, record_consent
 
 
 @pytest.fixture(scope="module")
@@ -29,6 +29,12 @@ def journey(client, doctor_token):
     assert visit["state"] == "draft"
     assert visit["context_snapshot"]["problems"], "لقطة الملف التاريخي تُجلب عند الإنشاء (FR-601)"
     visit_id = visit["id"]
+
+    # A1: التسجيل بلا موافقة موثّقة يُرفض بـ MDF-4230
+    blocked = client.post(f"/api/v1/visits/{visit_id}/recording/start", headers=headers)
+    assert blocked.status_code == 422, blocked.text
+    assert blocked.json()["error"]["code"] == "MDF-4230"
+    record_consent(client, visit_id, headers)
 
     assert client.post(f"/api/v1/visits/{visit_id}/recording/start", headers=headers).status_code == 200
     assert client.post(f"/api/v1/visits/{visit_id}/recording/pause", headers=headers).status_code == 200
@@ -116,6 +122,62 @@ def test_ai_chat_ambiguous_returns_question_no_patch(client, journey):
     assert "؟" in data["reply"]
 
 
+def test_low_confidence_code_is_withheld_until_doctor_input(client, journey):
+    """A5 «لا تخمين»: كود دون العتبة يُحجب ويُعلَّم requires_doctor_input — خانة فارغة."""
+    summary = client.get(f"/api/v1/visits/{journey['visit_id']}/summary",
+                         headers=journey["headers"]).json()["data"]
+    guidance = [g for section in summary["sections"] for g in section["guidance"]]
+    withheld = [g for g in guidance if g["requires_doctor_input"]]
+    assert withheld, "عيّنة P3 تتضمن بنداً دون العتبة"
+    for item in withheld:
+        assert item["code_value"] is None, "الكود المحجوب لا يخرج إطلاقاً"
+        assert item["code_system"] is None
+    assert summary["awaiting_doctor_input_count"] == 0  # لا شيء محسوم بعد
+
+
+def test_structured_plan_items_keep_mandated_code_systems(client, journey):
+    """توجيه المالك: دواء SFDA · جهاز GMDN — لا تُقسر أنظمة الخطة على النظام التشخيصي."""
+    summary = client.get(f"/api/v1/visits/{journey['visit_id']}/summary",
+                         headers=journey["headers"]).json()["data"]
+    guidance = [g for section in summary["sections"] for g in section["guidance"]]
+    by_kind = {g["kind"]: g for g in guidance}
+    if "clinical_device" in by_kind:
+        device = by_kind["clinical_device"]
+        assert device["code_system"] == "GMDN", "الجهاز يحمل GMDN لا ICD10AM"
+        assert device["code_secondary_system"] == "GTIN"
+        assert device["justification"], "الجهاز يحمل مبرراً إلزامياً"
+        assert device["linked_dx_code"], "كل بند خطة مرتبط بتشخيص"
+    if "clinical_rx" in by_kind:
+        assert by_kind["clinical_rx"]["code_system"] == "SFDA"
+
+
+def test_note_approve_gate_precedes_code_approve(client, journey):
+    """A2: البوابة ② مرفوضة قبل ① (MDF-4231)، ثم ① تجمّد نص المذكرة."""
+    headers = journey["headers"]
+    visit_id = journey["visit_id"]
+
+    # ② قبل ① مرفوضة
+    early = client.post(f"/api/v1/visits/{visit_id}/approve", headers=headers)
+    assert early.status_code == 422
+    assert early.json()["error"]["code"] in ("MDF-4231", "MDF-4222")
+
+    note = client.post(f"/api/v1/visits/{visit_id}/note-approve", headers=headers)
+    assert note.status_code == 200, note.text
+    assert note.json()["data"]["note_approved"] is True
+    assert note.json()["data"]["summary_hash"]
+
+    # بعد ① يتجمّد نص المذكرة (MDF-4226) لكن حسم الأكواد يبقى مفتوحاً
+    summary = client.get(f"/api/v1/visits/{visit_id}/summary", headers=headers).json()["data"]
+    assert summary["note_approved"] is True
+    assert summary["can_export"] is False
+    section = summary["sections"][0]
+    frozen = client.patch(f"/api/v1/summary-sections/{section['id']}",
+                          headers={**headers, "If-Match": summary["etag"]},
+                          json={"content_current": "post-gate1 edit"})
+    assert frozen.status_code == 422
+    assert frozen.json()["error"]["code"] == "MDF-4226"
+
+
 def test_approve_blocked_with_pending_guidance_mdf4222(client, journey):
     response = client.post(f"/api/v1/visits/{journey['visit_id']}/approve", headers=journey["headers"])
     assert response.status_code == 422
@@ -131,25 +193,27 @@ def test_resolve_guidance_then_approve_and_upload(client, journey):
     pending = [g for section in summary["sections"] for g in section["guidance"] if g["status"] == "pending"]
     assert pending
 
-    # حسم: قبول، رفض، وتعديل (النص والرمز معاً — قرار مالك)
-    first = pending[0]
-    accepted = client.patch(f"/api/v1/guidance-items/{first['id']}", headers=headers,
-                            json={"status": "accepted"})
-    assert accepted.status_code == 200
+    # حسم كل بند: المحجوب دون العتبة يتطلب إدخال كود (وإلا حجب الاعتماد)، وغيره يُقبل/يُعدَّل
+    for index, item in enumerate(pending):
+        if item["requires_doctor_input"]:
+            # A5: الطبيب يُدخل الكود بوعي فيسقط الحجب
+            resolved = client.patch(f"/api/v1/guidance-items/{item['id']}", headers=headers, json={
+                "status": "modified",
+                "modified_text": item["suggestion_text"] + " — clinician-entered code",
+                "modified_code_system": "ICD10AM",
+                "modified_code_value": "G44.2",
+            })
+            assert resolved.status_code == 200
+            assert resolved.json()["data"]["requires_doctor_input"] is False
+        elif index == 0:
+            resolved = client.patch(f"/api/v1/guidance-items/{item['id']}", headers=headers,
+                                    json={"status": "accepted"})
+            assert resolved.status_code == 200
+        else:
+            client.patch(f"/api/v1/guidance-items/{item['id']}", headers=headers, json={"status": "rejected"})
 
-    for item in pending[1:-1]:
-        client.patch(f"/api/v1/guidance-items/{item['id']}", headers=headers, json={"status": "rejected"})
-
-    last = pending[-1] if len(pending) > 1 else None
-    if last is not None:
-        modified = client.patch(f"/api/v1/guidance-items/{last['id']}", headers=headers, json={
-            "status": "modified",
-            "modified_text": "Essential (primary) hypertension — confirmed with home readings",
-            "modified_code_system": "ICD10AM",
-            "modified_code_value": "I10",
-        })
-        assert modified.status_code == 200
-        assert modified.json()["data"]["code_value"] == "I10"
+    # البوابة ① أولاً (إن لم تكن أُنجزت في اختبار سابق)
+    client.post(f"/api/v1/visits/{visit_id}/note-approve", headers=headers)
 
     approved = client.post(f"/api/v1/visits/{visit_id}/approve", headers=headers)
     assert approved.status_code == 200, approved.text

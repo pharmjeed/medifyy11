@@ -11,6 +11,9 @@ import type { SaAdmin } from "@/lib/sa";
 import { Logo } from "@/components/Shell";
 import { Field, ToastProvider, useToast } from "@/components/ui";
 
+/** رسالة خطأ ثنائية اللغة — تُحسم عند العرض كي تتبع تبديل اللغة. */
+type ErrorText = { ar: string; en: string };
+
 function SaLoginInner() {
   const router = useRouter();
   const params = useSearchParams();
@@ -21,14 +24,14 @@ function SaLoginInner() {
   const [password, setPassword] = useState("");
   const [totpCode, setTotpCode] = useState("");
   const [needTotp, setNeedTotp] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ErrorText | null>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     if (params.get("expired") === "1") {
-      setError(L("انتهت الجلسة — سجّل الدخول من جديد", "Session expired — please sign in again"));
+      setError({ ar: "انتهت الجلسة — سجّل الدخول من جديد", en: "Session expired — please sign in again" });
     }
-  }, [params, L]);
+  }, [params]);
 
   const doLogin = async () => {
     setBusy(true);
@@ -46,10 +49,12 @@ function SaLoginInner() {
         // الحساب محمي بمصادقة ثنائية — اطلب الرمز (DOC-20 §١.٣)
         setNeedTotp(true);
         setError(totpCode
-          ? L("رمز المصادقة غير صحيح — أدخل الرمز الحالي من تطبيق المصادقة", "Incorrect code — enter the current code from your authenticator app")
-          : L("الحساب محمي بمصادقة ثنائية — أدخل رمز تطبيق المصادقة", "This account is 2FA-protected — enter your authenticator code"));
+          ? { ar: "رمز المصادقة غير صحيح — أدخل الرمز الحالي من تطبيق المصادقة", en: "Incorrect code — enter the current code from your authenticator app" }
+          : { ar: "الحساب محمي بمصادقة ثنائية — أدخل رمز تطبيق المصادقة", en: "This account is 2FA-protected — enter your authenticator code" });
       } else {
-        setError(err instanceof ApiError ? `${err.text(lang)} (${err.code})` : L("تعذر الاتصال بالخادم", "Could not reach the server"));
+        setError(err instanceof ApiError
+          ? { ar: `${err.text("ar")} (${err.code})`, en: `${err.text("en")} (${err.code})` }
+          : { ar: "تعذر الاتصال بالخادم", en: "Could not reach the server" });
       }
     } finally {
       setBusy(false);
@@ -61,17 +66,17 @@ function SaLoginInner() {
       <LangToggle floating />
       <div style={{ textAlign: "center", marginBottom: 18 }}>
         <div style={{ transform: "scale(1.5)", transformOrigin: "center bottom" }}><Logo /></div>
-        <p style={{ color: "#5B7280", fontSize: 14, margin: "10px 0 0" }}>
+        <p style={{ color: "#5c7096", fontSize: 14, margin: "10px 0 0" }}>
           {L("لوحة المنصة — إدارة المنشآت والباقات والمدفوعات", "Platform console — facilities, plans & payments management")}
         </p>
       </div>
 
-      <div className="card" style={{ width: "min(420px,94vw)", padding: "26px 24px", position: "relative", borderTop: "3px solid #C9A227" }}>
+      <div className="card" style={{ width: "min(420px,94vw)", padding: "26px 24px", position: "relative", borderTop: "3px solid #00c2b8" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <h1 style={{ fontSize: 18, fontWeight: 700, color: "#0A5C64", margin: 0, flex: 1 }}>
+          <h1 style={{ fontSize: 18, fontWeight: 700, color: "#005a55", margin: 0, flex: 1 }}>
             {L("دخول السوبر أدمن", "Super admin sign in")}
           </h1>
-          <span className="badge" style={{ background: "#C9A227", color: "#0F2233", fontWeight: 800 }}>
+          <span className="badge" style={{ background: "#00c2b8", color: "#0c1a36", fontWeight: 800 }}>
             {L("مالك المنصة", "Owner")}
           </span>
         </div>
@@ -88,7 +93,7 @@ function SaLoginInner() {
               onChange={(event) => setTotpCode(event.target.value)} required />
           ) : null}
           {error !== null ? (
-            <p style={{ color: "#C0392B", fontSize: 12.5, fontWeight: 700, margin: "10px 0 0" }}>{error}</p>
+            <p style={{ color: "#d94b4b", fontSize: 12.5, fontWeight: 700, margin: "10px 0 0" }}>{lang === "ar" ? error.ar : error.en}</p>
           ) : null}
           <button type="submit" className="btn big" style={{ width: "100%", marginTop: 16 }} disabled={busy}>
             {busy ? <span className="spinner" /> : null} {L("دخول", "Sign in")}

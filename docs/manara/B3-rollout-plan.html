@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>B3 — خطة النشر المرحلية | Medify</title>
+<style>
+@page { size: A4; margin: 17mm 15mm 18mm; }
+:root{--teal:#0E7C86;--teal-dark:#0A5C64;--gold:#C9A227;--ok:#2E9E5B;--danger:#C0392B;--warn:#B07D10;--info:#2A6F97;--ink:#0F2233;--muted:#5B7280;--line:#D7E3E8;--sky:#EAF6F7;--bg:#F7FAFB}
+*{box-sizing:border-box}
+html{font-size:11pt}
+body{margin:0;font-family:"IBM Plex Sans Arabic","Segoe UI",Tahoma,Arial,sans-serif;color:var(--ink);direction:rtl;line-height:1.6;background:#fff}
+bdi,code,.ltr{direction:ltr;unicode-bidi:isolate}
+code{font-family:"IBM Plex Mono",Consolas,monospace;font-size:.88em;background:var(--sky);padding:1px 5px;border-radius:4px;color:var(--teal-dark)}
+.doc-head{border-bottom:3px solid var(--teal);padding-bottom:10px;margin-bottom:18px;display:flex;justify-content:space-between;align-items:flex-end;gap:16px}
+.brand{font-size:19pt;font-weight:700;color:var(--teal);letter-spacing:-.3px}
+.brand span{color:var(--gold)}
+.doc-meta{text-align:left;font-size:8.5pt;color:var(--muted);line-height:1.5}
+h1{font-size:17pt;margin:0 0 4px;color:var(--teal-dark)}
+.sub{font-size:10pt;color:var(--muted);margin:0 0 16px}
+h2{font-size:12.5pt;margin:20px 0 8px;color:var(--teal-dark);border-right:4px solid var(--gold);padding-right:9px;page-break-after:avoid}
+h3{font-size:11pt;margin:14px 0 6px;color:var(--ink);page-break-after:avoid}
+p{margin:0 0 9px}
+ul,ol{margin:0 0 10px;padding-right:20px}
+li{margin-bottom:4px}
+table{width:100%;border-collapse:collapse;margin:10px 0 14px;font-size:9.5pt;page-break-inside:avoid}
+th{background:var(--sky);color:var(--teal-dark);font-weight:700;text-align:right;padding:7px 9px;border:1px solid var(--line)}
+td{padding:7px 9px;border:1px solid var(--line);vertical-align:top}
+tbody tr:nth-child(even){background:#FBFDFD}
+.num{direction:ltr;text-align:center}
+.box{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:11px 13px;margin:10px 0;page-break-inside:avoid}
+.note{background:var(--sky);border-right:4px solid var(--teal);border-radius:6px;padding:10px 13px;margin:11px 0;font-size:10pt}
+.warn{background:#FDF6E7;border-right:4px solid var(--warn);border-radius:6px;padding:10px 13px;margin:11px 0;font-size:10pt}
+.fill{display:block;border-bottom:1px dotted #9AB3BC;min-height:20px;margin:5px 0 12px}
+.fill-lg{display:block;border:1px dotted #9AB3BC;border-radius:6px;min-height:58px;margin:5px 0 12px}
+.opt{display:inline-block;border:1.4px solid var(--muted);width:11px;height:11px;border-radius:3px;margin-left:6px;vertical-align:-1px}
+.chip{display:inline-block;background:var(--sky);color:var(--teal-dark);border:1px solid var(--line);border-radius:20px;padding:1px 10px;font-size:8.5pt;margin-left:4px}
+.chip.g{background:#EAF7EF;color:#1E7A45;border-color:#BFE4CE}
+.chip.w{background:#FDF6E7;color:#8A6208;border-color:#EEDCAE}
+.foot{margin-top:22px;padding-top:9px;border-top:1px solid var(--line);font-size:8pt;color:var(--muted);display:flex;justify-content:space-between}
+.pb{page-break-before:always}
+.avoid{page-break-inside:avoid}
+</style>
+</head>
+<body>
+
+<div class="doc-head"><div class="brand"><bdi>Medify<span>.</span></bdi></div><div class="doc-meta">وثيقة رقم <bdi>B3</bdi> · الإصدار <bdi>1.0</bdi><br>التاريخ: <bdi>2026-07-24</bdi><br>سري — للاستخدام مع فريق المنشأة</div></div>
+
+<h1>خطة النشر المرحلية</h1>
+<p class="sub"><bdi>sandbox</bdi> ← <bdi>UAT</bdi> بقسم واحد ← <bdi>production</bdi> · لا انتقال بين مرحلتين إلا باستيفاء معايير خروج مقيسة وتوقيع مسؤول التكامل لدى المنشأة.</p>
+
+<div class="warn"><strong>حدود النطاق (على كل المراحل):</strong> لا رفع إلى <bdi>NPHIES</bdi> ولا تنبؤ بقبول المطالبات — المنشأة ترفع المطالبة من نظامها، ومقياسنا «درجة اكتمال التوثيق» لا «احتمالية القبول» · <bdi>DRG</bdi> لا يُبنى إطلاقاً · التكامل معياري: نواة <bdi>FHIR R4</bdi> + مهايئ <bdi>HL7 v2</bdi>، وموصّل لكل «نظام» لا لكل «مستشفى».</div>
+
+<h2>المراحل الثلاث</h2>
+<p class="sub">الحزمة الصادرة في كل المراحل: <bdi>FHIR R4 Bundle</bdi> نوع <bdi>transaction</bdi> = <bdi>Encounter</bdi> (<bdi>class AMB</bdi>) + <bdi>Composition</bdi> (<bdi>LOINC 11488-4</bdi>) + <bdi>Condition[]</bdi> + <bdi>MedicationRequest[]</bdi> + <bdi>Procedure[]</bdi> · <bdi>POST</bdi> بـ<bdi>application/fhir+json</bdi> و<bdi>Bearer token</bdi>.</p>
+<table class="avoid">
+<tr><th>البند</th><th>① <bdi>sandbox</bdi> — <bdi>2</bdi> أسبوع</th><th>② <bdi>UAT</bdi> بقسم واحد — <bdi>4</bdi> أسابيع</th><th>③ <bdi>production</bdi> — <bdi>4</bdi> أسابيع</th></tr>
+<tr><td><strong>الهدف</strong></td>
+<td>إثبات المسار من طرف إلى طرف بوضع <bdi>mode=test</bdi>.</td>
+<td>تشغيل موازٍ بأطباء حقيقيين؛ نظام المنشأة يبقى السجل المرجعي.</td>
+<td>التحويل إلى <bdi>mode=live</bdi> وتوسّع مضبوط في موجة أولى.</td></tr>
+<tr><td><strong>نطاق البيانات · الأطباء والعيادات</strong></td>
+<td><span class="chip">اصطناعية</span> صفر <bdi>PHI</bdi> · لا أطباء · <bdi>2</bdi> حساب تقني · عيادة افتراضية.</td>
+<td><span class="chip w">حقيقية محدودة</span> بموافقة مريض مسجَّلة قبل التسجيل وعزل <bdi>RLS</bdi> · <bdi>3–5</bdi> أطباء · <bdi>1–2</bdi> عيادة · قسم واحد.</td>
+<td><span class="chip g">إنتاج</span> كل الـ<bdi>PHI</bdi> داخل المملكة بتشفير <bdi>Fernet</bdi> عمودي · <bdi>15–25</bdi> طبيباً · <bdi>5–8</bdi> عيادات · <bdi>2–3</bdi> أقسام.</td></tr>
+<tr><td><strong>ما نقدمه نحن</strong></td>
+<td>تهيئة <bdi>integration_configs</bdi> (<bdi>endpoint_url</bdi> · <bdi>auth_secret</bdi> مشفّر · <bdi>mode=test</bdi>) · اختبار اتصال (<bdi>last_test_ok</bdi>) · حزم عيّنة ودليل <bdi>MDF-5051</bdi> (رفض بنيوي) و<bdi>MDF-5052</bdi> (تعذّر وصول).</td>
+<td>تدريب الأطباء · حسابات <bdi>TOTP 2FA</bdi> · متابعة يومية لطابور الفشل (ميتاداتا فقط) · تقرير أسبوعي.</td>
+<td>التحويل إلى <bdi>mode=live</bdi> بعد اختبار ناجح · دعم أسبوعين · إعادة يدوية للفشل · تقرير شهري.</td></tr>
+<tr><td><strong>ما يقدمه فريق المنشأة</strong></td>
+<td>نقطة نهاية <bdi>sandbox</bdi> + <bdi>Bearer token</bdi> · المسار المدعوم واسم النظام وإصداره · مسؤول تكامل مسمّى.</td>
+<td>القالب المعتمد · القوائم المرجعية · موافقة أمن المعلومات · طبيب مرجعي · سياسة الاحتفاظ بالصوت.</td>
+<td>نقطة نهاية إنتاجية واعتمادها · المستخدمون وصلاحياتهم · مسار تصعيد معلن.</td></tr>
+</table>
+
+<h2>معايير الخروج — مكتوبة وقابلة للقياس</h2>
+<table class="avoid">
+<tr><th>المرحلة</th><th>لا انتقال قبل استيفائها جميعاً</th></tr>
+<tr><td>①</td><td><bdi>last_test_ok = true</bdi> في <bdi>3</bdi> محاولات متتالية · <bdi>50</bdi> حزمة اصطناعية بنجاح من طرف إلى طرف <bdi>≥ 95%</bdi> · <strong>صفر</strong> أخطاء بنيوية <bdi>MDF-5051</bdi> على عيّنة <bdi>20</bdi> حزمة · زمن الإيداع <bdi>p95 ≤ 5</bdi> ثوانٍ · مطابقة <bdi>100%</bdi> بين أقسام <bdi>Composition</bdi> وحقول القالب المعبّأ على <bdi>10</bdi> حالات · توقيع مسؤول التكامل <span class="opt"></span></td></tr>
+<tr><td>②</td><td><bdi>≥ 100</bdi> زيارة تبلغ <bdi>uploaded</bdi> عبر آلة الحالات المفروضة قاعدياً · نجاح إيداع <bdi>≥ 97%</bdi> · <strong>صفر</strong> <bdi>MDF-5051</bdi> على <bdi>30</bdi> حزمة متتالية · مطابقة حقول <bdi>≥ 98%</bdi> على <bdi>20</bdi> مذكرة يوقّعها الطبيب المرجعي · <bdi>p95 ≤ 5</bdi> ثوانٍ · <bdi>100%</bdi> رفع مسبوق باعتماد بشري (مضمون بـ<bdi>upload_jobs.visit_id → approvals.visit_id</bdi>) · <bdi>100%</bdi> جلسات بموافقة مريض وحدث تدقيق لكل حذف صوت · <strong>صفر</strong> أكواد معروضة دون عتبة الثقة (خانة فارغة بعبارة «يتطلب إدخال الطبيب») · <bdi>100%</bdi> من بنود الخطة مهيكلة بكودها — دواء <bdi>SFDA</bdi>+<bdi>GTIN</bdi> · إجراء <bdi>ACHI</bdi>+<bdi>SBS</bdi> · خدمة ومختبر وأشعة <bdi>SBS</bdi> · جهاز <bdi>GMDN</bdi>+<bdi>GTIN</bdi> بمبرر إلزامي — مع <bdi>linked_dx</bdi> لتشخيص <bdi>ICD-10-AM</bdi> وحالة <bdi>suggested</bdi>/<bdi>confirmed</bdi> · توقيع التكامل وأمن المعلومات <span class="opt"></span></td></tr>
+<tr><td>③</td><td>نجاح إيداع <bdi>≥ 98%</bdi> على <bdi>30</bdi> يوماً متصلة · <strong>صفر</strong> <bdi>MDF-5051</bdi> غير مُعالج خلال <bdi>48</bdi> ساعة · <bdi>p95 ≤ 5</bdi> ثوانٍ · مطابقة <bdi>≥ 98%</bdi> في تدقيق شهري على <bdi>25</bdi> مذكرة · <strong>صفر</strong> رفع بلا اعتماد و<strong>صفر</strong> تعديل على <bdi>approvals</bdi>/<bdi>audit_logs</bdi> · توقيع محضر استقرار الإنتاج <span class="opt"></span></td></tr>
+</table>
+
+<h2>الأدوار والمسؤوليات — <bdi>RACI</bdi> مبسّط (<bdi>R</bdi> منفّذ · <bdi>A</bdi> مسؤول · <bdi>C</bdi> يُستشار · <bdi>I</bdi> يُبلَّغ)</h2>
+<table class="avoid">
+<tr><th>المهمة</th><th><bdi>Medify</bdi></th><th>تقنية المعلومات</th><th>أمن المعلومات</th><th>القسم الطبي</th></tr>
+<tr><td>نقطة النهاية وبيانات الاعتماد واختبار الاتصال</td><td class="num"><bdi>C</bdi></td><td class="num"><bdi>A/R</bdi></td><td class="num"><bdi>C</bdi></td><td class="num"><bdi>I</bdi></td></tr>
+<tr><td>بناء الحزمة وإيداعها ومعالجة الفشل</td><td class="num"><bdi>A/R</bdi></td><td class="num"><bdi>C</bdi></td><td class="num"><bdi>I</bdi></td><td class="num"><bdi>I</bdi></td></tr>
+<tr><td>القالب والقوائم المرجعية</td><td class="num"><bdi>R</bdi></td><td class="num"><bdi>C</bdi></td><td class="num"><bdi>I</bdi></td><td class="num"><bdi>A</bdi></td></tr>
+<tr><td>الاعتماد السريري: نص المذكرة ثم الأكواد بنداً بنداً</td><td class="num"><bdi>I</bdi></td><td class="num"><bdi>I</bdi></td><td class="num"><bdi>I</bdi></td><td class="num"><bdi>A/R</bdi></td></tr>
+<tr><td>موافقة المريض وإقامة البيانات والمراجعة الأمنية</td><td class="num"><bdi>R</bdi></td><td class="num"><bdi>C</bdi></td><td class="num"><bdi>A</bdi></td><td class="num"><bdi>C</bdi></td></tr>
+<tr><td>رفع المطالبة إلى <bdi>NPHIES</bdi> — خارج نطاقنا</td><td class="num">—</td><td class="num"><bdi>C</bdi></td><td class="num"><bdi>I</bdi></td><td class="num"><bdi>A/R</bdi></td></tr>
+<tr><td>قرار الانتقال بين المراحل</td><td class="num"><bdi>C</bdi></td><td class="num"><bdi>R</bdi></td><td class="num"><bdi>C</bdi></td><td class="num"><bdi>A</bdi></td></tr>
+</table>
+
+<div class="pb"></div>
+
+<h2>المخاطر والتخفيف</h2>
+<div class="box"><strong>وضع الجسر (<bdi>bridge mode</bdi>) — الحل المؤقت المشترك لمخاطر التكامل أدناه:</strong> من <strong>يوم التوقيع</strong> وقبل اكتمال التكامل — تصدير <bdi>PDF</bdi> بترويسة ثنائية اللغة وزر «نسخ نظيف» للـ<bdi>EMR</bdi>، بلا تغيير في مسار الاعتماد البشري.</div>
+<table class="avoid">
+<tr><th>المخاطرة</th><th>الأثر</th><th>التخفيف</th></tr>
+<tr><td>تأخر بيانات اعتماد <bdi>sandbox</bdi></td><td>تأخر المرحلة ① وانزلاق الجدول كله.</td><td>طلبها في محضر التوقيع بمهلة <bdi>5</bdi> أيام عمل ومسؤول مسمّى · مؤقتاً: التدريب والالتقاط على <strong>وضع الجسر</strong> — لا انتظار.</td></tr>
+<tr><td>عدم دعم النظام لـ<bdi>FHIR</bdi></td><td>تعذّر إيداع <bdi>Bundle</bdi> المعياري آلياً.</td><td>التحويل إلى مهايئ <bdi>HL7 v2</bdi> (<bdi>MDM</bdi>/<bdi>ORU</bdi> رفعاً، <bdi>ADT</bdi> ديموغرافيا) عبر موصّل النظام · مؤقتاً: <strong>وضع الجسر</strong> حتى جاهزية المهايئ.</td></tr>
+<tr><td>عدم توفر القوائم المرجعية</td><td>نقص مطابقة الحقول وبنود بلا كود.</td><td>الأنظمة المهيّأة (<bdi>ICD-10-AM</bdi> لا يُعطَّل بقيد <bdi>CHECK</bdi> قاعدي · <bdi>ACHI</bdi> · <bdi>SBS</bdi> · <bdi>SFDA</bdi>) بدرجة ثقة وإصدار سجل وتاريخ سريان لكل كود · مؤقتاً: كل كود دون العتبة خانة فارغة بعبارة «يتطلب إدخال الطبيب» — لا تخمين.</td></tr>
+<tr><td>تأخر الموافقات الأمنية</td><td>تعذّر لمس بيانات حقيقية والانتقال إلى ② و③.</td><td>حزمة الأدلة مبكراً: <bdi>RLS</bdi> (بلا سياق = صفر صفوف) · تشفير <bdi>Fernet</bdi> عمودي · إخفاء هوية قابل للعكس · سجلات إلحاقية ببصمة <bdi>SHA-256</bdi> · <bdi>TOTP 2FA</bdi> · <bdi>PHI</bdi> داخل المملكة · مؤقتاً: إطالة ① ببيانات اصطناعية و<strong>وضع الجسر</strong>.</td></tr>
+</table>
+
+<h2>الجدول الزمني التقريبي (من تاريخ توقيع الاتفاقية)</h2>
+<table class="avoid">
+<tr><th>المدى</th><th>المرحلة</th><th>المحطات الرئيسة</th></tr>
+<tr><td>الأسبوع <bdi>1</bdi></td><td>التهيئة</td><td>محضر التوقيع · تسمية مسؤول التكامل · طلب اعتماد <bdi>sandbox</bdi> · تفعيل <strong>وضع الجسر</strong>.</td></tr>
+<tr><td>الأسبوعان <bdi>2–3</bdi></td><td>① <bdi>sandbox</bdi></td><td>تهيئة <bdi>integration_configs</bdi> · اختبار الاتصال · <bdi>50</bdi> حزمة اصطناعية · إغلاق معايير ①.</td></tr>
+<tr><td>الأسبوع <bdi>4</bdi></td><td>تهيئة ②</td><td>القالب والقوائم المرجعية · موافقة أمن المعلومات · تدريب الأطباء وحسابات <bdi>2FA</bdi>.</td></tr>
+<tr><td>الأسابيع <bdi>5–8</bdi></td><td>② <bdi>UAT</bdi></td><td>تشغيل موازٍ · متابعة طابور الفشل · تقرير أسبوعي · إغلاق معايير ② والتوقيع.</td></tr>
+<tr><td>الأسبوع <bdi>9</bdi></td><td>بوابة الانتقال</td><td>مراجعة مشتركة · تحويل <bdi>mode=test</bdi> إلى <bdi>mode=live</bdi> بعد اختبار ناجح.</td></tr>
+<tr><td>الأسابيع <bdi>10–13</bdi> فما بعد</td><td>③ <bdi>production</bdi> ثم التوسّع</td><td>الموجة الأولى · دعم أسبوعان · تقرير شهري · إغلاق معايير الاستقرار · موجات لاحقة باتفاق منفصل.</td></tr>
+<tr><td colspan="3">المدد مشروطة بمواعيد مخرجات المنشأة؛ أي تأخر يزيح ما بعده — عدا <strong>وضع الجسر</strong> العامل من الأسبوع <bdi>1</bdi>.</td></tr>
+</table>
+
+<div class="foot"><span><bdi>Medify</bdi> — كاتب طبي ذكي محيطي · وثيقة <bdi>B3</bdi></span><span>صفحة <bdi>__/__</bdi></span></div>
+
+</body>
+</html>
