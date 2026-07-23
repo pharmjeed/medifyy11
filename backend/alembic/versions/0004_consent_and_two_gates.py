@@ -60,10 +60,16 @@ FROM approvals a
 WHERE a.note_approval_id IS NULL
   AND NOT EXISTS (SELECT 1 FROM note_approvals n WHERE n.visit_id = a.visit_id);
 
+-- الترحيل لمرة واحدة يعطّل حارس الإلحاقية مؤقتاً (approvals إلحاقي — UPDATE ممنوع عادةً).
+-- ضمن معاملة الهجرة: أي فشل يعيد الحارس بالـrollback. المالك (منفّذ الهجرة) يملك الجدول.
+ALTER TABLE approvals DISABLE TRIGGER trg_approvals_append_only;
+
 UPDATE approvals a
 SET note_approval_id = n.id
 FROM note_approvals n
 WHERE n.visit_id = a.visit_id AND a.note_approval_id IS NULL;
+
+ALTER TABLE approvals ENABLE TRIGGER trg_approvals_append_only;
 
 -- قاعدة جديدة: create_all أنشأ المفتاح باسم مولَّد — لا نضيف مفتاحاً مكرراً
 DO $$
