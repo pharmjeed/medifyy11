@@ -5,11 +5,11 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { SaShell } from "@/components/SaShell";
-import { useToast } from "@/components/ui";
+import { Field, Modal, useToast } from "@/components/ui";
 import { ApiError } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
 import { saApi } from "@/lib/sa";
-import type { FacilityStatus, SaFacilityRow } from "@/lib/types";
+import type { FacilityStatus, SaFacilityRow, SaPlan } from "@/lib/types";
 
 const COLS = "1.6fr 1fr .8fr .7fr .7fr .7fr .8fr";
 
@@ -31,6 +31,8 @@ function FacilitiesInner() {
   const [q, setQ] = useState("");
   const [status, setStatus] = useState(params.get("status") ?? "");
   const [loading, setLoading] = useState(true);
+  const [creating, setCreating] = useState(false);
+  const [plans, setPlans] = useState<SaPlan[]>([]);
 
   const load = useCallback(async (searchQ: string, searchStatus: string, searchPage: number) => {
     setLoading(true);
@@ -49,6 +51,15 @@ function FacilitiesInner() {
   }, [toast, lang, L]);
 
   useEffect(() => { void load(q, status, page); }, [load, status, page]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // كتالوج دورات الفوترة — يملأ قائمة الباقة في نافذة الإنشاء
+  useEffect(() => {
+    void (async () => {
+      try {
+        setPlans((await saApi<SaPlan[]>("/plans")).data.filter((plan) => plan.is_active));
+      } catch { /* الإنشاء يبقى ممكناً بالدورة الافتراضية */ }
+    })();
+  }, []);
 
   const pages = Math.max(1, Math.ceil(total / 25));
 
@@ -69,6 +80,9 @@ function FacilitiesInner() {
               onClick={() => { setStatus(key ?? ""); setPage(1); }}>{label}</button>
           ))}
         </div>
+        <button className="btn h40" onClick={() => setCreating(true)}>
+          {L("+ منشأة جديدة", "+ New facility")}
+        </button>
       </div>
 
       <div className="grid-table">
@@ -120,7 +134,113 @@ function FacilitiesInner() {
           </button>
         </div>
       ) : null}
+
+      {creating ? (
+        <NewFacilityModal
+          plans={plans}
+          onClose={() => setCreating(false)}
+          onDone={(facilityId) => { setCreating(false); router.push(`/sa/facilities/${facilityId}`); }}
+        />
+      ) : null}
     </>
+  );
+}
+
+/** إنشاء منشأة من المنصة — بيانات المنشأة وحساب أدمنها وعدد الدكاترة في نموذج واحد. */
+function NewFacilityModal({ plans, onClose, onDone }: {
+  plans: SaPlan[];
+  onClose: () => void;
+  onDone: (facilityId: string) => void;
+}) {
+  const toast = useToast();
+  const { L, lang } = useLang();
+
+  const [name, setName] = useState("");
+  const [commercialReg, setCommercialReg] = useState("");
+  const [fullName, setFullName] = useState("");
+  const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [seats, setSeats] = useState(3);
+  const [plan, setPlan] = useState("monthly");
+  const [invoice, setInvoice] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const submit = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const body = await saApi<{ id: string; admin_username: string }>("/facilities", {
+        method: "POST",
+        body: {
+          name, commercial_reg: commercialReg, seats, plan,
+          issue_first_invoice: invoice,
+          admin: { full_name: fullName, username, email, password },
+        },
+      });
+      toast(L(`أُنشئت ${name} — أدمنها ${body.data.admin_username}`,
+              `${name} created — admin ${body.data.admin_username}`));
+      onDone(body.data.id);
+    } catch (err) {
+      setError(err instanceof ApiError
+        ? `${err.text(lang)} (${err.code})`
+        : L("تعذر الاتصال بالخادم", "Could not reach the server"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal title={L("منشأة جديدة", "New facility")} onClose={onClose}>
+      <form onSubmit={(event) => { event.preventDefault(); void submit(); }}>
+        <Field label={L("اسم المنشأة", "Facility name")} value={name}
+          onChange={(event) => setName(event.target.value)} required minLength={2} />
+        <Field label={L("السجل التجاري", "Commercial registration")} ltr value={commercialReg}
+          onChange={(event) => setCommercialReg(event.target.value)} required minLength={4} />
+
+        <div className="sub-box" style={{ marginBottom: 12 }}>
+          <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8 }}>
+            {L("حساب أدمن المنشأة", "Facility admin account")}
+          </div>
+          <Field label={L("الاسم الكامل", "Full name")} value={fullName}
+            onChange={(event) => setFullName(event.target.value)} required minLength={2} />
+          <Field label={L("اسم المستخدم", "Username")} ltr value={username}
+            onChange={(event) => setUsername(event.target.value)} required minLength={3} />
+          <Field label={L("البريد (قناة الاستعادة — إلزامي)", "Email (recovery channel — required)")} ltr
+            type="email" value={email} onChange={(event) => setEmail(event.target.value)} required />
+          <Field label={L("كلمة المرور", "Password")} ltr type="password" value={password}
+            onChange={(event) => setPassword(event.target.value)} required minLength={8} />
+        </div>
+
+        <Field label={L("عدد الدكاترة", "Doctors count")} ltr type="number" min={1} max={500}
+          value={String(seats)} onChange={(event) => setSeats(Number(event.target.value) || 1)} required />
+
+        <label className="field-label">{L("دورة الفوترة", "Billing cycle")}</label>
+        <select className="field" value={plan} onChange={(event) => setPlan(event.target.value)}>
+          {plans.length === 0 ? <option value="monthly">monthly</option> : null}
+          {plans.map((row) => (
+            <option key={row.id} value={row.code}>
+              {L(row.name_ar, row.name_en)} — {row.seat_price_sar} {L("ر.س/دكتور", "SAR/doctor")}
+            </option>
+          ))}
+        </select>
+
+        <label style={{ display: "flex", gap: 8, alignItems: "center", margin: "12px 0", fontSize: 13 }}>
+          <input type="checkbox" checked={invoice} onChange={(event) => setInvoice(event.target.checked)} />
+          {L("إصدار الفاتورة الأولى الآن", "Issue the first invoice now")}
+        </label>
+        <p style={{ fontSize: 12, color: "#5c7096", margin: "0 0 12px" }}>
+          {L("اتركه مطفأً لحسابات العرض والتجريب — الإصدار من المنصة فعل صريح.",
+             "Leave off for demo accounts — platform invoicing is an explicit action.")}
+        </p>
+
+        {error !== null ? <p style={{ color: "#d94b4b", fontSize: 12.5, fontWeight: 700, margin: "10px 0 0" }}>{error}</p> : null}
+        <button className="btn" style={{ width: "100%" }} type="submit" disabled={busy}>
+          {busy ? L("جارٍ الإنشاء…", "Creating…") : L("إنشاء المنشأة", "Create facility")}
+        </button>
+      </form>
+    </Modal>
   );
 }
 

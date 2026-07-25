@@ -29,7 +29,9 @@ from ...envelope import ok, paginated
 from ...errors import MedifyError
 from ...models import (
     Clinic,
+    CodingSystemConfig,
     Facility,
+    IntegrationConfig,
     Invoice,
     Plan,
     PlatformAdmin,
@@ -506,6 +508,77 @@ def sa_list_facilities(
         base.order_by(Facility.created_at.desc()).offset((page - 1) * per_page).limit(per_page)
     ).scalars().all()
     return paginated([_facility_row(db, facility) for facility in rows], total, page, per_page)
+
+
+class SaFacilityAdminIn(BaseModel):
+    full_name: str = Field(min_length=2)
+    username: str = Field(min_length=3)
+    email: EmailStr  # إلزامي للأدمن — قناة الاستعادة (DOC-04)
+    password: str = Field(min_length=8)
+
+
+class SaFacilityCreateIn(BaseModel):
+    name: str = Field(min_length=2)
+    commercial_reg: str = Field(min_length=4)
+    admin: SaFacilityAdminIn
+    seats: int = Field(ge=1, le=500)   # عدد الدكاترة (§٠.١ تعديل ٢)
+    plan: str = "monthly"              # دورة الفوترة — السعر من كتالوج المنصة
+    issue_first_invoice: bool = False  # الإصدار من المنصة فعل صريح لا تلقائي
+
+
+@router.post("/facilities", status_code=201)
+def sa_create_facility(body: SaFacilityCreateIn, ctx: SuperAuth, db: SystemDB):
+    """إنشاء منشأة من المنصة — نفس أثر التسجيل الذاتي (W-002) بفاعل منصّي (actor NULL).
+
+    الفاتورة الأولى اختيارية خلافاً للتسجيل الذاتي: الإصدار من المنصة فعل صريح (§٠.١)،
+    فتُترك مطفأة لحسابات العرض والتجريب.
+    """
+    require_cap(ctx, "facilities.write")
+    if db.execute(
+        select(Facility).where(Facility.commercial_reg == body.commercial_reg)
+    ).scalar_one_or_none() is not None:
+        raise MedifyError("MDF-4041", details={"reason": "commercial_reg_taken"})
+    plan = db.execute(select(Plan).where(Plan.code == body.plan)).scalar_one_or_none()
+    if plan is None or not plan.is_active:
+        raise MedifyError("MDF-4041", details={"reason": "plan_not_found_or_inactive"})
+
+    facility = Facility(name=body.name, commercial_reg=body.commercial_reg, status="active")
+    db.add(facility)
+    db.flush()
+    admin = User(
+        facility_id=facility.id,
+        role="admin",
+        full_name=body.admin.full_name,
+        username=body.admin.username,
+        email=body.admin.email,
+        password_hash=hash_password(body.admin.password),
+        is_active=True,
+    )
+    db.add(admin)
+    subscription = Subscription(facility_id=facility.id, seats_total=body.seats, plan=plan.code)
+    db.add(subscription)
+    db.flush()
+    # NULL = فعل المنصة (لا مستخدم منشأة وراءه)
+    db.add(SeatEvent(subscription_id=subscription.id, delta=body.seats,
+                     reason="expand", actor_user_id=None))
+    # أنظمة الترميز الافتراضية — الحزمة السعودية (FR-301)
+    for system in ("ICD10AM", "ACHI", "SBS", "SFDA"):
+        db.add(CodingSystemConfig(facility_id=facility.id, system=system, version="2024", is_active=True))
+    db.add(IntegrationConfig(facility_id=facility.id, mode="test"))
+    invoice_number = issue_invoice(db, subscription, body.seats).number if body.issue_first_invoice else None
+    sa_audit(db, ctx, "sa.facility_created", "facility", facility.id,
+             facility_id=facility.id,
+             meta={"name": facility.name, "seats": body.seats, "plan": plan.code,
+                   "admin_username": admin.username, "invoiced": invoice_number is not None})
+    return ok({
+        "id": str(facility.id),
+        "name": facility.name,
+        "commercial_reg": facility.commercial_reg,
+        "admin_username": admin.username,
+        "seats_total": body.seats,
+        "plan": plan.code,
+        "invoice_number": invoice_number,
+    })
 
 
 def _get_facility(db: Session, facility_id: uuid.UUID) -> Facility:
