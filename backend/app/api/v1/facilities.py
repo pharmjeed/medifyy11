@@ -27,6 +27,7 @@ from ...models import (
 )
 from ...notify import notify_admins
 from ...security import hash_password
+from ...services.default_templates import seed_default_templates
 from ...services.billing import (
     create_payment_session,
     get_subscription,
@@ -106,6 +107,8 @@ def register_facility(body: RegisterFacilityIn, db: SystemDB):
     for system in ("ICD10AM", "ACHI", "SBS", "SFDA"):
         db.add(CodingSystemConfig(facility_id=facility.id, system=system, version="2024", is_active=True))
     db.add(IntegrationConfig(facility_id=facility.id, mode="test"))
+    # قوالب SOAP القياسية — بدونها لا يستطيع أي دكتور بدء زيارة (W-211)
+    seed_default_templates(db, facility.id)
     issue_invoice(db, subscription, body.seats)
     audit(db, facility.id, "facility.registered", "facility", facility.id, admin.id, {"seats": body.seats})
     return ok({"facility_id": str(facility.id), "admin_username": admin.username})

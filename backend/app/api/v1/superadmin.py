@@ -49,6 +49,7 @@ from ...security import (
     verify_password,
 )
 from ...services.billing import issue_invoice, plan_seat_price, seats_used
+from ...services.default_templates import seed_default_templates
 from ...totp import (
     generate_recovery_codes,
     generate_secret,
@@ -565,6 +566,8 @@ def sa_create_facility(body: SaFacilityCreateIn, ctx: SuperAuth, db: SystemDB):
     for system in ("ICD10AM", "ACHI", "SBS", "SFDA"):
         db.add(CodingSystemConfig(facility_id=facility.id, system=system, version="2024", is_active=True))
     db.add(IntegrationConfig(facility_id=facility.id, mode="test"))
+    # قوالب SOAP القياسية — بدونها لا يستطيع أي دكتور بدء زيارة (W-211)
+    seed_default_templates(db, facility.id)
     invoice_number = issue_invoice(db, subscription, body.seats).number if body.issue_first_invoice else None
     sa_audit(db, ctx, "sa.facility_created", "facility", facility.id,
              facility_id=facility.id,
