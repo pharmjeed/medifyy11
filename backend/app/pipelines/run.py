@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 import logging
 import uuid
 from typing import Any
@@ -24,6 +25,7 @@ from ..models import (
     Visit,
 )
 from ..notify import notify
+from ..services.history import previous_visits
 from .deidentify import build_map
 from .llm import get_llm
 
@@ -31,7 +33,8 @@ logger = logging.getLogger("medify.pipelines")
 
 PROMPT_VERSIONS = {
     "P2-summary": "1.0",
-    "P3-guidance": "1.1",  # بنود خطة مهيكلة + ثقة + provenance (توجيه المالك 2026-07-22)
+    # 1.2: المراجعات السابقة مدخل صريح + إرشاد تشخيصي/علاجي عملي (تعديل مالك 2026-07-26)
+    "P3-guidance": "1.2",
     "P4-reverse-template": "1.0",
     "P5-edit-chat": "1.0",
 }
@@ -132,6 +135,12 @@ def run_guidance(db: Session, visit: Visit, summary: Summary) -> bool:
     version = PROMPT_VERSIONS["P3-guidance"]
     by_key = {section.section_key: section for section in sections}
 
+    # المراجعات السابقة: من اللقطة إن حملتها (ما رآه الطبيب فعلاً عند بدء الزيارة)، وإلا تُبنى الآن
+    context_json = (snapshot.content_json if snapshot else {}) or {}
+    history = context_json.get("previous_visits")
+    if history is None:
+        history = previous_visits(db, visit.patient_id, visit.doctor_id, exclude_visit_id=visit.id)
+
     try:
         output, _model_ref = get_llm().complete_json(
             "P3-guidance",
@@ -140,7 +149,8 @@ def run_guidance(db: Session, visit: Visit, summary: Summary) -> bool:
                 "summary_sections": [
                     {"section_key": s.section_key, "content": deid.scrub(s.content_current)} for s in sections
                 ],
-                "patient_context": deid.scrub(str((snapshot.content_json if snapshot else {}) or {})),
+                "patient_context": deid.scrub(str(context_json)),
+                "previous_visits": deid.scrub(json.dumps(history, ensure_ascii=False)),
                 "transcript_highlights": deid.scrub(_transcript_text(transcript)[:2000] if transcript else ""),
                 "active_coding_systems": ", ".join(systems),
             },

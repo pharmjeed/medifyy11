@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import re
@@ -85,6 +86,54 @@ class ClaudeEngine(LLMEngine):
         rendered = render_prompt(load_prompt(prompt_id, version), variables)
         model_ref = f"{prompt_id}@{version}/{self._model}"
         for attempt in range(2):  # مخرج غير مطابق → إعادة استدعاء واحدة (DOC-08 §٦)
+            raw = self._call(rendered, attachments)
+            try:
+                return _extract_json(raw), model_ref
+            except ValueError:
+                if attempt == 1:
+                    raise
+                logger.warning("مخرج غير مطابق للعقد من %s — إعادة المحاولة", prompt_id)
+        raise ValueError("unreachable")
+
+
+class GeminiEngine(LLMEngine):
+    """جيميناي (تعديل مالك 2026-07-26) — نفس عقد المخرجات: JSON صالح أو ValueError بعد إعادة واحدة."""
+
+    def __init__(self) -> None:
+        from google import genai
+
+        s = get_settings()
+        self._client = genai.Client(api_key=s.gemini_api_key)
+        self._model = s.gemini_model
+
+    def _call(self, rendered: str, attachments: list[dict[str, Any]] | None) -> str:
+        from google.genai import types
+
+        parts = [
+            types.Part.from_bytes(
+                data=base64.b64decode(attachment["data"]),
+                mime_type=attachment["media_type"],
+            )
+            for attachment in attachments or []
+        ]
+        parts.append(types.Part.from_text(text=rendered))
+        response = self._client.models.generate_content(
+            model=self._model,
+            contents=[types.Content(role="user", parts=parts)],
+            config=types.GenerateContentConfig(temperature=0.2, response_mime_type="application/json"),
+        )
+        return response.text or ""
+
+    def complete_json(
+        self,
+        prompt_id: str,
+        version: str,
+        variables: dict[str, Any],
+        attachments: list[dict[str, Any]] | None = None,
+    ) -> tuple[dict[str, Any], str]:
+        rendered = render_prompt(load_prompt(prompt_id, version), variables)
+        model_ref = f"{prompt_id}@{version}/{self._model}"
+        for attempt in range(2):
             raw = self._call(rendered, attachments)
             try:
                 return _extract_json(raw), model_ref
@@ -268,9 +317,15 @@ def get_llm() -> LLMEngine:
         s = get_settings()
         if s.llm_engine == "claude" and s.anthropic_api_key:
             _engine_instance = ClaudeEngine()
+        elif s.llm_engine == "gemini" and s.gemini_api_key:
+            try:
+                _engine_instance = GeminiEngine()
+            except Exception as exc:  # حزمة غائبة → mock دون توقف (D-03)
+                logger.warning("تعذّر تشغيل GeminiEngine (%s) — تفعيل mock", exc)
+                _engine_instance = MockLLMEngine()
         else:
-            if s.llm_engine == "claude":
-                logger.warning("LLM_ENGINE=claude لكن ANTHROPIC_API_KEY غائب — تفعيل mock (D-03)")
+            if s.llm_engine in ("claude", "gemini"):
+                logger.warning("LLM_ENGINE=%s لكن مفتاح المزود غائب — تفعيل mock (D-03)", s.llm_engine)
             _engine_instance = MockLLMEngine()
     return _engine_instance
 

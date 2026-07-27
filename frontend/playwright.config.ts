@@ -9,6 +9,11 @@ export default defineConfig({
     baseURL: process.env.E2E_BASE_URL ?? "http://localhost:3000",
     locale: "ar-SA",
     trace: "retain-on-failure",
+    // التسجيل يلتقط صوتاً حقيقياً من الميكروفون — جهاز وهمي + إذن ممنوح مسبقاً في الاختبار
+    permissions: ["microphone"],
+    launchOptions: {
+      args: ["--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream"],
+    },
   },
   webServer: process.env.E2E_NO_SERVER === "1" ? undefined : {
     command: "npm run dev",

@@ -24,6 +24,7 @@ from ...models import (
 )
 from ...pipelines.run import run_edit_chat
 from ...pipelines.stt import get_stt
+from ...services.history import previous_visits
 from ...services.visits import get_visit_for_doctor, summary_etag
 
 router = APIRouter()
@@ -148,6 +149,8 @@ def get_summary(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB, response: Response
         if item["requires_doctor_input"] and item["status"] in ("accepted", "modified")
         and not item["code_value"]
     )
+    # المراجعات السابقة لهذا المريض — سياق المراجعة نفسه الذي رآه الإرشاد (تعديل مالك 2026-07-26)
+    history = previous_visits(db, visit.patient_id, visit.doctor_id, exclude_visit_id=visit.id)
     return ok({
         "visit_id": str(visit.id),
         "state": visit.state,
@@ -161,6 +164,7 @@ def get_summary(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB, response: Response
         "note_approved": note_approval is not None,
         "can_export": approval is not None,
         "approval": approval_out,
+        "previous_visits": history,
     })
 
 

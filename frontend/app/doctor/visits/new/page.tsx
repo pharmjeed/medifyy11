@@ -9,15 +9,32 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, api, getSessionUser, wsUrl } from "@/lib/api";
+import { startMicCapture } from "@/lib/audio";
+import type { MicCapture } from "@/lib/audio";
 import { useLang } from "@/lib/i18n";
-import type { ConsentState, CreatedVisit, Patient, PatientContext, Speaker, Template } from "@/lib/types";
+import type { ConsentState, CreatedPatient, CreatedVisit, Patient, PatientContext, Speaker, Template } from "@/lib/types";
 import { ProgressBar7 } from "@/components/ProgressBar7";
 import { Shell } from "@/components/Shell";
-import { Modal, SpeakerBadge, SpecBadge, SpecBar, useErrorScreen, useToast } from "@/components/ui";
+import { Field, Modal, SpeakerBadge, SpecBadge, SpecBar, useErrorScreen, useToast } from "@/components/ui";
 
 type Phase = "patient" | "template" | "consent" | "recording" | "generating" | "blocked";
 
 interface Segment { id: string; text: string; partial: boolean; speaker?: Speaker; speaker_confidence?: number }
+
+/** سقف الحفظ المحلي عند الانقطاع (~10 دقائق صوت) — بعده تُتخطى الأجزاء بلا كسر تسلسل الترقيم */
+const MAX_PENDING_CHUNKS = 2400;
+
+const EMPTY_PATIENT_FORM = { hospital_mrn: "", display_name: "", dob: "", gender: "" };
+
+/** ينتظر إغلاق قناة التفريغ — الخادم يحفظ التفريغ قبل الإغلاق، فلا يبدأ التلخيص قبله */
+function waitForSocketClose(socket: WebSocket | null, timeoutMs = 25000): Promise<void> {
+  return new Promise((resolve) => {
+    if (socket === null || socket.readyState === WebSocket.CLOSED) { resolve(); return; }
+    const finish = (): void => { clearTimeout(timer); resolve(); };
+    const timer = setTimeout(finish, timeoutMs);
+    socket.addEventListener("close", finish, { once: true });
+  });
+}
 
 function medsText(context: PatientContext): string {
   return (context.medications ?? [])
@@ -35,6 +52,13 @@ export default function NewVisitPage() {
   const [patients, setPatients] = useState<Patient[]>([]);
   const [query, setQuery] = useState("");
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
+
+  // إضافة مريض يدوياً — للمريض الذي لم يصل بعد من مزامنة نظام المستشفى (تعديل مالك 2026-07-26)
+  const [addOpen, setAddOpen] = useState(false);
+  const [addForm, setAddForm] = useState(EMPTY_PATIENT_FORM);
+  const [addBusy, setAddBusy] = useState(false);
+  const [listVersion, setListVersion] = useState(0);
+
   const [templates, setTemplates] = useState<Template[]>([]);
   const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(null);
   const [visit, setVisit] = useState<CreatedVisit | null>(null);
@@ -55,6 +79,7 @@ export default function NewVisitPage() {
   const [genStep, setGenStep] = useState<0 | 1 | 2>(0); // 0 = P2 يجري · 1 = P3 يجري · 2 = اكتمل
 
   const ws = useRef<WebSocket | null>(null);
+  const mic = useRef<MicCapture | null>(null); // الميكروفون الحي — PCM16 يُرسل كما هو للتفريغ
   const seq = useRef(0);
   const pending = useRef<{ seq: number; payload: string }[]>([]); // حفظ محلي عند الانقطاع (NFR-09)
   const timers = useRef<ReturnType<typeof setInterval>[]>([]);
@@ -82,25 +107,27 @@ export default function NewVisitPage() {
         showError(err);
       }
     })();
-  }, [query, showError]);
+  }, [query, listVersion, showError]);
 
   const clearTimers = useCallback(() => {
     for (const timer of timers.current) clearInterval(timer);
     timers.current = [];
   }, []);
-  useEffect(() => () => { clearTimers(); ws.current?.close(); }, [clearTimers]);
+  useEffect(() => () => {
+    clearTimers();
+    mic.current?.stop();   // مغادرة الصفحة أثناء التسجيل تُطفئ الميكروفون فوراً
+    mic.current = null;
+    ws.current?.close();
+  }, [clearTimers]);
 
   const connectWs = useCallback((visitId: string) => {
     const socket = new WebSocket(wsUrl(visitId));
     ws.current = socket;
     socket.onopen = () => {
       setOnline(true);
-      // إعادة إرسال المخزن محلياً من آخر جزء مؤكد (NFR-09)
-      for (const chunk of pending.current) {
-        socket.send(JSON.stringify({ type: "audio_chunk", ...chunk, payload: chunk.payload }));
-      }
-      pending.current = [];
-      setOfflineChunks(0);
+      // لا نُرسل المخزَّن قبل أن يقول الخادم من أين يُكمل: الاتصال الجديد يبدأ عدّاداً جديداً،
+      // فإرسال الأرقام القديمة يُسقط ما حُفظ محلياً أثناء الانقطاع (NFR-09 · DOC-05 §٥).
+      socket.send(JSON.stringify({ type: "resume_query" }));
     };
     socket.onmessage = (event) => {
       const message = JSON.parse(String(event.data)) as {
@@ -123,7 +150,16 @@ export default function NewVisitPage() {
           { id, text, partial: false, speaker, speaker_confidence: speakerConfidence },
         ]);
       } else if (message.type === "resume_from" && message.seq !== undefined) {
-        seq.current = message.seq;
+        // يُرقَّم المخزَّن محلياً من النقطة التي طلبها الخادم ثم يُرسل بالترتيب — لا فجوة ولا فقد
+        const buffered = pending.current;
+        pending.current = [];
+        let next = message.seq;
+        for (const chunk of buffered) {
+          socket.send(JSON.stringify({ type: "audio_chunk", seq: next, payload: chunk.payload }));
+          next += 1;
+        }
+        seq.current = next;
+        setOfflineChunks(0);
       } else if (message.type === "error") {
         const code = message.code ?? "MDF-5031";
         toast(L(`انقطاع خط التفريغ (${code}) — وضع الحفظ المحلي`,
@@ -143,6 +179,41 @@ export default function NewVisitPage() {
 
   const phaseRef = useRef<Phase>("patient");
   useEffect(() => { phaseRef.current = phase; }, [phase]);
+
+  // إضافة مريض من داخل الزيارة — MRN مكرر يعيد الملف القائم بدل ازدواج
+  const submitNewPatient = async () => {
+    const mrn = addForm.hospital_mrn.trim();
+    const name = addForm.display_name.trim();
+    if (mrn === "" || name.length < 2) {
+      toast(L("رقم الملف MRN والاسم إلزاميان", "MRN and full name are required"));
+      return;
+    }
+    setAddBusy(true);
+    try {
+      const created = await api<CreatedPatient>("/patients", {
+        method: "POST",
+        body: {
+          hospital_mrn: mrn,
+          display_name: name,
+          dob: addForm.dob.trim() === "" ? null : addForm.dob.trim(),
+          gender: addForm.gender.trim() === "" ? null : addForm.gender.trim(),
+        },
+      });
+      setSelectedPatient(created.data);
+      setAddOpen(false);
+      setAddForm(EMPTY_PATIENT_FORM);
+      setQuery("");
+      setListVersion((value) => value + 1);
+      toast(created.data.already_exists
+        ? L("رقم الملف مسجّل مسبقاً — اختير الملف القائم", "MRN already registered — the existing file was selected")
+        : L("أُضيف المريض واختير لهذه الزيارة", "Patient added and selected for this visit"));
+    } catch (err) {
+      if (err instanceof ApiError && err.code === "MDF-4013") { setPhase("blocked"); return; }
+      showError(err);
+    } finally {
+      setAddBusy(false);
+    }
+  };
 
   // الخطوة قبل الأخيرة: أنشئ الزيارة (draft) واعرض بوابة الموافقة قبل أي تسجيل
   const proceedToConsent = async () => {
@@ -176,15 +247,18 @@ export default function NewVisitPage() {
     }, 1000));
     timers.current.push(setInterval(() => {
       if (pausedRef.current || stopped.current) return;
-      const chunk = { seq: seq.current, payload: "AAAA" };
-      seq.current += 1;
+      const payload = mic.current?.drain() ?? "";
+      if (payload === "") return; // لا صوت متجمّع في هذه الدورة
       const socket = ws.current;
       if (socket !== null && socket.readyState === WebSocket.OPEN) {
-        socket.send(JSON.stringify({ type: "audio_chunk", ...chunk }));
-      } else {
-        pending.current.push(chunk); // حفظ محلي
+        socket.send(JSON.stringify({ type: "audio_chunk", seq: seq.current, payload }));
+        seq.current += 1;
+      } else if (pending.current.length < MAX_PENDING_CHUNKS) {
+        pending.current.push({ seq: seq.current, payload }); // حفظ محلي (NFR-09)
+        seq.current += 1;
         setOfflineChunks(pending.current.length);
       }
+      // امتلاء المخزن: يُتخطى الجزء دون تقديم الترقيم — يبقى ما بعده متصلاً بما أُرسل
     }, 250));
   };
 
@@ -192,6 +266,17 @@ export default function NewVisitPage() {
   const confirmConsentAndRecord = async () => {
     if (visit === null || !consentAck) return;
     setConsentBusy(true);
+    // الميكروفون أولاً: الموافقة سجل إلحاقي لا يُوثَّق ما لم يكن التسجيل ممكناً فعلاً
+    let capture: MicCapture;
+    try {
+      capture = await startMicCapture();
+    } catch {
+      setConsentBusy(false);
+      toast(L("تعذّر تشغيل الميكروفون — اسمح بالوصول للميكروفون من المتصفح ثم أعد المحاولة",
+              "Microphone unavailable — allow microphone access in the browser, then try again"));
+      return;
+    }
+    mic.current = capture;
     try {
       await api(`/visits/${visit.id}/consent`, {
         method: "POST",
@@ -200,6 +285,8 @@ export default function NewVisitPage() {
       await api(`/visits/${visit.id}/recording/start`, { method: "POST" });
       beginRecordingMechanics(visit.id);
     } catch (err) {
+      capture.stop();
+      mic.current = null;
       if (err instanceof ApiError && err.code === "MDF-4013") { setPhase("blocked"); return; }
       showError(err);
     } finally {
@@ -212,6 +299,7 @@ export default function NewVisitPage() {
     const next = !paused;
     setPaused(next);
     pausedRef.current = next;
+    mic.current?.setPaused(next); // الإيقاف المؤقت يوقف التقاط الصوت لا الميكروفون
     ws.current?.send(JSON.stringify({ type: next ? "pause" : "resume" }));
     try {
       await api(`/visits/${visit.id}/recording/${next ? "pause" : "resume"}`, { method: "POST" });
@@ -222,11 +310,25 @@ export default function NewVisitPage() {
     if (visit === null) return;
     stopped.current = true;
     clearTimers();
-    try { ws.current?.send(JSON.stringify({ type: "end" })); } catch { /* مغلق */ }
-    ws.current?.close();
+    // آخر ما التقطه الميكروفون يُرسل قبل الإنهاء، ثم يُطفأ الجهاز
+    const socket = ws.current;
+    const tail = mic.current?.drain() ?? "";
+    mic.current?.stop();
+    mic.current = null;
+    if (socket !== null && socket.readyState === WebSocket.OPEN) {
+      try {
+        if (tail !== "") {
+          socket.send(JSON.stringify({ type: "audio_chunk", seq: seq.current, payload: tail }));
+          seq.current += 1;
+        }
+        socket.send(JSON.stringify({ type: "end" }));
+      } catch { /* مغلق */ }
+    }
     setPhase("generating");
     setGenStep(0);
     const flip = setTimeout(() => setGenStep(1), 2400); // مؤشر P2 → P3 (W-213)
+    // الخادم يحفظ التفريغ ثم يغلق القناة — الانتظار يضمن أن التلخيص يقرأ التفريغ الحقيقي
+    await waitForSocketClose(socket);
     try {
       await api(`/visits/${visit.id}/recording/stop`, {
         method: "POST",
@@ -246,6 +348,8 @@ export default function NewVisitPage() {
     if (visit === null) { router.push("/doctor"); return; }
     stopped.current = true;
     clearTimers();
+    mic.current?.stop();
+    mic.current = null;
     ws.current?.close();
     try {
       await api(`/visits/${visit.id}/cancel`, { method: "POST" });
@@ -293,16 +397,23 @@ export default function NewVisitPage() {
               <p className="page-desc">{L("عند الاختيار تُجلب لقطة الملف التاريخي كسياق للتحليل (FR-601).", "On selection, a snapshot of the patient's history is fetched as context for analysis (FR-601).")}</p>
               <div className="badge success" style={{ marginBottom: 10 }}>
                 <span style={{ width: 8, height: 8, borderRadius: 999, background: "#12a594" }} />
-                {L("قائمة المرضى مُزامنة من نظام المستشفى — لا إنشاء مرضى داخل Medify", "Patient list is synced from the hospital system — no patient creation inside Medify")}
+                {L("قائمة المرضى مُزامنة من نظام المستشفى — ويمكنك إضافة مريض لم تصله المزامنة بعد",
+                   "Patient list is synced from the hospital system — you may also add a patient the sync has not delivered yet")}
               </div>
-              <input className="field search" placeholder={L("ابحث بالاسم أو رقم الملف MRN…", "Search by name or MRN…")} value={query}
-                onChange={(event) => setQuery(event.target.value)} style={{ marginBottom: 12 }} />
+              <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+                <input className="field search" placeholder={L("ابحث بالاسم أو رقم الملف MRN…", "Search by name or MRN…")} value={query}
+                  onChange={(event) => setQuery(event.target.value)} style={{ flex: 1, marginBottom: 0 }} />
+                <button className="btn-secondary" style={{ whiteSpace: "nowrap" }}
+                  onClick={() => { setAddForm({ ...EMPTY_PATIENT_FORM, hospital_mrn: /^\d+$/.test(query.trim()) ? query.trim() : "" }); setAddOpen(true); }}>
+                  + {L("إضافة مريض", "Add patient")}
+                </button>
+              </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 420, overflowY: "auto" }}>
                 {patients.length === 0 ? (
                   <div className="grid-empty">
                     {L("لا نتائج — البحث بالاسم أو MRN داخل منشأتك فقط.", "No results — search by name or MRN within your facility only.")}<br />
-                    {L("المريض غير موجود؟ سجّله في نظام المستشفى أولاً وسيظهر هنا مع المزامنة القادمة — لا إنشاء مرضى داخل Medify.",
-                       "Patient not found? Register them in the hospital system first and they will appear here with the next sync — no patient creation inside Medify.")}
+                    {L("المريض غير موجود؟ الأصل أن يُسجَّل في نظام المستشفى ويظهر هنا مع المزامنة، ويمكنك إضافته الآن بزر «إضافة مريض» ليبدأ التسجيل فوراً.",
+                       "Patient not found? They should normally be registered in the hospital system and arrive with the sync — or add them now with “Add patient” to start recording immediately.")}
                   </div>
                 ) : patients.map((patient) => {
                   const selected = selectedPatient?.id === patient.id;
@@ -315,6 +426,7 @@ export default function NewVisitPage() {
                         <strong>{patient.display_name}</strong>
                         <span style={{ display: "block", fontSize: 12.5, color: "#5c7096" }}>
                           {patient.gender ?? "—"} · {L("ملف", "MRN")} <bdi>{patient.hospital_mrn}</bdi>
+                          {patient.source === "manual" ? ` · ${L("مضاف يدوياً", "Added manually")}` : ""}
                         </span>
                       </span>
                       <span className="badge" style={{ background: selected ? "#e6f7f4" : "#f7f9fb", color: selected ? "#12a594" : "#5c7096" }}>
@@ -334,8 +446,17 @@ export default function NewVisitPage() {
                   </div>
                   <p style={{ margin: "10px 0 2px", fontWeight: 700 }}>{selectedPatient.display_name}</p>
                   <p style={{ margin: 0, fontSize: 12.5, color: "#5c7096" }}>
-                    {selectedPatient.gender ?? "—"} · {L("ملف", "MRN")} <bdi>{selectedPatient.hospital_mrn}</bdi> · {L("مزامنة", "Synced")} {selectedPatient.synced_at.slice(0, 10)}
+                    {selectedPatient.gender ?? "—"} · {L("ملف", "MRN")} <bdi>{selectedPatient.hospital_mrn}</bdi> ·{" "}
+                    {selectedPatient.source === "manual"
+                      ? L("أُضيف يدوياً", "Added manually")
+                      : L("مزامنة", "Synced")} {selectedPatient.synced_at.slice(0, 10)}
                   </p>
+                  {selectedPatient.source === "manual" ? (
+                    <p style={{ fontSize: 12, color: "#9c6f00", margin: "8px 0 0" }}>
+                      {L("ملف أُنشئ داخل Medify — تأكد من مطابقة رقم الملف MRN لنظام المستشفى قبل رفع المذكرة.",
+                         "File created inside Medify — verify the MRN matches the hospital system before the note is uploaded.")}
+                    </p>
+                  ) : null}
                   <p style={{ fontSize: 12.5, color: "#5c7096", margin: "10px 0 0" }}>
                     {L("اللقطة بتاريخها تُحفظ لكل زيارة — قابلية تدقيق ما رآه الـ", "A dated snapshot is stored per visit — auditability of what the ")}<bdi>AI</bdi>{L(" (DOC-04 §٤).", " saw (DOC-04 §4).")}{" "}
                     {L("تُجلب اللقطة الكاملة (المزمنة/الأدوية/الحساسيات/النتائج) عند إنشاء الزيارة.",
@@ -418,6 +539,10 @@ export default function NewVisitPage() {
                   </span>
                 </span>
               </label>
+              <p style={{ fontSize: 12, color: "#5c7096", margin: "12px 0 0" }}>
+                {L("عند التأكيد يطلب المتصفح إذن الميكروفون — الصوت يُبثّ للتفريغ عبر قناة الزيارة المشفّرة ولا يبدأ التسجيل قبل السماح.",
+                   "On confirmation the browser will ask for microphone access — audio streams for transcription over the encrypted visit channel, and recording will not start before you allow it.")}
+              </p>
               <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
                 <button className="btn hero" style={{ flex: 1 }} disabled={!consentAck || consentBusy}
                   onClick={() => void confirmConsentAndRecord()}>
@@ -509,6 +634,48 @@ export default function NewVisitPage() {
               <p style={{ fontSize: 12.5, color: "#5c7096", marginTop: 14 }}>{L("≤ 30 ثانية لاستشارة 15 دقيقة (NFR-02) — فشل التحليل لا يحجب الملخص (W-224).", "≤ 30 seconds for a 15-minute consultation (NFR-02) — analysis failure does not block the summary (W-224).")}</p>
             </div>
           </section>
+        ) : null}
+
+        {addOpen ? (
+          <Modal title={L("إضافة مريض", "Add patient")} onClose={() => { if (!addBusy) setAddOpen(false); }}>
+            <p style={{ fontSize: 12.5, color: "#5c7096", margin: "0 0 12px" }}>
+              {L("للمريض الذي لم يصل بعد من مزامنة نظام المستشفى. اكتب رقم الملف MRN كما هو في نظام المستشفى — عليه يُبنى رفع المذكرة لاحقاً.",
+                 "For a patient the hospital sync has not delivered yet. Enter the MRN exactly as in the hospital system — the note upload is keyed to it.")}
+            </p>
+            <Field label={L("رقم الملف MRN *", "MRN *")} ltr value={addForm.hospital_mrn} autoFocus
+              placeholder="1042376"
+              onChange={(event) => setAddForm({ ...addForm, hospital_mrn: event.target.value })} />
+            <Field label={L("الاسم الكامل *", "Full name *")} value={addForm.display_name}
+              placeholder={L("محمد عبدالله القحطاني", "Mohammed Abdullah Alqahtani")}
+              onChange={(event) => setAddForm({ ...addForm, display_name: event.target.value })} />
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              <div>
+                <Field label={L("تاريخ الميلاد", "Date of birth")} ltr type="date" value={addForm.dob}
+                  onChange={(event) => setAddForm({ ...addForm, dob: event.target.value })} />
+              </div>
+              <div>
+                <label className="field-label">{L("الجنس", "Gender")}</label>
+                <select className="field" value={addForm.gender}
+                  onChange={(event) => setAddForm({ ...addForm, gender: event.target.value })}>
+                  <option value="">{L("غير محدد", "Unspecified")}</option>
+                  <option value="ذكر">{L("ذكر", "Male")}</option>
+                  <option value="أنثى">{L("أنثى", "Female")}</option>
+                </select>
+              </div>
+            </div>
+            <p style={{ fontSize: 12, color: "#5c7096", margin: "12px 0 0" }}>
+              {L("يُحفظ داخل منشأتك فقط، والاسم وتاريخ الميلاد مشفّران في القاعدة (DOC-16).",
+                 "Stored within your facility only; name and date of birth are encrypted at rest (DOC-16).")}
+            </p>
+            <div className="modal-actions">
+              <button className="btn" style={{ flex: 1 }} disabled={addBusy} onClick={() => void submitNewPatient()}>
+                {addBusy ? L("يُضاف…", "Adding…") : L("إضافة واختيار", "Add & select")}
+              </button>
+              <button className="btn-neutral" style={{ flex: 1 }} disabled={addBusy} onClick={() => setAddOpen(false)}>
+                {L("إلغاء", "Cancel")}
+              </button>
+            </div>
+          </Modal>
         ) : null}
 
         {cancelOpen ? (

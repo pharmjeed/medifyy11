@@ -19,6 +19,7 @@ dependencies = [
     "httpx>=0.27",
     "python-multipart>=0.0.9",
     "anthropic>=0.40",
+    "google-genai>=1.0",
     "redis>=5.0",
     # تصدير المذكرة PDF بترويسة ثنائية اللغة (A3) — التشكيل والاتجاه للعربية،
     # وfonttools[woff] لتحويل خطوط الهوية woff2 إلى TTF بلا تكرار ملفات الخطوط.

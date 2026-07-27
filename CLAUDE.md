@@ -31,7 +31,7 @@ Monorepo: `frontend/` (Next.js 14 App Router + TS strict) · `backend/` (FastAPI
 
 ## قرارات مقفولة (مالك 2026-07-14)
 
-- المرضى **بالمزامنة حصراً** — لا API ولا واجهة إنشاء/تعديل مريض.
+- ~~المرضى **بالمزامنة حصراً** — لا API ولا واجهة إنشاء/تعديل مريض.~~ **مُعدَّل (مالك 2026-07-26)**: المزامنة تبقى المصدر الأساسي، ويُضاف `POST /patients` (دكتور فقط) + زر «إضافة مريض» في شاشة الزيارة للمريض الذي لم تصله المزامنة بعد. لا تعديل ولا حذف مريض. MRN مكرر داخل المنشأة يعيد الملف القائم (`already_exists`) بلا ازدواج، والملف اليدوي يُميَّز بـ`source=manual` من `audit_logs` (لا عمود جديد — DOC-04 حصري).
 - آلة حالات الزيارة: `draft → recording → transcribed → summarized → in_review → approved → uploaded | upload_failed` + `cancelled` نهائية من `draft/recording` فقط (trigger).
 - أقسام المراجعة تُبنى **ديناميكياً من بنية القالب** — لا S/O/A/P مثبتة.
 - الدكتور يعدّل نص الإرشاد **ورمزه معاً** عند الحسم بالتعديل.
@@ -57,7 +57,8 @@ Monorepo: `frontend/` (Next.js 14 App Router + TS strict) · `backend/` (FastAPI
 
 ## المحركات القابلة للتبديل (متغيرات بيئة)
 
-- `STT_ENGINE=whisper|mock` · `LLM_ENGINE=claude|mock` (نموذج claude-sonnet-4-5)
+- `STT_ENGINE=gemini|whisper|mock` · `LLM_ENGINE=gemini|claude|mock` (`GEMINI_API_KEY` + `GEMINI_MODEL`؛ غياب المفتاح = mock تلقائياً بلا توقف)
+- **التفريغ الحي بجيميناي (مالك 2026-07-26)**: المتصفح يلتقط الميكروفون فعلياً (`frontend/lib/audio.ts` — PCM16 أحادي 16kHz base64 كل 250ms عبر نفس قناة WSS)، والخادم يجمّعها في نوافذ ~4 ثوانٍ ويغلّفها WAV ويرسلها للنموذج؛ نوافذ الصمت تُتخطى بلا استدعاء. التسجيل يُحفظ `.wav`. لا تسجيل بلا إذن ميكروفون — ولا تُوثَّق الموافقة قبله.
 - `INTEGRATION_ENGINE=mock|http` (وجهة رفع المستشفى) · `EMAIL_ENGINE=mock|smtp`
 - `ANALYTICS_ENGINE=log|posthog` — الأحداث بلا محتوى سريري
 - المطالبات في `backend/app/prompts/` بإصدارات (`P2-summary@1.0` …) — تُسجَّل مع كل استدعاء.

@@ -27,6 +27,7 @@ export interface Me extends SessionUser {
   specialty: string | null;
   clinic_id: string | null;
   clinic_name: string | null;
+  facility_commercial_reg: string;
 }
 
 export interface Clinic {
@@ -90,6 +91,13 @@ export interface Patient {
   dob: string | null;
   gender: string | null;
   synced_at: string;
+  /** مصدر الملف: مزامنة نظام المستشفى أو إنشاء يدوي من الطبيب (تعديل مالك 2026-07-26) */
+  source?: "hospital_sync" | "manual";
+}
+
+/** مخرج POST /patients — يعيد ملفاً قائماً حين يكون MRN مسجلاً مسبقاً */
+export interface CreatedPatient extends Patient {
+  already_exists: boolean;
 }
 
 export interface TemplateSection {

@@ -6,8 +6,9 @@ import uuid
 from pathlib import Path
 
 from fastapi import APIRouter
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select
+from sqlalchemy.orm import Session
 
 from ...analytics import track
 from ...audit import audit
@@ -16,6 +17,7 @@ from ...deps import DoctorAuth, DB, pagination
 from ...envelope import ok, paginated
 from ...errors import MedifyError
 from ...models import (
+    AuditLog,
     Facility,
     Patient,
     PatientContextSnapshot,
@@ -29,12 +31,24 @@ from ...models import (
 )
 from ...pipelines.run import run_guidance, run_summary
 from ...services.consent import consent_document
+from ...services.history import build_context
 from ...services.visits import get_visit_for_doctor, transition
 
 router = APIRouter()
 
 
-# ===== بحث المرضى (FR-601) — المزامنة حصراً: لا إنشاء/تعديل =====
+# ===== المرضى (FR-601) — المزامنة هي المصدر الأساسي + إنشاء يدوي (تعديل مالك 2026-07-26) =====
+
+def _manual_patient_ids(db: Session, facility_id: uuid.UUID) -> set[str]:
+    """معرفات المرضى المُنشأين يدوياً — من سجل التدقيق (لا عمود مصدر في DOC-04)."""
+    rows = db.execute(
+        select(AuditLog.entity_id).where(
+            AuditLog.facility_id == facility_id,
+            AuditLog.action == "patient.created",
+        )
+    ).scalars().all()
+    return {row for row in rows if row}
+
 
 @router.get("/patients")
 def search_patients(ctx: DoctorAuth, db: DB, query: str = "", page: int = 1, per_page: int = 10):
@@ -52,6 +66,7 @@ def search_patients(ctx: DoctorAuth, db: DB, query: str = "", page: int = 1, per
     total = len(patients)
     start = (page - 1) * per_page
     subset = patients[start:start + per_page]
+    manual = _manual_patient_ids(db, ctx.facility_id)
     return paginated([
         {
             "id": str(patient.id),
@@ -60,9 +75,79 @@ def search_patients(ctx: DoctorAuth, db: DB, query: str = "", page: int = 1, per
             "dob": patient.dob,
             "gender": patient.gender,
             "synced_at": patient.synced_at.isoformat(),
+            # المصدر يميّز ملف المزامنة عن ملف أنشأه الطبيب يدوياً (MRN غير مؤكد من نظام المستشفى)
+            "source": "manual" if str(patient.id) in manual else "hospital_sync",
         }
         for patient in subset
     ], total, page, per_page)
+
+
+class PatientCreateIn(BaseModel):
+    """إنشاء ملف مريض يدوياً — تعديل مالك 2026-07-26 على قرار «المزامنة حصراً»."""
+
+    hospital_mrn: str = Field(min_length=1, max_length=64)
+    display_name: str = Field(min_length=2, max_length=120)
+    dob: str | None = Field(default=None, max_length=10)      # YYYY-MM-DD
+    gender: str | None = Field(default=None, max_length=16)
+
+
+@router.post("/patients", status_code=201)
+def create_patient(body: PatientCreateIn, ctx: DoctorAuth, db: DB):
+    """ملف مريض جديد داخل منشأة الطبيب — للمريض الذي لم يصل بعد من مزامنة نظام المستشفى.
+
+    المزامنة تبقى المصدر الأساسي؛ هذا مسار الاستثناء (مريض جديد على العيادة). MRN مكرر
+    داخل المنشأة → يُعاد الملف القائم بدل ازدواج يرفضه قيد uq_patients_facility_mrn.
+    """
+    facility = db.execute(select(Facility).where(Facility.id == ctx.facility_id)).scalar_one()
+    if facility.status == "suspended":
+        raise MedifyError("MDF-4013", details={"reason": "facility_suspended"})
+
+    mrn = body.hospital_mrn.strip()
+    display_name = body.display_name.strip()
+    dob = (body.dob or "").strip() or None
+    gender = (body.gender or "").strip() or None
+    if not mrn or len(display_name) < 2:
+        raise MedifyError("MDF-5001", details={"validation": "hospital_mrn/display_name required"})
+
+    existing = db.execute(
+        select(Patient).where(Patient.facility_id == ctx.facility_id, Patient.hospital_mrn == mrn)
+    ).scalar_one_or_none()
+    if existing is not None:
+        return ok({
+            "id": str(existing.id),
+            "hospital_mrn": existing.hospital_mrn,
+            "display_name": existing.display_name,
+            "dob": existing.dob,
+            "gender": existing.gender,
+            "synced_at": existing.synced_at.isoformat(),
+            "source": "manual" if str(existing.id) in _manual_patient_ids(db, ctx.facility_id) else "hospital_sync",
+            "already_exists": True,
+        })
+
+    now = dt.datetime.now(dt.timezone.utc)
+    patient = Patient(
+        facility_id=ctx.facility_id,
+        hospital_mrn=mrn,
+        display_name=display_name,
+        dob=dob,
+        gender=gender,
+        synced_at=now,  # لا عمود مصدر في DOC-04 — التمييز من سجل التدقيق أدناه
+    )
+    db.add(patient)
+    db.flush()
+    # لا محتوى سريرياً ولا اسم مريض في السجل (DOC-16) — MRN معرّف ملف لا محتوى
+    audit(db, ctx.facility_id, "patient.created", "patient", patient.id, ctx.user_id,
+          {"hospital_mrn": mrn, "source": "manual"})
+    return ok({
+        "id": str(patient.id),
+        "hospital_mrn": patient.hospital_mrn,
+        "display_name": patient.display_name,
+        "dob": patient.dob,
+        "gender": patient.gender,
+        "synced_at": patient.synced_at.isoformat(),
+        "source": "manual",
+        "already_exists": False,
+    })
 
 
 # ===== إنشاء الزيارة =====
@@ -89,23 +174,12 @@ def create_visit(body: VisitCreateIn, ctx: DoctorAuth, db: DB):
     if ctx.user.clinic_id is None:
         raise MedifyError("MDF-4031", details={"reason": "doctor_without_clinic"})
 
-    # لقطة الملف التاريخي — مدخل الإرشاد المدمج (FR-701)؛ في الربط الحي تُجلب من نظام المستشفى
+    # لقطة الملف التاريخي — مدخل الإرشاد المدمج (FR-701). تُبنى من مراجعات المريض السابقة
+    # الفعلية عند هذا الطبيب (تعديل مالك 2026-07-26)؛ في الربط الحي تُدمج معها بيانات المستشفى.
     snapshot = PatientContextSnapshot(
         patient_id=patient.id,
         facility_id=ctx.facility_id,
-        content_json={
-            "problems": ["Essential hypertension (2024)", "Type 2 diabetes mellitus (2022)"],
-            "medications": [
-                {"name": "amlodipine 10 mg", "note": "ankle oedema 2025-11 — dose reduced"},
-                {"name": "metformin 500 mg BID"},
-            ],
-            "allergies": ["No known drug allergies"],
-            "vitals_history": [
-                {"date": "2026-05-02", "bp": "158/92"},
-                {"date": "2026-06-10", "bp": "161/94"},
-            ],
-            "source": "hospital_sync",
-        },
+        content_json=build_context(db, patient.id, ctx.user_id),
         fetched_at=dt.datetime.now(dt.timezone.utc),
     )
     db.add(snapshot)
@@ -213,7 +287,7 @@ def recording_start(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB):
         db.add(Recording(
             visit_id=visit.id,
             facility_id=ctx.facility_id,
-            storage_uri=str(storage_dir / f"{visit.id}.opus"),
+            storage_uri=str(storage_dir / f"{visit.id}.wav"),  # PCM16 من المتصفح يُحفظ WAV
             duration_sec=0,
             retention_until=dt.datetime.now(dt.timezone.utc) + dt.timedelta(days=settings.recording_retention_days),
         ))
@@ -255,19 +329,21 @@ def recording_stop(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB, body: Recording
     track("recording.completed", ctx.facility_id, "doctor", visit.id,
           duration_sec=body.duration_sec, pauses_count=body.pauses_count, offline_chunks=body.offline_chunks)
 
-    # إن لم يصل تفريغ عبر WS (تعطل P1) نبني transcript فارغاً بعلامة انقطاع
+    # إن لم يصل تفريغ عبر WS (تعطل P1) — على المحرك التجريبي يُبنى حوار العرض،
+    # وعلى محرك حقيقي يبقى التفريغ فارغاً: لا يُلخَّص كلام لم يُقَل (سلامة سريرية).
     transcript = db.execute(select(Transcript).where(Transcript.visit_id == visit.id)).scalar_one_or_none()
     if transcript is None:
         from ...pipelines.speaker import attribute_segments
-        from ...pipelines.stt import MOCK_DIALOGUE
+        from ...pipelines.stt import MOCK_DIALOGUE, MockSTTEngine, get_stt
+        demo = isinstance(get_stt(), MockSTTEngine)
         db.add(Transcript(
             visit_id=visit.id,
             facility_id=ctx.facility_id,
             content_json={"segments": attribute_segments([
                 {"id": f"s-{i}", "text": text, "t0": i * 4.0, "t1": i * 4.0 + 3.5}
                 for i, text in enumerate(MOCK_DIALOGUE)
-            ])},
-            language_stats={"ar": 0.9, "en": 0.1},
+            ]) if demo else []},
+            language_stats={"ar": 0.9, "en": 0.1} if demo else {"segments": 0, "interrupted": True},
         ))
         db.flush()
 

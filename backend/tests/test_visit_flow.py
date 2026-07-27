@@ -278,3 +278,59 @@ def test_visit_appears_in_admin_dashboards_as_counters_only(client, admin_token)
     assert "guidance_by_status" in quality
     flattened = str(usage) + str(quality)
     assert "hypertension" not in flattened.lower(), "لا محتوى سريرياً في لوحات الأدمن"
+
+
+# ===== إضافة مريض من شاشة الزيارة (تعديل مالك 2026-07-26 على «المزامنة حصراً») =====
+
+def test_doctor_creates_patient_and_starts_visit_on_him(client, doctor_token):
+    headers = auth(doctor_token)
+    body = {"hospital_mrn": "9900123", "display_name": "سلمى ناصر الدوسري",
+            "dob": "1993-04-11", "gender": "أنثى"}
+
+    created = client.post("/api/v1/patients", headers=headers, json=body)
+    assert created.status_code == 201, created.text
+    patient = created.json()["data"]
+    assert patient["already_exists"] is False
+    assert patient["source"] == "manual", "الملف اليدوي يُميَّز عن ملف المزامنة"
+
+    # يظهر في البحث داخل المنشأة بمصدره
+    found = client.get("/api/v1/patients", headers=headers, params={"query": "9900123"}).json()["data"]
+    assert found and found[0]["id"] == patient["id"] and found[0]["source"] == "manual"
+
+    # MRN مكرر داخل المنشأة → الملف القائم لا ازدواج (قيد uq_patients_facility_mrn)
+    again = client.post("/api/v1/patients", headers=headers,
+                        json={**body, "display_name": "اسم مختلف تماماً"})
+    assert again.status_code == 201, again.text
+    assert again.json()["data"]["already_exists"] is True
+    assert again.json()["data"]["id"] == patient["id"]
+
+    # الزيارة تبدأ على المريض المُضاف كأي مريض مزامنة
+    templates = client.get("/api/v1/templates", headers=headers).json()["data"]
+    visit = client.post("/api/v1/visits", headers=headers,
+                        json={"patient_id": patient["id"], "template_id": templates[0]["id"]})
+    assert visit.status_code == 201, visit.text
+    assert visit.json()["data"]["patient"]["hospital_mrn"] == "9900123"
+
+
+def test_admin_cannot_create_patient(client, admin_token):
+    """المرضى للدكتور حصراً (DOC-06 §٣) — الإنشاء لا يفتح باباً للأدمن."""
+    response = client.post("/api/v1/patients", headers=auth(admin_token),
+                           json={"hospital_mrn": "9900999", "display_name": "اسم تجريبي"})
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "MDF-4031"
+
+
+def test_created_patient_is_invisible_to_other_facility(client, doctor_token, foreign_doctor_token):
+    """العزل: نفس MRN في منشأة أخرى ملف مستقل، ولا تسرب بين المنشأتين."""
+    mine = client.post("/api/v1/patients", headers=auth(doctor_token),
+                       json={"hospital_mrn": "9900555", "display_name": "فهد سعد العنزي"})
+    assert mine.status_code == 201, mine.text
+    theirs = client.post("/api/v1/patients", headers=auth(foreign_doctor_token),
+                         json={"hospital_mrn": "9900555", "display_name": "مريض منشأة أخرى"})
+    assert theirs.status_code == 201, theirs.text
+    assert theirs.json()["data"]["id"] != mine.json()["data"]["id"]
+    assert theirs.json()["data"]["already_exists"] is False
+
+    listed = client.get("/api/v1/patients", headers=auth(foreign_doctor_token),
+                        params={"query": "9900555", "per_page": 100}).json()["data"]
+    assert [p["display_name"] for p in listed] == ["مريض منشأة أخرى"]

@@ -2,7 +2,8 @@
 # نشر Medify على Oracle Cloud عبر SSH — idempotent (CLAUDE-CODE-PROMPT §٩).
 # المدخلات من deploy.env أو بيئة الجلسة:
 #   ORACLE_HOST (إلزامي) · ORACLE_USER (افتراضي ubuntu، يجرَّب opc تلقائياً) · ORACLE_SSH_KEY (مسار المفتاح)
-#   اختيارياً: DOMAIN · ANTHROPIC_API_KEY · REPO_URL (افتراضي مستودع GitHub) · GIT_REF (افتراضي main)
+#   اختيارياً: DOMAIN · ANTHROPIC_API_KEY · GEMINI_API_KEY (يفعّل التفريغ الحي والتلخيص بجيميناي)
+#              · STT_ENGINE/LLM_ENGINE (تجاوز يدوي) · REPO_URL (افتراضي مستودع GitHub) · GIT_REF (افتراضي main)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -25,6 +26,17 @@ DOMAIN="${DOMAIN:-}"
 REPO_URL="${REPO_URL:-https://github.com/pharmjeed/medifyy11.git}"
 GIT_REF="${GIT_REF:-main}"
 ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}"
+GEMINI_API_KEY="${GEMINI_API_KEY:-}"
+GEMINI_MODEL="${GEMINI_MODEL:-gemini-3.6-flash}"
+# اختيار المحركات: ما يُصرَّح به في deploy.env يتقدم، وإلا يُشتق من المفاتيح المتاحة
+if [[ -z "${LLM_ENGINE:-}" ]]; then
+    if [[ -n "$GEMINI_API_KEY" ]]; then LLM_ENGINE=gemini
+    elif [[ -n "$ANTHROPIC_API_KEY" ]]; then LLM_ENGINE=claude
+    else LLM_ENGINE=mock; fi
+fi
+if [[ -z "${STT_ENGINE:-}" ]]; then
+    if [[ -n "$GEMINI_API_KEY" ]]; then STT_ENGINE=gemini; else STT_ENGINE=mock; fi
+fi
 # منافذ قابلة للتخصيص — لخوادم مشتركة تشغل 80/443 لمشروع آخر
 PROD_HTTP_PORT="${PROD_HTTP_PORT:-80}"
 PROD_HTTPS_PORT="${PROD_HTTPS_PORT:-443}"
@@ -137,7 +149,8 @@ deploy_env() {
         set -a; source /opt/medify/.env; set +a
         export COMPOSE_PROJECT_NAME=$NAME HTTP_PORT=$HTTP_PORT HTTPS_PORT=$HTTPS_PORT \
                ENVIRONMENT=$ENVIRONMENT SITE_ADDRESS='$SITE_ADDRESS' PUBLIC_ORIGIN='$PUBLIC_ORIGIN' \
-               ANTHROPIC_API_KEY='$ANTHROPIC_API_KEY' LLM_ENGINE=$([[ -n "$ANTHROPIC_API_KEY" ]] && echo claude || echo mock)
+               ANTHROPIC_API_KEY='$ANTHROPIC_API_KEY' GEMINI_API_KEY='$GEMINI_API_KEY' \
+               GEMINI_MODEL='$GEMINI_MODEL' LLM_ENGINE=$LLM_ENGINE STT_ENGINE=$STT_ENGINE
         sudo -E docker compose -f docker-compose.prod.yml up -d --build
         echo '>> ($NAME) الهجرات تجري داخل حاوية backend عند الإقلاع'
         sleep 10

@@ -152,3 +152,54 @@ def test_websocket_rejects_wrong_state(client, doctor_token):
     with pytest.raises(WebSocketDisconnect):
         with client.websocket_connect(f"/ws/visits/{visits[0]['id']}/transcribe?token={doctor_token}") as ws:
             ws.receive_json()
+
+
+def test_reconnect_mid_recording_keeps_earlier_transcript_and_audio(client, doctor_token):
+    """انقطاع وسط الاستشارة: الاتصال الثاني يُكمل فوق الأول — لا يمحو نصفها الأول (NFR-09)."""
+    import base64
+    import os
+    import wave
+    from pathlib import Path
+
+    headers = auth(doctor_token)
+    patients = client.get("/api/v1/patients", headers=headers).json()["data"]
+    templates = client.get("/api/v1/templates", headers=headers).json()["data"]
+    visit_id = client.post("/api/v1/visits", headers=headers, json={
+        "patient_id": patients[0]["id"], "template_id": templates[0]["id"],
+    }).json()["data"]["id"]
+    record_consent(client, visit_id, headers)
+    client.post(f"/api/v1/visits/{visit_id}/recording/start", headers=headers)
+
+    chunk = base64.b64encode(b"\x11\x22" * 2000).decode()  # 4000 بايت = 0.125s من PCM16 16kHz
+
+    # الاتصال الأول ينقطع بلا "end" — كما يحدث عند سقوط الشبكة
+    with client.websocket_connect(f"/ws/visits/{visit_id}/transcribe?token={doctor_token}") as ws:
+        for seq in range(8):
+            ws.send_json({"type": "audio_chunk", "seq": seq, "payload": chunk})
+            ws.receive_json()
+
+    first = client.get(f"/api/v1/visits/{visit_id}/transcript", headers=headers).json()["data"]
+    assert len(first["content"]["segments"]) == 2, "جملتان من الاتصال الأول"
+
+    # الاتصال الثاني: العميل يسأل أين توقف الخادم ثم يُكمل بالترقيم الذي طلبه
+    with client.websocket_connect(f"/ws/visits/{visit_id}/transcribe?token={doctor_token}") as ws:
+        ws.send_json({"type": "resume_query"})
+        resumed = ws.receive_json()
+        assert resumed == {"type": "resume_from", "seq": 0}, "اتصال جديد = عدّاد جديد"
+        for offset in range(8):
+            ws.send_json({"type": "audio_chunk", "seq": resumed["seq"] + offset, "payload": chunk})
+            ws.receive_json()
+        ws.send_json({"type": "end"})
+        assert ws.receive_json() == {"type": "status", "state": "summarizing"}
+
+    merged = client.get(f"/api/v1/visits/{visit_id}/transcript", headers=headers).json()["data"]
+    segments = merged["content"]["segments"]
+    assert len(segments) == 4, "مقاطع الاتصالين معاً — لا استبدال"
+    assert [segment["id"] for segment in segments] == ["s-0", "s-1", "s-2", "s-3"], "معرفات متصلة بلا تصادم"
+
+    # الصوت أُلحق أيضاً: ملف WAV صالح يضم أجزاء الاتصالين (16 جزءاً × 4000 بايت)
+    path = Path(os.environ["RECORDINGS_DIR"]) / f"{visit_id}.wav"
+    assert path.exists()
+    with wave.open(str(path), "rb") as handle:
+        assert handle.getframerate() == 16000 and handle.getnchannels() == 1
+        assert handle.getnframes() == 16 * 2000, "إطارات الاتصالين معاً بترويسة مصحّحة"
