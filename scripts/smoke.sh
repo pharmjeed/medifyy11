@@ -50,6 +50,10 @@ VISIT=$(curl -fsS -X POST "${AUTH[@]}" -H 'Content-Type: application/json' "$API
     -d "{\"patient_id\":\"$PATIENT_ID\",\"template_id\":\"$TEMPLATE_ID\"}")
 VISIT_ID=$(echo "$VISIT" | JQ "d['data']['id']")
 [[ -n "$VISIT_ID" && "$VISIT_ID" != "None" ]]; check "إنشاء زيارة (لقطة ملف المريض)" $?
+# بوابة موافقة المريض (A1) — لا تسجيل قبل توثيقها (MDF-4230)
+curl -fsS -X POST "${AUTH[@]}" -H 'Content-Type: application/json' \
+    "$API/visits/$VISIT_ID/consent" -d '{"acknowledged":true,"method":"verbal_ack"}' >/dev/null
+check "توثيق موافقة المريض" $?
 curl -fsS -X POST "${AUTH[@]}" "$API/visits/$VISIT_ID/recording/start" >/dev/null; check "بدء التسجيل" $?
 STOPPED=$(curl -fsS -X POST "${AUTH[@]}" -H 'Content-Type: application/json' \
     "$API/visits/$VISIT_ID/recording/stop" -d '{"duration_sec":30}')
