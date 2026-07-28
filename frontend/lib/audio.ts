@@ -23,6 +23,12 @@ registerProcessor("medify-capture", MedifyCaptureProcessor);
 export interface MicCapture {
   /** يسحب ما تجمّع من صوت منذ آخر سحب — base64 لـPCM16، أو "" إن لم يتجمّع شيء. */
   drain: () => string;
+  /** أعلى سعة (0..1) منذ آخر قراءة — تصفير بعد القراءة. صفر متواصل = الجهاز لا يُوصِل إشارة. */
+  peak: () => number;
+  /** المسار مكتوم من نظام التشغيل/الجهاز — المتصفح يُعلمنا دون عينات. */
+  trackMuted: () => boolean;
+  /** اسم جهاز الإدخال الذي اختاره المتصفح — يكشف التقاط جهاز خاطئ. */
+  deviceLabel: string;
   /** الإيقاف المؤقت: يوقف التجميع دون إغلاق الميكروفون. */
   setPaused: (paused: boolean) => void;
   /** إغلاق الميكروفون وتحرير الجهاز (مؤشر التسجيل في المتصفح ينطفئ). */
@@ -83,9 +89,14 @@ export async function startMicCapture(): Promise<MicCapture> {
   const pending: Int16Array[] = [];
   let paused = false;
   let stopped = false;
+  let peakSinceRead = 0;
 
   const collect = (frame: Float32Array): void => {
     if (paused || stopped) return;
+    for (let index = 0; index < frame.length; index += 1) {
+      const magnitude = Math.abs(frame[index] ?? 0);
+      if (magnitude > peakSinceRead) peakSinceRead = magnitude;
+    }
     pending.push(floatToPcm16(downsample(frame, context.sampleRate, CAPTURE_SAMPLE_RATE)));
   };
 
@@ -112,7 +123,18 @@ export async function startMicCapture(): Promise<MicCapture> {
     processor.connect(sink);
   }
 
+  const track = stream.getAudioTracks()[0];
+
   return {
+    deviceLabel: track?.label ?? "",
+    peak(): number {
+      const value = peakSinceRead;
+      peakSinceRead = 0;
+      return value;
+    },
+    trackMuted(): boolean {
+      return track?.muted === true;
+    },
     drain(): string {
       if (pending.length === 0) return "";
       const total = pending.reduce((sum, part) => sum + part.length, 0);

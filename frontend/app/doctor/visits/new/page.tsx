@@ -77,6 +77,10 @@ export default function NewVisitPage() {
   const [offlineChunks, setOfflineChunks] = useState(0);
   const [cancelOpen, setCancelOpen] = useState(false);
   const [genStep, setGenStep] = useState<0 | 1 | 2>(0); // 0 = P2 يجري · 1 = P3 يجري · 2 = اكتمل
+  // مؤشر صوت صادق: الأعمدة من ذروات العينات الفعلية لا من أنيميشن — صمت رقمي متواصل = تحذير
+  const [levels, setLevels] = useState<number[]>(Array.from({ length: 16 }, () => 0));
+  const [micSilent, setMicSilent] = useState(false);
+  const silentTicks = useRef(0);
 
   const ws = useRef<WebSocket | null>(null);
   const mic = useRef<MicCapture | null>(null); // الميكروفون الحي — PCM16 يُرسل كما هو للتفريغ
@@ -247,6 +251,16 @@ export default function NewVisitPage() {
     }, 1000));
     timers.current.push(setInterval(() => {
       if (pausedRef.current || stopped.current) return;
+      // مقياس المستوى + كاشف الصمت الرقمي: ذروة 0 متواصلة = الميكروفون لا يُوصِل إشارة (مكتوم/جهاز خاطئ)
+      const peak = mic.current?.peak() ?? 0;
+      setLevels((current) => [...current.slice(1), peak]);
+      if (peak < 0.0015 || mic.current?.trackMuted() === true) {
+        silentTicks.current += 1;
+        if (silentTicks.current >= 20) setMicSilent(true); // ~5 ثوانٍ صمت مطلق
+      } else {
+        silentTicks.current = 0;
+        setMicSilent(false);
+      }
       const payload = mic.current?.drain() ?? "";
       if (payload === "") return; // لا صوت متجمّع في هذه الدورة
       const socket = ws.current;
@@ -575,12 +589,28 @@ export default function NewVisitPage() {
               <div style={{ display: "flex", alignItems: "center", gap: 16, margin: "16px 0" }}>
                 <span style={{ width: 12, height: 12, borderRadius: 999, background: "#d94b4b", animation: paused ? undefined : "mBlink 1.2s ease infinite" }} />
                 <bdi style={{ fontSize: 28, fontWeight: 800, color: "#005a55" }}>{mm}:{ss}</bdi>
+                {/* الأعمدة من ذروات الميكروفون الفعلية — خط مسطّح = لا يصل صوت */}
                 <div className="wave" style={{ flex: 1, opacity: paused ? 0.3 : 1 }}>
-                  {Array.from({ length: 16 }, (_, index) => (
-                    <span key={index} style={{ animationDelay: `${(index % 8) * 0.09}s`, animationPlayState: paused ? "paused" : "running" }} />
+                  {levels.map((level, index) => (
+                    <span key={index} style={{
+                      animation: "none",
+                      height: `${Math.max(5, Math.min(100, Math.round(level * 260)))}%`,
+                      background: micSilent ? "#c7d1e0" : undefined,
+                      transition: "height .18s ease",
+                    }} />
                   ))}
                 </div>
               </div>
+              {micSilent && !paused ? (
+                <div style={{ background: "#fbeaea", border: "2px solid #d94b4b", borderRadius: 10, padding: "10px 14px", margin: "0 0 12px", fontSize: 13, color: "#a13333", lineHeight: 1.9 }}>
+                  <strong>⚠ {L("الميكروفون لا يلتقط أي صوت", "The microphone is not picking up any audio")}</strong>
+                  {" — "}
+                  {L("الجهاز المستخدم:", "Device in use:")} <bdi>{mic.current?.deviceLabel !== "" ? mic.current?.deviceLabel : L("غير معروف", "unknown")}</bdi>
+                  <br />
+                  {L("لن يظهر تفريغ ولن يُبنى ملخص ما دام الصوت لا يصل. تحقق من: زر كتم المايك في الجهاز/السماعة · اختيار الميكروفون الصحيح في إعدادات الموقع بالمتصفح · مستوى الإدخال في إعدادات صوت ويندوز.",
+                     "No transcript or summary can be produced while no audio arrives. Check: the hardware mute button on your device/headset · the microphone selected in the browser's site settings · the input level in Windows sound settings.")}
+                </div>
+              ) : null}
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
                 <button className="btn-secondary" onClick={() => void togglePause()}>{paused ? L("استئناف", "Resume") : L("إيقاف مؤقت", "Pause")}</button>
                 <button className="btn hero" style={{ flex: 1 }} onClick={() => void finishRecording()}>{L("إنهاء التسجيل وتوليد الملخص", "Finish recording & generate summary")}</button>

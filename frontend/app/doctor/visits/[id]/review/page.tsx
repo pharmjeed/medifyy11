@@ -87,6 +87,7 @@ export default function ReviewPage() {
   const [chatBusy, setChatBusy] = useState(false);
   const [transcriptOpen, setTranscriptOpen] = useState(false);
   const [transcript, setTranscript] = useState<TranscriptSegment[]>([]);
+  const [transcriptLoaded, setTranscriptLoaded] = useState(false);
   const [conflict, setConflict] = useState<{ sectionId: string; mine: string } | null>(null);
   const [upload, setUpload] = useState<UploadView>({ phase: "idle" });
   const chatRef = useRef<HTMLDivElement | null>(null);
@@ -103,6 +104,14 @@ export default function ReviewPage() {
       }
     } catch (err) {
       showError(err);
+    }
+    // نص المحادثة يُجلب مع التحميل: تفريغ فارغ = «لم يُلتقط صوت» — تمييزه عن فشل التحليل (W-224)
+    try {
+      const transcriptBody = await api<{ content: { segments: TranscriptSegment[] } }>(`/visits/${visitId}/transcript`);
+      setTranscript(transcriptBody.data.content.segments ?? []);
+      setTranscriptLoaded(true);
+    } catch (err) {
+      if (err instanceof ApiError && err.code === "MDF-4041") setTranscriptLoaded(true); // لا تفريغ لهذه الزيارة إطلاقاً
     }
   }, [visitId, showError]);
 
@@ -121,7 +130,9 @@ export default function ReviewPage() {
   const awaitingInput = summary?.awaiting_doctor_input_count ?? 0;
   // نص المذكرة يُحرَّر حتى البوابة ① فقط
   const noteEditable = summary !== null && !locked && !noteApproved;
-  const analysisFailed = summary !== null && allGuidance.length === 0 && summary.state === "in_review";
+  // تفريغ فارغ = الميكروفون لم يلتقط كلاماً — سببٌ أدق من «فشل التحليل» ويُعرض بدله
+  const noAudio = summary !== null && transcriptLoaded && transcript.length === 0;
+  const analysisFailed = summary !== null && allGuidance.length === 0 && summary.state === "in_review" && !noAudio;
 
   const handleMutationError = (err: unknown, sectionId?: string, mine?: string) => {
     if (err instanceof ApiError && err.code === "MDF-4224" && sectionId !== undefined && mine !== undefined) {
@@ -344,10 +355,11 @@ export default function ReviewPage() {
 
   const openTranscript = async () => {
     setTranscriptOpen(true);
-    if (transcript.length === 0) {
+    if (!transcriptLoaded) {
       try {
         const result = await api<{ content: { segments: TranscriptSegment[] } }>(`/visits/${visitId}/transcript`);
-        setTranscript(result.data.content.segments);
+        setTranscript(result.data.content.segments ?? []);
+        setTranscriptLoaded(true);
       } catch (err) {
         handleMutationError(err);
       }
@@ -388,6 +400,16 @@ export default function ReviewPage() {
             <span className="badge success">{L("🔒 معتمدة — قراءة فقط (MDF-4226)", "🔒 Approved — read-only (MDF-4226)")}</span>
           ) : null}
         </div>
+
+        {noAudio ? (
+          <div style={{ border: "2px solid #d94b4b", background: "#fbeaea", borderRadius: 12, padding: "12px 16px", marginTop: 12, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+            <strong style={{ color: "#a13333" }}>⚠ {L("لم يُلتقط أي كلام مسموع في تسجيل هذه الزيارة", "No audible speech was captured in this visit's recording")}</strong>
+            <span style={{ fontSize: 12.5, color: "#5c7096" }}>
+              {L("الميكروفون لم يُوصِل صوتاً، لذلك الملخص فارغ ولا نص محادثة ولا إرشادات — لا يُلخَّص كلام لم يُقَل. تحقق من الميكروفون (الكتم/الجهاز الصحيح) وابدأ زيارة جديدة.",
+                 "The microphone delivered no audio, so the summary is empty with no transcript and no guidance — speech never said is never summarized. Check the microphone (mute/correct device) and start a new visit.")}
+            </span>
+          </div>
+        ) : null}
 
         {analysisFailed ? (
           <div style={{ border: "2px solid #9c6f00", background: "#fdf4e0", borderRadius: 12, padding: "12px 16px", marginTop: 12, display: "flex", gap: 10, alignItems: "center" }}>
@@ -724,7 +746,16 @@ export default function ReviewPage() {
                  "Stored linked to the visit (FR-604) · Audio is auto-deleted per the retention policy")}
             </div>
             <div style={{ flex: 1, overflowY: "auto", padding: 16 }}>
-              {transcript.map((segment) => (
+              {transcript.length === 0 ? (
+                <div className="grid-empty" style={{ textAlign: "center" }}>
+                  {L("لا يوجد نص محادثة لهذه الزيارة — لم يُلتقط كلام مسموع في التسجيل.",
+                     "No transcript for this visit — no audible speech was captured in the recording.")}<br />
+                  <span style={{ fontSize: 12.5 }}>
+                    {L("غالباً الميكروفون كان مكتوماً أو التُقط جهاز خاطئ. تحقق منه وابدأ زيارة جديدة.",
+                       "Most likely the microphone was muted or the wrong device was captured. Check it and start a new visit.")}
+                  </span>
+                </div>
+              ) : transcript.map((segment) => (
                 <div key={segment.id} style={{ marginBottom: 10, fontSize: 14, lineHeight: 1.9 }}>
                   <SpeakerBadge speaker={segment.speaker} confidence={segment.speaker_confidence} />{" "}
                   <bdi className="tech-badge">{segment.t0.toFixed(0)}s</bdi> {segment.text}
