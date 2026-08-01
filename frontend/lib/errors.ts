@@ -1,4 +1,4 @@
-/** رموز MDF الـ22 (DOC-13 v1.1) — رسالة وإجراء مقترح بالعربية والإنجليزية لسلوك W-004. */
+/** رموز MDF (DOC-13 + الرموز المعتمدة لاحقاً) — رسالة وإجراء مقترح بالعربية والإنجليزية لسلوك W-004. */
 
 export interface MdfMeta {
   message_ar: string;
@@ -70,6 +70,11 @@ export const MDF_UI: Record<string, MdfMeta> = {
   "MDF-4228": {
     message_ar: "فشلت عملية السداد.", message_en: "Payment failed.",
     action_ar: "أعد المحاولة أو جرّب وسيلة دفع أخرى.", action_en: "Retry or try another payment method.",
+  },
+  "MDF-4233": {
+    message_ar: "الكود غير موجود أو ملغى في السجل المرجعي.", message_en: "Code not found or inactive in the reference registry.",
+    action_ar: "ابحث واختر كوداً نشطاً من الإكمال التلقائي — الكود الملغى يُعرض بديله.",
+    action_en: "Search and pick an active code from the autocomplete — retired codes show their replacement.",
   },
   "MDF-4291": {
     message_ar: "تجاوزت حد المعدل.", message_en: "Rate limit exceeded.",

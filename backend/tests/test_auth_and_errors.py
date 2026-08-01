@@ -14,13 +14,13 @@ def test_health(client):
     assert response.json()["data"]["status"] == "ok"
 
 
-def test_mdf_catalog_is_exactly_27():
+def test_mdf_catalog_is_exactly_28():
     """22 (DOC-13 v1.2) + MDF-4015/4229 (DOC-20) + MDF-4230/4231/4232 (بوابتا الاعتماد
-    وموافقة المريض — توجيه المالك 2026-07-22)."""
-    assert len(MDF_CATALOG) == 27
+    وموافقة المريض — توجيه المالك 2026-07-22) + MDF-4233 (السجل المرجعي — قرار مالك 2026-08-02)."""
+    assert len(MDF_CATALOG) == 28
     assert "MDF-4015" in MDF_CATALOG and "MDF-4229" in MDF_CATALOG
-    # رموز توجيه المالك: موافقة المريض + بوابتا الاعتماد
-    assert {"MDF-4230", "MDF-4231", "MDF-4232"} <= set(MDF_CATALOG)
+    # رموز توجيه المالك: موافقة المريض + بوابتا الاعتماد + السجل المرجعي
+    assert {"MDF-4230", "MDF-4231", "MDF-4232", "MDF-4233"} <= set(MDF_CATALOG)
     for code, (status, ar, en) in MDF_CATALOG.items():
         assert code.startswith("MDF-")
         assert ar and en  # ثنائية اللغة إلزامية

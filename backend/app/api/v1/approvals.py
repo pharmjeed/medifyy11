@@ -21,6 +21,7 @@ from ...models import (
     UploadAttempt,
     UploadJob,
 )
+from ...services.code_registry import check_code, registry_systems
 from ...services.fhir import build_bundle, store_bundle
 from ...services.uploader import process_upload_job
 from ...services.visits import get_visit_for_doctor, summary_hashes, transition
@@ -118,6 +119,37 @@ def approve_visit(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB):
     if awaiting_input > 0:
         raise MedifyError("MDF-4222", details={"awaiting_doctor_input": awaiting_input,
                                                "reason": "codes_below_confidence_threshold"})
+
+    # البوابة المرجعية (قرار مالك 2026-08-02): كود محسوم غير موجود/ملغى في السجل لا يمر —
+    # هذا هو «يُتحقق منه مقابل النظام النشط قبل الرفع» فعلياً. سجل فارغ لنظامٍ ما = لا تحقق له.
+    systems_loaded = registry_systems(db)
+    if systems_loaded:
+        resolved = db.execute(
+            select(GuidanceItem)
+            .join(SummarySection, SummarySection.id == GuidanceItem.section_id)
+            .where(
+                SummarySection.summary_id == summary.id,
+                GuidanceItem.status.in_(["accepted", "modified"]),
+                GuidanceItem.code_value.is_not(None),
+            )
+        ).scalars().all()
+        invalid_codes = []
+        for gi in resolved:
+            for code_system, code_value in (
+                (gi.code_system, gi.code_value),
+                (gi.code_secondary_system, gi.code_secondary_value),
+            ):
+                verdict, entry = check_code(db, code_system, code_value, systems_loaded)
+                if verdict in ("unknown", "inactive"):
+                    invalid_codes.append({
+                        "item_id": str(gi.id),
+                        "code_system": code_system,
+                        "code_value": code_value,
+                        "registry_status": verdict,
+                        "replaced_by": entry.replaced_by if entry else None,
+                    })
+        if invalid_codes:
+            raise MedifyError("MDF-4233", details={"items": invalid_codes})
 
     content_hash, codes_hash = summary_hashes(db, visit)
     approval = Approval(

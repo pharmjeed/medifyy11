@@ -1,4 +1,5 @@
-"""نماذج DOC-04 v1.1 (24 جدولاً) + طبقة المنصة (قرار مالك 2026-07-15: platform_admins, plans)."""
+"""نماذج DOC-04 v1.1 (24 جدولاً) + طبقة المنصة (قرار مالك 2026-07-15: platform_admins, plans)
++ السجل المرجعي للأكواد registry_codes (قرار مالك 2026-08-02)."""
 from .base import Base
 from .clinical import (
     Approval,
@@ -18,6 +19,7 @@ from .clinical import (
     VisitConsent,
 )
 from .platform import Plan, PlatformAdmin, PlatformAuditLog, PlatformSetting
+from .reference import RegistryCode
 from .system import AuditLog, Notification
 from .tenancy import (
     Clinic,
@@ -40,4 +42,5 @@ __all__ = [
     "NoteApproval", "Approval", "UploadJob", "UploadAttempt",
     "AuditLog", "Notification",
     "PlatformAdmin", "Plan", "PlatformAuditLog", "PlatformSetting",
+    "RegistryCode",
 ]

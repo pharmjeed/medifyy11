@@ -25,6 +25,7 @@ from ..models import (
     Visit,
 )
 from ..notify import notify
+from ..services.code_registry import check_code, registry_systems
 from ..services.history import previous_visits
 from .deidentify import build_map
 from .llm import get_llm
@@ -166,6 +167,8 @@ def run_guidance(db: Session, visit: Visit, summary: Summary) -> bool:
     counts_by_kind: dict[str, int] = {}
     per_section: dict[str, int] = {}
     safety_flags = 0
+    # السجل المرجعي (قرار مالك 2026-08-02): سجلنا مصدر الحقيقة للكود لا ذاكرة النموذج
+    systems_loaded = registry_systems(db)
     for item in items:
         key = str(item.get("section_key", ""))
         section = by_key.get(key)
@@ -200,6 +203,36 @@ def run_guidance(db: Session, visit: Visit, summary: Summary) -> bool:
         if kind == "clinical_device" and not justification:
             continue  # الجهاز بلا مبرر مرفوض (CHECK القاعدة يرفضه أصلاً)
 
+        # التحقق المرجعي: valid → الصيغة القانونية وإصدار السجل من عندنا ·
+        # unknown → «لا تخمين»: الكود يسقط ويُطلب إدخال الطبيب ·
+        # inactive → يبقى معروضاً ببديله (البوابة ② تمنعه) · unchecked → كما ورد.
+        code_value = item.get("code_value")
+        registry_version = item.get("code_registry_version")
+        effective_date = item.get("code_effective_date")
+        verdict, entry = check_code(db, code_system, code_value, systems_loaded)
+        if verdict == "valid":
+            code_value = entry.code
+            registry_version = entry.registry_version
+            effective_date = entry.effective_date.isoformat() if entry.effective_date else None
+        elif verdict == "unknown":
+            code_value = None
+            registry_version = None
+            effective_date = None
+            requires_input = True
+        elif verdict == "inactive":
+            code_value = entry.code
+            registry_version = entry.registry_version
+            effective_date = entry.effective_date.isoformat() if entry.effective_date else None
+
+        secondary_value = item.get("code_secondary_value")
+        secondary_verdict, secondary_entry = check_code(
+            db, item.get("code_secondary_system"), secondary_value, systems_loaded
+        )
+        if secondary_verdict == "valid":
+            secondary_value = secondary_entry.code
+        elif secondary_verdict == "unknown":
+            secondary_value = None  # كود ثانوي مخترع لا يدخل السجل السريري
+
         db.add(
             GuidanceItem(
                 section_id=section.id,
@@ -207,11 +240,11 @@ def run_guidance(db: Session, visit: Visit, summary: Summary) -> bool:
                 kind=kind,
                 suggestion_text=deid.restore(str(item.get("suggestion_text", ""))),
                 code_system=code_system,
-                code_value=item.get("code_value"),
-                code_secondary_system=item.get("code_secondary_system"),
-                code_secondary_value=item.get("code_secondary_value"),
-                code_registry_version=item.get("code_registry_version"),
-                code_effective_date=item.get("code_effective_date"),
+                code_value=code_value,
+                code_secondary_system=item.get("code_secondary_system") if secondary_value else None,
+                code_secondary_value=secondary_value,
+                code_registry_version=registry_version,
+                code_effective_date=effective_date,
                 confidence=confidence,
                 requires_doctor_input=requires_input,
                 linked_dx_code=item.get("linked_dx_code"),

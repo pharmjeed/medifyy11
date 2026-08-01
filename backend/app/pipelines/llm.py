@@ -251,7 +251,7 @@ class MockLLMEngine(LLMEngine):
                 "section_key": "P", "kind": "clinical_service",
                 "suggestion_text": "Fasting lipid profile is indicated for cardiovascular risk stratification "
                                    "in newly documented hypertension.",
-                "code_system": "SBS", "code_value": "SBS-80061",
+                "code_system": "SBS", "code_value": "73000-00-60",  # Lipid profile — كود SBS V2.0 حقيقي (CHI)
                 "code_secondary_system": None, "code_secondary_value": None,
                 "code_registry_version": "SBS 2026 release 1", "code_effective_date": "2026-01-01",
                 "confidence": 0.91, "linked_dx_code": "I10", "justification": None,

@@ -128,8 +128,54 @@ def seed_platform(db: Session) -> None:
     db.flush()
 
 
+# عيّنة السجل المرجعي (قرار مالك 2026-08-02) — أكواد حقيقية من SBS_V2_Code_list.xlsx (CHI)
+# وICD-10-AM؛ للإنتاج يُستورد الملف الكامل عبر scripts/import_codes.py.
+# (system, code, short_desc, chapter, active, inactive_date, replaced_by, version)
+REGISTRY_SAMPLE = [
+    ("ICD10AM", "I10", "Essential (primary) hypertension", "Diseases of the circulatory system",
+     True, None, None, "ICD-10-AM 12th ed."),
+    ("ICD10AM", "E11.9", "Type 2 diabetes mellitus without complication", "Endocrine, nutritional and metabolic diseases",
+     True, None, None, "ICD-10-AM 12th ed."),
+    ("ICD10AM", "G44.2", "Tension-type headache", "Diseases of the nervous system",
+     True, None, None, "ICD-10-AM 12th ed."),
+    ("ICD10AM", "J02.9", "Acute pharyngitis, unspecified", "Diseases of the respiratory system",
+     True, None, None, "ICD-10-AM 12th ed."),
+    ("ICD10AM", "R51", "Headache", "Symptoms, signs and abnormal clinical and laboratory findings",
+     True, None, None, "ICD-10-AM 12th ed."),
+    ("SBS", "73000-00-60", "Lipid profile", "Laboratory and Pathology",
+     True, None, None, "SBS V2.0"),
+    ("SBS", "73050-18-50", "Glycosylated Hgb", "Laboratory and Pathology",
+     True, None, None, "SBS V2.0"),
+    ("SBS", "83600-01-70", "Specialist Psychiatric consultation for adult", "KSA Service Codes",
+     True, None, None, "SBS V2.0"),
+    ("SBS", "42845-01-01", "Adjustment of sutures following strabismus surgery", "Procedures on eye and adnexa",
+     True, None, None, "SBS V2.0"),
+    # كود ملغى في V2.0 مع بديله — يُظهر مسار «كود ملغى» في المراجعة والبوابة ②
+    ("SBS", "42845-00-02", "Adjust sutures 1 eye flw prev strabismus surg bil", "Procedures on eye and adnexa",
+     False, dt.date(2023, 6, 1), "42845-01-01", "SBS V2.0"),
+]
+
+
+def seed_registry(db: Session) -> None:
+    from app.models import RegistryCode
+    from app.services.code_registry import normalize_code
+
+    if db.execute(select(RegistryCode.id).limit(1)).scalar_one_or_none() is not None:
+        return  # السجل مبذور — idempotent
+    for system, code, short_desc, chapter, active, inactive_date, replaced_by, version in REGISTRY_SAMPLE:
+        db.add(RegistryCode(
+            code_system=system, code=code, code_norm=normalize_code(code),
+            short_desc=short_desc, chapter=chapter, is_active=active,
+            effective_date=dt.date(2023, 6, 1) if version.startswith("SBS") else dt.date(2022, 7, 1),
+            inactive_date=inactive_date, replaced_by=replaced_by, registry_version=version,
+        ))
+    db.flush()
+    print(f"seed: سجل الأكواد المرجعي — {len(REGISTRY_SAMPLE)} كوداً (عيّنة؛ الكامل عبر import_codes.py)")
+
+
 def seed(db: Session) -> None:
     seed_platform(db)
+    seed_registry(db)
     if db.execute(select(Facility).where(Facility.commercial_reg == "1010456789")).scalar_one_or_none():
         print("seed: المنشأة موجودة — تخطٍّ (idempotent)")
         return

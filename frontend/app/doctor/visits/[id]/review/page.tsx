@@ -10,7 +10,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, api, apiWithHeaders, getToken } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
 import type {
-  ChatPatch, GuidanceItem, SummarySection, TranscriptSegment, UploadStatus, VisitSummary,
+  ChatPatch, CodeSearchResult, GuidanceItem, SummarySection, TranscriptSegment, UploadStatus, VisitSummary,
 } from "@/lib/types";
 import { ProgressBar7 } from "@/components/ProgressBar7";
 import { Shell } from "@/components/Shell";
@@ -82,6 +82,10 @@ export default function ReviewPage() {
   const [modifying, setModifying] = useState<GuidanceItem | null>(null);
   const [modText, setModText] = useState("");
   const [modCode, setModCode] = useState("");
+  // إكمال تلقائي من السجل المرجعي (قرار مالك 2026-08-02) — GET /codes/search
+  const [codeResults, setCodeResults] = useState<CodeSearchResult[]>([]);
+  const [codeSearchOpen, setCodeSearchOpen] = useState(false);
+  const codeSearchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [chat, setChat] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState("");
   const [chatBusy, setChatBusy] = useState(false);
@@ -182,6 +186,29 @@ export default function ReviewPage() {
     } catch (err) {
       handleMutationError(err, sectionId, "");
     }
+  };
+
+  const searchCodes = (item: GuidanceItem, query: string) => {
+    setModCode(query);
+    if (codeSearchTimer.current !== null) clearTimeout(codeSearchTimer.current);
+    if (query.trim().length < 2) {
+      setCodeResults([]);
+      setCodeSearchOpen(false);
+      return;
+    }
+    const system = item.code_system ?? "ICD10AM";
+    codeSearchTimer.current = setTimeout(async () => {
+      try {
+        const result = await api<CodeSearchResult[]>(
+          `/codes/search?system=${encodeURIComponent(system)}&q=${encodeURIComponent(query.trim())}`,
+        );
+        setCodeResults(result.data);
+        setCodeSearchOpen(result.data.length > 0);
+      } catch {
+        setCodeResults([]);
+        setCodeSearchOpen(false); // سجل غير محمّل أو خطأ عابر — يبقى الإدخال الحر متاحاً
+      }
+    }, 250);
   };
 
   const resolveGuidance = async (item: GuidanceItem, status: "accepted" | "rejected" | "modified") => {
@@ -507,6 +534,13 @@ export default function ReviewPage() {
                           {item.safety_flag && item.status === "pending" ? (
                             <span className="badge safety">{L("⚠ سلامة مريض — بانتظار الحسم", "⚠ Patient safety — awaiting resolution")}</span>
                           ) : null}
+                          {item.registry_status === "inactive" ? (
+                            <span className="badge" style={{ background: "#fbeaea", color: "#d94b4b", border: "1px dashed #d94b4b" }}
+                              title={L("الكود ملغى في السجل المرجعي — لن يمر من بوابة الاعتماد ② حتى يُستبدل", "The code is retired in the reference registry — it will not pass approval gate 2 until replaced")}>
+                              {L("⚠ كود ملغى", "⚠ Retired code")}
+                              {item.code_replaced_by ? <> — {L("البديل:", "Replacement:")} <bdi className="ui">{item.code_replaced_by}</bdi></> : null}
+                            </span>
+                          ) : null}
                           <span style={{ flex: 1 }} />
                           {needsInput ? (
                             <span className="badge" style={{ background: "#fdf4e0", color: "#9c6f00", border: "1px dashed #d8b24a" }}
@@ -517,8 +551,10 @@ export default function ReviewPage() {
                           ) : item.code_value !== null ? (
                             <span className="code-badge" title={
                               (item.code_registry_version ?? "") + (item.code_effective_date ? ` · ${item.code_effective_date}` : "")
+                              + (item.registry_status === "valid" ? L(" · مُتحقق من السجل المرجعي", " · verified against the reference registry") : "")
                             }>
                               {item.code_system} · {item.code_value}
+                              {item.registry_status === "valid" ? <span style={{ color: "#12a594" }}> ✓</span> : null}
                               {item.code_secondary_value ? <> · {item.code_secondary_system} {item.code_secondary_value}</> : null}
                               {confidencePct !== null ? <span style={{ opacity: 0.7 }}> · <bdi className="ui">{confidencePct}%</bdi></span> : null}
                             </span>
@@ -549,8 +585,38 @@ export default function ReviewPage() {
                                     ? L("أدخل الرمز يدوياً (كان محجوباً دون عتبة الثقة)", "Enter the code manually (it was withheld below the confidence threshold)")
                                     : <>{L("الرمز —", "Code —")} {item.code_system} {L("(يُتحقق منه مقابل النظام النشط قبل الرفع)", "(validated against the active system before upload)")}</>}
                                 </label>
-                                <input className="field mono" value={modCode} onChange={(event) => setModCode(event.target.value)}
-                                  placeholder={needsInput ? L("مثال: I10", "e.g. I10") : ""} />
+                                <div style={{ position: "relative" }}>
+                                  <input className="field mono" value={modCode} onChange={(event) => searchCodes(item, event.target.value)}
+                                    placeholder={needsInput ? L("ابحث بالكود أو الوصف — مثال: I10", "Search by code or description — e.g. I10") : ""} />
+                                  {codeSearchOpen && codeResults.length > 0 ? (
+                                    <div style={{ position: "absolute", top: "100%", insetInlineStart: 0, insetInlineEnd: 0, zIndex: 30,
+                                      background: "#fff", border: "1px solid #c7d1e0", borderRadius: 10,
+                                      boxShadow: "0 8px 24px rgba(16,42,67,.14)", maxHeight: 220, overflowY: "auto" }}>
+                                      {codeResults.map((result) => (
+                                        <button key={result.code} type="button"
+                                          disabled={!result.is_active && result.replaced_by === null}
+                                          title={result.long_desc ?? result.short_desc}
+                                          onClick={() => {
+                                            if (result.is_active) { setModCode(result.code); setCodeSearchOpen(false); }
+                                            else if (result.replaced_by !== null) searchCodes(item, result.replaced_by);
+                                          }}
+                                          style={{ display: "flex", gap: 8, alignItems: "baseline", width: "100%", textAlign: "start",
+                                            padding: "8px 10px", background: "transparent", border: "none",
+                                            borderBottom: "1px solid #eef2f7", cursor: "pointer",
+                                            opacity: result.is_active ? 1 : 0.6 }}>
+                                          <bdi className="ui" style={{ fontWeight: 700, fontSize: 12.5, whiteSpace: "nowrap" }}>{result.code}</bdi>
+                                          <span style={{ fontSize: 12.5, color: "#33475f", flex: 1 }} dir="ltr">{result.short_desc}</span>
+                                          {!result.is_active ? (
+                                            <span style={{ fontSize: 11.5, color: "#d94b4b", whiteSpace: "nowrap" }}>
+                                              {L("ملغى", "Retired")}
+                                              {result.replaced_by !== null ? <> ← <bdi className="ui">{result.replaced_by}</bdi></> : null}
+                                            </span>
+                                          ) : null}
+                                        </button>
+                                      ))}
+                                    </div>
+                                  ) : null}
+                                </div>
                               </>
                             ) : null}
                             <label className="field-label" style={{ fontSize: 12.5 }}>{L("نص الإرشاد", "Guidance text")}</label>
@@ -564,7 +630,7 @@ export default function ReviewPage() {
                           <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
                             <button className="btn-success" style={{ height: 36 }} onClick={() => void resolveGuidance(item, "accepted")}>{L("قبول", "Accept")}</button>
                             <button className="btn-danger-outline" style={{ height: 36 }} onClick={() => void resolveGuidance(item, "rejected")}>{L("رفض", "Reject")}</button>
-                            <button className="btn-row" onClick={() => { setModifying(item); setModText(item.suggestion_text); setModCode(item.code_value ?? ""); }}>{L("تعديل", "Modify")}</button>
+                            <button className="btn-row" onClick={() => { setModifying(item); setModText(item.suggestion_text); setModCode(item.code_value ?? ""); setCodeResults([]); setCodeSearchOpen(false); }}>{L("تعديل", "Modify")}</button>
                           </div>
                         ) : null}
                       </div>

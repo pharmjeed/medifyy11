@@ -175,6 +175,23 @@ export interface GuidanceItem {
   evidence_ref: string | null;
   safety_flag: boolean;
   status: "pending" | "accepted" | "rejected" | "modified";
+  /** حالة السجل المرجعي (قرار مالك 2026-08-02): null = سجل غير محمّل أو كود محجوب */
+  registry_status?: "valid" | "inactive" | "unknown" | null;
+  code_replaced_by?: string | null;
+}
+
+/** نتيجة بحث السجل المرجعي — GET /codes/search (قرار مالك 2026-08-02) */
+export interface CodeSearchResult {
+  code: string;
+  short_desc: string;
+  long_desc: string | null;
+  chapter: string | null;
+  block: string | null;
+  is_active: boolean;
+  replaced_by: string | null;
+  registry_version: string;
+  effective_date: string | null;
+  inactive_date: string | null;
 }
 
 export interface SummarySection {

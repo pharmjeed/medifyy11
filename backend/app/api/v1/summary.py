@@ -24,6 +24,7 @@ from ...models import (
 )
 from ...pipelines.run import run_edit_chat
 from ...pipelines.stt import get_stt
+from ...services.code_registry import check_code, registry_systems
 from ...services.history import previous_visits
 from ...services.visits import get_visit_for_doctor, summary_etag
 
@@ -74,11 +75,23 @@ def get_summary(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB, response: Response
     ).scalars().all()
     out_sections: list[dict[str, Any]] = []
     pending_total = 0
+    # حالة السجل المرجعي تُحسب عند القراءة (قرار مالك 2026-08-02) — لا عمود جديد على guidance_items
+    systems_loaded = registry_systems(db)
+
+    def _registry(item: GuidanceItem) -> tuple[str | None, str | None]:
+        if item.requires_doctor_input or not item.code_value:
+            return None, None  # الكود محجوب دون العتبة — لا حالة تُعرض له
+        verdict, entry = check_code(db, item.code_system, item.code_value, systems_loaded)
+        if verdict == "unchecked":
+            return None, None
+        return verdict, (entry.replaced_by if entry else None)
+
     for section in sections:
         items = db.execute(
             select(GuidanceItem).where(GuidanceItem.section_id == section.id).order_by(GuidanceItem.created_at)
         ).scalars().all()
         pending_total += sum(1 for item in items if item.status == "pending")
+        registry_by_id = {item.id: _registry(item) for item in items}
         out_sections.append({
             "id": str(section.id),
             "section_key": section.section_key,
@@ -106,6 +119,9 @@ def get_summary(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB, response: Response
                     "evidence_ref": (item.evidence_ref or {}).get("ref"),
                     "safety_flag": bool((item.evidence_ref or {}).get("safety_flag")),
                     "status": item.status,
+                    # valid | inactive | unknown | null (سجل غير محمّل أو كود محجوب)
+                    "registry_status": registry_by_id[item.id][0],
+                    "code_replaced_by": registry_by_id[item.id][1],
                 }
                 for item in items
             ],
@@ -265,15 +281,31 @@ def resolve_guidance(item_id: uuid.UUID, body: GuidancePatchIn, ctx: DoctorAuth,
     if body.status == "modified":
         if not body.modified_text:
             raise MedifyError("MDF-4225", details={"missing": "modified_text"})
+        new_system = body.modified_code_system if body.modified_code_system is not None else item.code_system
+        new_value = body.modified_code_value if body.modified_code_value is not None else item.code_value
+        code_changed = new_value != item.code_value or new_system != item.code_system
+        # التحقق المرجعي قبل أي كتابة (قرار مالك 2026-08-02): كود غير موجود/ملغى يُرفض فوراً
+        verdict, entry = check_code(db, new_system, new_value, registry_systems(db))
+        if verdict in ("unknown", "inactive"):
+            raise MedifyError("MDF-4233", details={
+                "code_system": new_system,
+                "code_value": new_value,
+                "registry_status": verdict,
+                "replaced_by": entry.replaced_by if entry else None,
+            })
         item.suggestion_text = body.modified_text
-        if body.modified_code_system is not None:
-            item.code_system = body.modified_code_system
-        if body.modified_code_value is not None:
-            item.code_value = body.modified_code_value
+        item.code_system = new_system
+        item.code_value = new_value
         # الطبيب أدخل الكود بنفسه — الحجب دون العتبة يسقط بفعل واعٍ منه لا آلياً
         if item.requires_doctor_input and item.code_value:
             item.requires_doctor_input = False
             item.confidence = None  # الكود صار مُدخلاً بشرياً لا مقترحاً بثقة
+        if verdict == "valid":
+            # الصيغة القانونية وإصدار السجل وتاريخ السريان من سجلنا لا من ادعاء سابق
+            item.code_value = entry.code
+            item.code_registry_version = entry.registry_version
+            item.code_effective_date = entry.effective_date.isoformat() if entry.effective_date else None
+        elif code_changed:  # unchecked وكود مغيّر — لا ادعاء إصدار سجلٍ لكود مُدخل يدوياً
             item.code_registry_version = None
             item.code_effective_date = None
     item.status = body.status
