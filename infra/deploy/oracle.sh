@@ -154,7 +154,7 @@ deploy_env() {
         sudo -E docker compose -f docker-compose.prod.yml up -d --build
         echo '>> ($NAME) الهجرات تجري داخل حاوية backend عند الإقلاع'
         sleep 10
-        sudo -E docker compose -f docker-compose.prod.yml run --rm seed || true
+        sudo -E docker compose -f docker-compose.prod.yml run --build --rm seed || true
     "
 }
 

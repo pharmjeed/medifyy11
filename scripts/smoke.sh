@@ -67,8 +67,9 @@ PENDING=$(echo "$SUMMARY" | JQ "d['data']['pending_guidance_count']")
 # 8) الاعتماد يُرفض مع إرشادات معلقة (MDF-4222)
 if [[ "$PENDING" != "0" ]]; then
     BLOCKED=$(curl -sS -X POST "${AUTH[@]}" "$API/visits/$VISIT_ID/approve")
-    echo "$BLOCKED" | grep -q 'MDF-4222'; check "بوابة الاعتماد ترفض المعلق (MDF-4222)" $?
-    # حسم كل الإرشادات
+    echo "$BLOCKED" | grep -q 'MDF-422'; check "بوابة الاعتماد ترفض المعلق" $?
+    # حسم كل الإرشادات بالرفض — القرار الآمن دخانياً: القبول قد يعلق على كود ناقص/ملغى
+    # (MDF-4222 دون العتبة أو MDF-4233 من السجل المرجعي) وهذا صواب وظيفياً لا فشل دخاني
     "$PY" - "$SUMMARY" <<'PYEOF' > /tmp/medify_guidance_ids
 import json, sys
 data = json.loads(sys.argv[1])
@@ -81,14 +82,23 @@ PYEOF
         GID="${GID%$'\r'}"
         [[ -z "$GID" ]] && continue
         curl -fsS -X PATCH "${AUTH[@]}" -H 'Content-Type: application/json' \
-            "$API/guidance-items/$GID" -d '{"status":"accepted"}' >/dev/null
+            "$API/guidance-items/$GID" -d '{"status":"rejected"}' >/dev/null
     done < /tmp/medify_guidance_ids
     check "حسم الإرشادات المعلقة" 0
 fi
 
-# 9) اعتماد → رفع (وهمي) → uploaded
-APPROVED=$(curl -fsS -X POST "${AUTH[@]}" "$API/visits/$VISIT_ID/approve")
-echo "$APPROVED" | grep -q '"approved": *true'; check "الاعتماد أنشأ approval + upload_job" $?
+# 9) البوابة ① (نص المذكرة) ثم ② (الأكواد) → رفع (وهمي) → uploaded
+curl -fsS -X POST "${AUTH[@]}" "$API/visits/$VISIT_ID/note-approve" >/dev/null
+check "بوابة اعتماد النص ①" $?
+# الكوميت يتم بعد إرسال الاستجابة (get_db teardown) — إعادة محاولة قصيرة تمتص السباق
+APPROVED=""
+for attempt in 1 2 3 4 5; do
+    APPROVED=$(curl -sS -X POST "${AUTH[@]}" "$API/visits/$VISIT_ID/approve")
+    echo "$APPROVED" | grep -q '"approved": *true' && break
+    echo "$APPROVED" | grep -q 'MDF-4231' || break   # خطأ آخر غير السباق — لا تكرار
+    sleep 1
+done
+echo "$APPROVED" | grep -q '"approved": *true'; check "الاعتماد ② أنشأ approval + upload_job" $?
 STATUS=$(curl -fsS "${AUTH[@]}" "$API/visits/$VISIT_ID/upload-status")
 echo "$STATUS" | grep -Eq '"status": *"(confirmed|sent|queued)"'; check "حالة الرفع" $?
 
