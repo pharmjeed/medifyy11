@@ -30,7 +30,8 @@ class Settings(BaseSettings):
 
     # جيميناي (تعديل مالك 2026-07-26) — تفريغ حي متعدد الوسائط + تلخيص/إرشاد بمفتاح واحد
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-3.6-flash"   # P2..P5 (2.5-flash أُغلق لحسابات جديدة 2026-07)
+    # الافتراضي (توجيه مالك 2026-08-01) — والسوبر أدمن يبدّله من /sa/settings دون نشر (platform_settings)
+    gemini_model: str = "gemini-3.5-flash-lite"
     gemini_stt_model: str = ""               # فارغ = gemini_model
     stt_window_seconds: float = 4.0          # طول نافذة التفريغ الحي المرسلة للنموذج
     audio_sample_rate: int = 16000           # PCM16 أحادي من المتصفح (lib/audio.ts)

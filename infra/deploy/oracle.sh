@@ -27,7 +27,7 @@ REPO_URL="${REPO_URL:-https://github.com/pharmjeed/medifyy11.git}"
 GIT_REF="${GIT_REF:-main}"
 ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}"
 GEMINI_API_KEY="${GEMINI_API_KEY:-}"
-GEMINI_MODEL="${GEMINI_MODEL:-gemini-3.6-flash}"
+GEMINI_MODEL="${GEMINI_MODEL:-gemini-3.5-flash-lite}"
 # اختيار المحركات: ما يُصرَّح به في deploy.env يتقدم، وإلا يُشتق من المفاتيح المتاحة
 if [[ -z "${LLM_ENGINE:-}" ]]; then
     if [[ -n "$GEMINI_API_KEY" ]]; then LLM_ENGINE=gemini

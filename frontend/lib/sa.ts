@@ -25,7 +25,7 @@ export interface SaAdmin {
 
 /** قدرات الدرجات — مرآة GRADE_CAPS في الباك اند (DOC-20 §١.٢) لإخفاء الأزرار فقط؛ الفرض في الخادم. */
 export const SA_GRADE_CAPS: Record<SaRole, ReadonlySet<string>> = {
-  owner: new Set(["facilities.write", "users.write", "invoices.write", "plans.write", "admins.manage", "security"]),
+  owner: new Set(["facilities.write", "users.write", "invoices.write", "plans.write", "admins.manage", "security", "settings.write"]),
   ops: new Set(["facilities.write", "users.write", "invoices.write"]),
   finance: new Set(["invoices.write"]),
   support: new Set(),

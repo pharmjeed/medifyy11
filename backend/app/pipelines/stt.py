@@ -138,9 +138,11 @@ class GeminiSTTEngine(STTEngine):
     def __init__(self) -> None:
         from google import genai  # استيراد كسول — الحزمة اختيارية على بيئات الـmock
 
+        from ..services.ai_models import resolve_gemini_model
+
         settings = get_settings()
         self._client = genai.Client(api_key=settings.gemini_api_key)
-        self._model = settings.gemini_stt_model or settings.gemini_model
+        self._model = settings.gemini_stt_model or resolve_gemini_model()
         self._sample_rate = settings.audio_sample_rate
         self._silence_threshold = settings.stt_silence_threshold
         self._window_bytes = max(1, int(settings.stt_window_seconds * self._sample_rate * 2))

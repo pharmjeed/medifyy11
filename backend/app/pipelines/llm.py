@@ -102,9 +102,11 @@ class GeminiEngine(LLMEngine):
     def __init__(self) -> None:
         from google import genai
 
+        from ..services.ai_models import resolve_gemini_model
+
         s = get_settings()
         self._client = genai.Client(api_key=s.gemini_api_key)
-        self._model = s.gemini_model
+        self._model = resolve_gemini_model()  # تجاوز المنصة (platform_settings) وإلا GEMINI_MODEL
 
     def _call(self, rendered: str, attachments: list[dict[str, Any]] | None) -> str:
         from google.genai import types

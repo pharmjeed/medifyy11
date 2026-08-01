@@ -352,6 +352,23 @@ export interface SaPlan {
   facilities_count: number;
 }
 
+export interface SaGoogleModel {
+  id: string;
+  display_name: string;
+  description: string;
+}
+
+export interface SaAiSettings {
+  llm_engine: string;
+  stt_engine: string;
+  default_model: string;
+  selected_model: string | null;
+  effective_model: string;
+  stt_model: string;
+  models: SaGoogleModel[];
+  models_source: "live" | "fallback";
+}
+
 export interface SaInvoice extends Invoice {
   facility_id: string;
   facility_name?: string;

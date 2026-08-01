@@ -29,6 +29,7 @@ os.environ.update({
     "SEED_SUPER_ADMIN_PASSWORD": "Owner@12345",  # يبذر السوبر أدمن للاختبارات (البذر يتخطّاه بلا هذا المتغير)
     "LLM_ENGINE": "mock",
     "STT_ENGINE": "mock",
+    "GEMINI_API_KEY": "",  # حتى مع .env محلي بمفتاح حقيقي — لا استدعاء Google API من الاختبارات
     "INTEGRATION_ENGINE": "mock",
     "EMAIL_ENGINE": "mock",
     "RATE_LIMIT_DEFAULT": "100000",

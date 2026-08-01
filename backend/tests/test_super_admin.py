@@ -399,3 +399,53 @@ def test_2fa_full_lifecycle(client, sa_token):
     disabled = client.post("/api/v1/sa/me/2fa/disable", headers=auth(token3), json={"code": _totp_code(secret)})
     assert disabled.status_code == 200
     _sa_login(client, "sec.test", "Secure@12345")  # يدخل بلا رمز بعد التعطيل
+
+
+# ═══ إعدادات الذكاء الاصطناعي (توجيه مالك 2026-08-01) ═══
+
+def test_ai_settings_read(client, sa_token):
+    response = client.get("/api/v1/sa/settings/ai", headers=auth(sa_token))
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["selected_model"] is None          # لا تجاوز بعد البذر
+    assert data["effective_model"] == data["default_model"]
+    assert data["models_source"] == "fallback"     # لا GEMINI_API_KEY في الاختبارات
+    ids = {model["id"] for model in data["models"]}
+    assert "gemini-3.5-flash-lite" in ids
+
+
+def test_ai_settings_switch_applies_and_resets(client, sa_token):
+    switched = client.patch("/api/v1/sa/settings/ai", headers=auth(sa_token),
+                            json={"gemini_model": "gemini-3.6-pro"})
+    assert switched.status_code == 200, switched.text
+    data = switched.json()["data"]
+    assert data["selected_model"] == "gemini-3.6-pro"
+    assert data["effective_model"] == "gemini-3.6-pro"
+    assert data["stt_model"] == "gemini-3.6-pro"   # لا GEMINI_STT_MODEL → يتبع الاختيار
+
+    # القراءة اللاحقة تعكس التجاوز + السجل الموحّد دوّن التبديل
+    read = client.get("/api/v1/sa/settings/ai", headers=auth(sa_token)).json()["data"]
+    assert read["effective_model"] == "gemini-3.6-pro"
+    audit_rows = client.get("/api/v1/sa/audit?action=sa.ai_model", headers=auth(sa_token)).json()["data"]
+    assert any(row["action"] == "sa.ai_model_updated" for row in audit_rows)
+
+    # العودة لافتراضي البيئة
+    reset = client.patch("/api/v1/sa/settings/ai", headers=auth(sa_token), json={"gemini_model": None})
+    assert reset.status_code == 200
+    assert reset.json()["data"]["selected_model"] is None
+    assert reset.json()["data"]["effective_model"] == reset.json()["data"]["default_model"]
+
+
+def test_ai_settings_write_owner_only(client, finance_token):
+    """القراءة لكل الدرجات — التعديل للمالك حصراً (settings.write)."""
+    assert client.get("/api/v1/sa/settings/ai", headers=auth(finance_token)).status_code == 200
+    denied = client.patch("/api/v1/sa/settings/ai", headers=auth(finance_token),
+                          json={"gemini_model": "gemini-3.6-pro"})
+    assert denied.status_code == 403
+    assert denied.json()["error"]["code"] == "MDF-4031"
+
+
+def test_ai_settings_rejects_bad_model_id(client, sa_token):
+    bad = client.patch("/api/v1/sa/settings/ai", headers=auth(sa_token),
+                       json={"gemini_model": "not a model!!"})
+    assert bad.status_code == 422

@@ -19,6 +19,7 @@ const SA_NAV: { href: string; ar: string; en: string; cap?: string }[] = [
   { href: "/sa/invoices", ar: "الفواتير والمدفوعات", en: "Invoices & payments" },
   { href: "/sa/audit", ar: "سجل المنصة", en: "Platform audit" },
   { href: "/sa/admins", ar: "حسابات المنصة", en: "Platform accounts", cap: "admins.manage" },
+  { href: "/sa/settings", ar: "الذكاء الاصطناعي", en: "AI settings" },
   { href: "/sa/security", ar: "الأمان", en: "Security" },
 ];
 

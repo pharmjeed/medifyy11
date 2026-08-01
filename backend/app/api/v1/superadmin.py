@@ -1052,3 +1052,54 @@ def sa_patch_invoice(invoice_id: uuid.UUID, body: SaInvoicePatchIn, ctx: SuperAu
     sa_audit(db, ctx, "sa.invoice_status_changed", "invoice", invoice.id,
              facility_id=invoice.facility_id, meta=meta)
     return ok(_invoice_out(invoice))
+
+
+# ════════════════ إعدادات الذكاء الاصطناعي (توجيه مالك 2026-08-01) ════════════════
+
+def _ai_settings_out(db: Session) -> dict:
+    from ...services.ai_models import list_google_models, stored_gemini_model
+
+    s = get_settings()
+    selected = stored_gemini_model(db)
+    models, source = list_google_models()
+    return {
+        "llm_engine": s.llm_engine,
+        "stt_engine": s.stt_engine,
+        "default_model": s.gemini_model,               # افتراضي البيئة (GEMINI_MODEL)
+        "selected_model": selected,                    # تجاوز المنصة — None = يسري الافتراضي
+        "effective_model": selected or s.gemini_model,
+        "stt_model": s.gemini_stt_model or selected or s.gemini_model,
+        "models": models,
+        "models_source": source,                       # live = من Google API | fallback = كتالوج ثابت
+    }
+
+
+@router.get("/settings/ai")
+def sa_ai_settings(ctx: SuperAuth, db: SystemDB):
+    """النموذج الفعلي + قائمة نماذج قوقل المتاحة للحساب — قراءة لكل الدرجات."""
+    return ok(_ai_settings_out(db))
+
+
+class SaAiSettingsIn(BaseModel):
+    # None = حذف التجاوز والعودة لافتراضي البيئة — النمط يسمح بكل معرفات نماذج قوقل
+    gemini_model: str | None = Field(default=None, min_length=2, max_length=80, pattern=r"^[A-Za-z0-9][A-Za-z0-9._\-/]*$")
+
+
+@router.patch("/settings/ai")
+def sa_update_ai_settings(body: SaAiSettingsIn, ctx: SuperAuth, request: Request, db: SystemDB):
+    """تبديل نموذج قوقل للمنصة كلها — يسري فوراً (إعادة بناء محركي llm/stt) دون نشر."""
+    from ...pipelines.llm import reset_llm_cache
+    from ...pipelines.stt import reset_stt_cache
+    from ...services.ai_models import set_gemini_model, stored_gemini_model
+
+    require_cap(ctx, "settings.write")  # owner حصراً
+    require_reauth(ctx, request)        # تغيير نموذج المنصة — إجراء حسّاس (DOC-20 §١.٣)
+    previous = stored_gemini_model(db)
+    if body.gemini_model != previous:
+        set_gemini_model(db, body.gemini_model, ctx.admin_id)
+        db.flush()
+        reset_llm_cache()
+        reset_stt_cache()
+        sa_audit(db, ctx, "sa.ai_model_updated", "platform_setting", "ai.gemini_model",
+                 meta={"from": previous or "(default)", "to": body.gemini_model or "(default)"})
+    return ok(_ai_settings_out(db))

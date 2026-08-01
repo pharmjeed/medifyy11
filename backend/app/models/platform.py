@@ -65,6 +65,21 @@ class Plan(Base, TimestampMixin):
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
 
+class PlatformSetting(Base, TimestampMixin):
+    """إعدادات المنصة (مفتاح/قيمة) — توجيه مالك 2026-08-01: اختيار نموذج الذكاء من الكونسول.
+
+    محجوبة كلياً عن medify_app — تُقرأ عبر جلسة النظام عند بناء المحركات فقط.
+    """
+
+    __tablename__ = "platform_settings"
+    __table_args__ = (UniqueConstraint("key", name="uq_platform_settings_key"),)
+
+    id: Mapped[uuid.UUID] = pk()
+    key: Mapped[str] = mapped_column(Text, nullable=False)
+    value: Mapped[Any] = mapped_column(JSONB, nullable=False)
+    updated_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("platform_admins.id"), nullable=True)
+
+
 class PlatformAuditLog(Base, TimestampMixin):
     """سجل تدقيق المنصة الموحّد (W-SA-09) — إلحاقي فقط، محجوب عن medify_app."""
 

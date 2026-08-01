@@ -58,6 +58,7 @@ Monorepo: `frontend/` (Next.js 14 App Router + TS strict) · `backend/` (FastAPI
 ## المحركات القابلة للتبديل (متغيرات بيئة)
 
 - `STT_ENGINE=gemini|whisper|mock` · `LLM_ENGINE=gemini|claude|mock` (`GEMINI_API_KEY` + `GEMINI_MODEL`؛ غياب المفتاح = mock تلقائياً بلا توقف)
+- **نموذج قوقل (توجيه مالك 2026-08-01)**: الافتراضي `gemini-3.5-flash-lite`، ومالك المنصة يبدّله لأي نموذج قوقل من `/sa/settings` (جدول `platform_settings` بمفتاح `ai.gemini_model` — يتجاوز البيئة ويسري فوراً بإعادة بناء المحركين، D-33). القائمة حيّة من Google API وإلا كتالوج احتياطي.
 - **التفريغ الحي بجيميناي (مالك 2026-07-26)**: المتصفح يلتقط الميكروفون فعلياً (`frontend/lib/audio.ts` — PCM16 أحادي 16kHz base64 كل 250ms عبر نفس قناة WSS)، والخادم يجمّعها في نوافذ ~4 ثوانٍ ويغلّفها WAV ويرسلها للنموذج؛ نوافذ الصمت تُتخطى بلا استدعاء. التسجيل يُحفظ `.wav`. لا تسجيل بلا إذن ميكروفون — ولا تُوثَّق الموافقة قبله.
 - `INTEGRATION_ENGINE=mock|http` (وجهة رفع المستشفى) · `EMAIL_ENGINE=mock|smtp`
 - `ANALYTICS_ENGINE=log|posthog` — الأحداث بلا محتوى سريري

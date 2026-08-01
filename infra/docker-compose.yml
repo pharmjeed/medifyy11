@@ -40,7 +40,7 @@ services:
       LLM_ENGINE: ${LLM_ENGINE:-mock}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
-      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.6-flash}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.5-flash-lite}
       GEMINI_STT_MODEL: ${GEMINI_STT_MODEL:-}
       INTEGRATION_ENGINE: ${INTEGRATION_ENGINE:-mock}
       EMAIL_ENGINE: mock
