@@ -20,6 +20,7 @@ const SA_NAV: { href: string; ar: string; en: string; cap?: string }[] = [
   { href: "/sa/audit", ar: "سجل المنصة", en: "Platform audit" },
   { href: "/sa/admins", ar: "حسابات المنصة", en: "Platform accounts", cap: "admins.manage" },
   { href: "/sa/settings", ar: "الذكاء الاصطناعي", en: "AI settings" },
+  { href: "/sa/registry", ar: "ملفات الأكواد", en: "Code files" },
   { href: "/sa/security", ar: "الأمان", en: "Security" },
 ];
 

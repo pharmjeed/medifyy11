@@ -16,8 +16,9 @@ import uuid
 from decimal import Decimal
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Depends, Form, Request, Response, UploadFile
 from pydantic import BaseModel, EmailStr, Field
+from sqlalchemy import delete as sa_delete
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -1103,3 +1104,88 @@ def sa_update_ai_settings(body: SaAiSettingsIn, ctx: SuperAuth, request: Request
         sa_audit(db, ctx, "sa.ai_model_updated", "platform_setting", "ai.gemini_model",
                  meta={"from": previous or "(default)", "to": body.gemini_model or "(default)"})
     return ok(_ai_settings_out(db))
+
+
+# ════════════════ السجل المرجعي للأكواد — ملفات الأكواد المعتمدة (قرار مالك 2026-08-02) ════════════════
+
+REGISTRY_FILE_MAX_BYTES = 25 * 1024 * 1024  # ملف CHI الرسمي ~2MB — سقف مريح
+
+
+@router.get("/registry")
+def sa_registry_overview(ctx: SuperAuth, db: SystemDB):
+    """حالة السجل لكل نظام (SBS/ICD10AM/ACHI/SFDA/GMDN): الأعداد والإصدارات وآخر تحديث
+    وحالة الإنفاذ (سجل فارغ = لا تحقق لذلك النظام) — قراءة لكل الدرجات."""
+    from ...services.registry_import import registry_overview
+
+    return ok({"systems": registry_overview(db)})
+
+
+@router.post("/registry/import")
+async def sa_registry_import(
+    ctx: SuperAuth,
+    request: Request,
+    db: SystemDB,
+    file: UploadFile,
+    system: Annotated[str, Form()],
+    version: Annotated[str, Form(min_length=2, max_length=80)],
+    dry_run: Annotated[bool, Form()] = False,
+):
+    """رفع ملف أكواد معتمد (xlsx من CHI أو CSV عام) واستيراده — owner حصراً.
+
+    dry_run=true: معاينة الأعداد بلا كتابة (لا إعادة مصادقة).
+    dry_run=false: الاعتماد والنشر الفعلي — إجراء حسّاس (TOTP) ويُدوَّن في سجل المنصة.
+    """
+    from ...services.registry_import import REGISTRY_SYSTEMS, import_codes, parse_registry_file
+
+    require_cap(ctx, "registry.write")
+    if system not in REGISTRY_SYSTEMS:
+        raise MedifyError("MDF-4041", details={"system": system})
+    if not dry_run:
+        require_reauth(ctx, request)  # نشر مرجع ترميز المنصة كلها — حسّاس (DOC-20 §١.٣)
+
+    content = await file.read()
+    if len(content) > REGISTRY_FILE_MAX_BYTES:
+        raise MedifyError("MDF-4225", details={"reason": "file_too_large", "max_bytes": REGISTRY_FILE_MAX_BYTES})
+    try:
+        rows = parse_registry_file(file.filename or "", content)
+        inserted, updated = import_codes(db, system, version, rows)
+    except ValueError as exc:
+        raise MedifyError("MDF-4225", details={"reason": "invalid_registry_file", "error": str(exc)}) from exc
+
+    if dry_run:
+        db.rollback()  # معاينة فقط — لا كتابة ولا تدوين
+        return ok({"dry_run": True, "system": system, "version": version,
+                   "inserted": inserted, "updated": updated})
+
+    db.flush()
+    sa_audit(db, ctx, "sa.registry_imported", "registry_codes", system,
+             meta={"system": system, "version": version, "file": file.filename,
+                   "inserted": inserted, "updated": updated})
+    from ...services.registry_import import registry_overview
+
+    return ok({"dry_run": False, "system": system, "version": version,
+               "inserted": inserted, "updated": updated,
+               "systems": registry_overview(db)})
+
+
+@router.delete("/registry/{system}")
+def sa_registry_clear(system: str, ctx: SuperAuth, request: Request, db: SystemDB):
+    """إزالة سجل نظامٍ كاملاً — يوقف التحقق لذلك النظام فوراً (يعود سلوك ما قبل التحميل).
+
+    owner حصراً + إعادة مصادقة — يُدوَّن في سجل المنصة."""
+    from ...models import RegistryCode
+    from ...services.registry_import import REGISTRY_SYSTEMS, registry_overview
+
+    require_cap(ctx, "registry.write")
+    if system not in REGISTRY_SYSTEMS:
+        raise MedifyError("MDF-4041", details={"system": system})
+    require_reauth(ctx, request)
+
+    removed = db.execute(
+        sa_delete(RegistryCode).where(RegistryCode.code_system == system)
+    ).rowcount
+    if removed == 0:
+        raise MedifyError("MDF-4041", details={"system": system, "reason": "registry_empty"})
+    sa_audit(db, ctx, "sa.registry_cleared", "registry_codes", system,
+             meta={"system": system, "removed": removed})
+    return ok({"system": system, "removed": removed, "systems": registry_overview(db)})

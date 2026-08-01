@@ -180,6 +180,27 @@ export interface GuidanceItem {
   code_replaced_by?: string | null;
 }
 
+/** حالة نظام في السجل المرجعي — GET /sa/registry (قرار مالك 2026-08-02) */
+export interface SaRegistrySystem {
+  system: "ICD10AM" | "ACHI" | "SBS" | "SFDA" | "GMDN";
+  total: number;
+  active: number;
+  inactive: number;
+  versions: string[];
+  last_updated: string | null;
+  enforced: boolean;
+}
+
+/** نتيجة استيراد ملف أكواد — POST /sa/registry/import */
+export interface SaRegistryImportResult {
+  dry_run: boolean;
+  system: string;
+  version: string;
+  inserted: number;
+  updated: number;
+  systems?: SaRegistrySystem[];
+}
+
 /** نتيجة بحث السجل المرجعي — GET /codes/search (قرار مالك 2026-08-02) */
 export interface CodeSearchResult {
   code: string;

@@ -45,7 +45,7 @@ Monorepo: `frontend/` (Next.js 14 App Router + TS strict) · `backend/` (FastAPI
 - **API**: كل شيء تحت `/api/v1/sa/*` بمحرك النظام (يتجاوز RLS بقيود صريحة): auth (login/refresh/logout/me) · overview · facilities (قائمة/تفاصيل/حالة/اشتراك) · users (إنشاء أدمن/دكتور، تفعيل/تعطيل، إعادة كلمة مرور) · plans (CRUD — الرمز ثابت) · invoices (قائمة/إصدار/تسوية يدوية paid/void/overdue).
 - **الفوترة حسب الدكاترة**: فاتورة الدورة = عدد الدكاترة النشطين × `plans.seat_price_sar` + VAT 15% مفصولة (`billing.plan_seat_price` مع احتياطي 400). تغيير الباقة/المقاعد من المنصة **لا** يُصدر فاتورة تلقائياً — الإصدار فعل صريح. التسوية اليدوية ترفع تعليق المنشأة إن لم تبقَ متأخرات؛ لا تراجع عن paid.
 - **السوبر أدمن لا يقرأ محتوى سريرياً أبداً** — نفس قيد أدمن المنشأة: عدادات وتجميعات فقط. كل فعل منصةٍ يُدوَّن في `audit_logs` منشأته بـ `actor_user_id=NULL` + `meta.sa`.
-- **الواجهات**: `/sa/login` · `/sa` (نظرة) · `/sa/facilities[/:id]` · `/sa/plans` · `/sa/invoices` — هيكل `SaShell` بشارة ذهبية وجلسة مستقلة (`lib/sa.ts`).
+- **الواجهات**: `/sa/login` · `/sa` (نظرة) · `/sa/facilities[/:id]` · `/sa/plans` · `/sa/invoices` · `/sa/registry` (ملفات الأكواد — قرار 2026-08-02) — هيكل `SaShell` بشارة ذهبية وجلسة مستقلة (`lib/sa.ts`).
 - **البذر**: dev عبر `scripts/seed.py` (حساب `owner` — يتطلب `SEED_SUPER_ADMIN_PASSWORD`) · الإنتاج عبر `scripts/create_super_admin.py` (كلمة المرور من `SUPER_ADMIN_PASSWORD`).
 
 ## اعتماد DOC-20 + تعديلا المالك (2026-07-16)
@@ -62,8 +62,11 @@ Monorepo: `frontend/` (Next.js 14 App Router + TS strict) · `backend/` (FastAPI
 - **جدول `registry_codes`** (هجرة 0006 — نمط plans: منصّي بلا RLS، دور التطبيق SELECT فقط):
   كود بصيغته القانونية + `code_norm` للمطابقة (E119=E11.9، 408030000=40803-00-00) + وصف + حالة
   نشط/ملغى + بديل الملغى + إصدار السجل. **سجل فارغ لنظامٍ ما = لا تحقق له** (تفعيل تدريجي بالاستيراد).
-- **الاستيراد**: `scripts/import_codes.py --file SBS_V2_Code_list.xlsx --system SBS --version "SBS V2.0"` —
-  يقرأ تبويب CHI «Technical List» أو CSV عاماً، upsert idempotent، يتطلب openpyxl للـxlsx.
+- **النشر من الكونسول (قرار مالك 2026-08-02 — تكملة)**: صفحة `/sa/registry` «ملفات الأكواد» —
+  حالة كل نظام (أعداد/إصدارات/آخر تحديث/الإنفاذ) + رفع الملف بخطوتين (معاينة dry-run ثم
+  «اعتماد ونشر» — حسّاس بإعادة مصادقة TOTP) + إزالة سجل نظامٍ لإيقاف تحققه. قدرة `registry.write`
+  للـowner حصراً. نقاط: `GET/POST /sa/registry[/import]` · `DELETE /sa/registry/{system}` —
+  المنطق المشترك في `services/registry_import.py` (يستخدمه CLI أيضاً: `scripts/import_codes.py`).
   المصدر الرسمي: chi.gov.sa → Regulations → Saudi Billing System. **ICD-10-AM مرخّص (IHACPA) عبر
   قنوات CHI/nphies — لا يُستورد ICD-10-CM الأمريكي ولا يُبنى DRG إطلاقاً.**
 - **أحكام الفحص**: valid (الصيغة القانونية وإصدار السجل وتاريخ السريان تُفرض من سجلنا) ·

@@ -25,7 +25,7 @@ export interface SaAdmin {
 
 /** قدرات الدرجات — مرآة GRADE_CAPS في الباك اند (DOC-20 §١.٢) لإخفاء الأزرار فقط؛ الفرض في الخادم. */
 export const SA_GRADE_CAPS: Record<SaRole, ReadonlySet<string>> = {
-  owner: new Set(["facilities.write", "users.write", "invoices.write", "plans.write", "admins.manage", "security", "settings.write"]),
+  owner: new Set(["facilities.write", "users.write", "invoices.write", "plans.write", "admins.manage", "security", "settings.write", "registry.write"]),
   ops: new Set(["facilities.write", "users.write", "invoices.write"]),
   finance: new Set(["invoices.write"]),
   support: new Set(),
@@ -139,6 +139,55 @@ export async function saApi<T>(path: string, options: SaApiOptions = {}, retried
   if (err.code === "MDF-4012" && !retried && !path.startsWith("/auth/")) {
     if (await trySaRefresh()) {
       return saApi<T>(path, options, true);
+    }
+    clearSaSession();
+    if (typeof window !== "undefined") {
+      window.location.href = "/sa/login?expired=1";
+    }
+  }
+  throw new ApiError(response.status, err);
+}
+
+/** رفع ملف multipart لمسارات /sa (ملفات الأكواد المعتمدة — قرار مالك 2026-08-02).
+ *  لا Content-Type يدوي — المتصفح يضبط boundary بنفسه. */
+export async function saApiUpload<T>(
+  path: string,
+  form: FormData,
+  reauthCode?: string,
+  retried = false,
+): Promise<Envelope<T>> {
+  const headers: Record<string, string> = {};
+  if (reauthCode) headers["X-SA-Reauth"] = reauthCode;
+  const token = getSaToken();
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+
+  const response = await fetch(`/api/v1/sa${path}`, {
+    method: "POST",
+    headers,
+    credentials: "include",
+    body: form,
+  });
+
+  if (response.ok) {
+    return (await response.json()) as Envelope<T>;
+  }
+
+  let err: MdfError = {
+    code: "MDF-5001",
+    message_ar: "خطأ داخلي غير مصنف.",
+    message_en: "Unclassified error",
+    details: {},
+  };
+  try {
+    const parsed = (await response.json()) as { error?: MdfError };
+    if (parsed.error) err = parsed.error;
+  } catch {
+    /* استجابة غير JSON */
+  }
+
+  if (err.code === "MDF-4012" && !retried) {
+    if (await trySaRefresh()) {
+      return saApiUpload<T>(path, form, reauthCode, true);
     }
     clearSaSession();
     if (typeof window !== "undefined") {

@@ -34,7 +34,7 @@ class SuperAdminContext:
 
 # قدرات الدرجات — DOC-20 §١.٢: كل درجة أقل من التي فوقها؛ الكتالوج/الأسعار والحسابات للـowner حصراً
 GRADE_CAPS: dict[str, frozenset[str]] = {
-    "owner": frozenset({"facilities.write", "users.write", "invoices.write", "plans.write", "admins.manage", "security", "settings.write"}),
+    "owner": frozenset({"facilities.write", "users.write", "invoices.write", "plans.write", "admins.manage", "security", "settings.write", "registry.write"}),
     "ops": frozenset({"facilities.write", "users.write", "invoices.write"}),
     "finance": frozenset({"invoices.write"}),
     "support": frozenset(),
