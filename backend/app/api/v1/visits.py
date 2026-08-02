@@ -4,16 +4,17 @@ from __future__ import annotations
 import datetime as dt
 import uuid
 from pathlib import Path
+from typing import Literal
 
 from fastapi import APIRouter
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ...analytics import track
 from ...audit import audit
 from ...config import get_settings
-from ...deps import DoctorAuth, DB, pagination
+from ...deps import Auth, DoctorAuth, DB, pagination
 from ...envelope import ok, paginated
 from ...errors import MedifyError
 from ...models import (
@@ -407,38 +408,47 @@ def cancel_visit(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB):
     return ok({"state": "cancelled"})
 
 
-# ===== الإبطال Void (قرار مالك 2026-08-03) =====
+# ===== الإبطال Void (قرار مالك 2026-08-03 — موسَّع بمهمة التحصين م4) =====
 
-VOID_REASONS = ("wrong_patient", "duplicate", "test", "consent_withdrawn", "other")
+VoidReason = Literal["wrong_patient", "duplicate", "test_recording", "test", "consent_withdrawn", "other"]
+# المصادر: summarized (قبل المراجعة) · in_review · approved قبل النقل (= codes_approved
+# بخريطة أسماء التوجيه، وnote_approved ضمن in_review). من uploaded وما بعدها → 409 (المسار reopen).
+VOIDABLE_STATES = ("summarized", "in_review", "approved")
 
 
 class VoidIn(BaseModel):
-    reason: str
+    reason: VoidReason  # قيمة خارج القائمة = 422 بمغلف التحقق القياسي
     note: str = Field(default="", max_length=500)
+
+    @model_validator(mode="after")
+    def _other_requires_note(self) -> "VoidIn":
+        if self.reason == "other" and not self.note.strip():
+            raise ValueError("reason=other يتطلب توضيحاً نصياً في note")
+        return self
 
 
 @router.post("/visits/{visit_id}/void")
-def void_visit(visit_id: uuid.UUID, body: VoidIn, ctx: DoctorAuth, db: DB):
-    """إبطال زيارة اكتملت معالجتها ولا يصح اعتمادها — من in_review حصراً → voided نهائية.
+def void_visit(visit_id: uuid.UUID, body: VoidIn, ctx: Auth, db: DB):
+    """إبطال زيارة لا يصح اعتمادها — من summarized/in_review/approved (قبل النقل) → voided نهائية.
 
-    Void ≠ Delete: المحتوى السريري يُختم ويخرج من المخارج والإحصائيات، بينما واقعة
-    الإبطال (الفاعل/السبب/الوقت) تُدوَّن في سجل التدقيق الإلحاقي وتبقى. الصوت لا
-    يُمس هنا — يتبع سياسة الاحتفاظ ذاتها (retention_until → purge الدوري).
+    RBAC (م4): صاحب الزيارة (RLS يضمن الملكية) أو أدمن المنشأة (سياسة doctor_scope
+    تمرّره — لا يقرأ محتوى سريرياً، والإبطال فعل إداري على الحالة).
+    Void ≠ Delete: المحتوى السريري يُختم ويخرج من المخارج (410) والإحصائيات، بينما
+    واقعة الإبطال (الفاعل/السبب/الوقت) تُدوَّن في سجل التدقيق الإلحاقي وتبقى.
+    الصوت لا يُمس هنا — يتبع سياسة الاحتفاظ (المُبطلة على أقصر مدة — م8).
     """
     visit = get_visit_for_doctor(db, visit_id)
-    if body.reason not in VOID_REASONS:
-        raise MedifyError("MDF-4041", details={"reason": body.reason, "allowed": list(VOID_REASONS)})
+    reason = "test_recording" if body.reason == "test" else body.reason  # توافق عكسي للاسم القديم
     note = body.note.strip()
-    if body.reason == "other" and not note:
-        raise MedifyError("MDF-4041", details={"reason": "other", "note": "required"})
-    if visit.state != "in_review":
-        # قبل المعالجة مساره «إلغاء» (FR-606)؛ بعد الاعتماد لا رجوع — الحكم النهائي للـtrigger
-        raise MedifyError("MDF-4223", details={"state": visit.state, "to": "voided"})
+    from_state = visit.state
+    if from_state not in VOIDABLE_STATES:
+        # قبل المعالجة مساره «إلغاء» (FR-606)؛ بعد النقل المسار reopen — الحكم النهائي للـtrigger
+        raise MedifyError("MDF-4223", details={"state": from_state, "to": "voided"})
     transition(db, visit, "voided", ctx.user_id)
     # سبب الإبطال بيان إداري لا محتوى سريرياً (DOC-16) — يُدوَّن كاملاً مع هوية الفاعل والوقت
     audit(db, ctx.facility_id, "visit.voided", "visit", visit.id, ctx.user_id,
-          {"reason": body.reason, "note": note})
-    return ok({"state": "voided", "reason": body.reason})
+          {"reason": reason, "note": note, "from_state": from_state, "actor_role": ctx.role})
+    return ok({"state": "voided", "reason": reason})
 
 
 @router.get("/visits/{visit_id}/transcript")

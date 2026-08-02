@@ -22,7 +22,10 @@ from ...services.visits import get_visit_for_doctor
 router = APIRouter()
 
 
-def _require_gate_two(db, visit: Visit) -> None:
+def _require_exportable(db, visit: Visit) -> None:
+    """المُبطلة مختومة (410 — م4) قبل أي فحص بوابة؛ ثم لا خروج بيانات قبل البوابة ②."""
+    if visit.state == "voided":
+        raise MedifyError("MDF-4235", details={"visit_id": str(visit.id)})
     approval = db.execute(select(Approval).where(Approval.visit_id == visit.id)).scalar_one_or_none()
     if approval is None:
         raise MedifyError("MDF-4232", details={"visit_id": str(visit.id)})
@@ -32,7 +35,7 @@ def _require_gate_two(db, visit: Visit) -> None:
 def export_text(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB):
     """نص نظيف يُلصق في الـ EMR (F-086) — يُنسخ من الواجهة بنقرة."""
     visit = get_visit_for_doctor(db, visit_id)
-    _require_gate_two(db, visit)
+    _require_exportable(db, visit)
     content = note_text(db, visit)
     audit(db, ctx.facility_id, "note.exported", "visit", visit.id, ctx.user_id, {"format": "text"})
     track("note.exported", ctx.facility_id, "doctor", visit.id, format="text", chars=len(content))
@@ -43,7 +46,7 @@ def export_text(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB):
 def export_pdf(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB):
     """PDF بترويسة وتذييل ثنائيي اللغة (F-038/F-084)."""
     visit = get_visit_for_doctor(db, visit_id)
-    _require_gate_two(db, visit)
+    _require_exportable(db, visit)
     payload = note_pdf(db, visit)
     audit(db, ctx.facility_id, "note.exported", "visit", visit.id, ctx.user_id, {"format": "pdf"})
     track("note.exported", ctx.facility_id, "doctor", visit.id, format="pdf", bytes=len(payload))

@@ -10,7 +10,7 @@
 | 1 | توسعة آلة الحالات | ✅ أُنجزت | هجرة 0011: `reopened` + دورة `uploaded→reopened→in_review` + `voided` من summarized/approved · خطاف Audit موحّد `visit.state_changed` في `transition()` بفاعل (uploader عبره أيضاً) · 5 اختبارات جديدة (146 passed) |
 | 2 | الرفع المجزّأ | ✅ أُنجزت | هجرة 0012 `audio_chunks` (قيد فريد visit+index، sha256، offset/length) · ترقيم موحّد معمَّر عبر الاتصالات (idempotent re-ack — قتل ثغرة تكرار الصوت) · reconcile ذاتي الشفاء عند الاتصال · finalize صارم في stop (لا-فجوات/حجم/bit-exact → MDF-4234 جديد 409) · واجهة: sha256 لكل مقطع + backoff أُسّي + لافتة «استئناف تسجيل منقطع» بعد قتل التبويبة · 5 اختبارات جديدة (151 passed) |
 | 3 | إعادة المحاولة التلقائية | ✅ أُنجزت | هجرة 0013 `processing_attempts` (يُكتب بجلسة نظام — ينجو من rollback) · مصنّف مبني على الأنواع (`pipelines/classify.py` — أصلح عدّ FileNotFoundError عابراً) · `services/processing.py`: محاولة + 3 إعادات 30ث/2د/5د على العابر فقط، non_retryable فوري، فشل P3 غير معطِّل · وضعان: inline (dev/tests) وqueue (عامل arq بخدمة worker في compose) · نقطتا `processing-status` و`reprocess` + استطلاع الواجهة بتقدم صادق · 4 اختبارات (155 passed) |
-| 4 | الإبطال (Void) | ⬜ لم تبدأ | قائم جزئياً (0008) — توسعة المصادر + RBAC أدمن + exports 410 |
+| 4 | الإبطال (Void) | ✅ أُنجزت | المصادر الموسّعة summarized/in_review/approved-قبل-النقل (trigger 0011 + API) · RBAC: الدكتور صاحب الزيارة أو الأدمن (سياسة doctor_scope تمرّره) · exports → 410 بكود MDF-4235 الجديد · reason enum بمصادقة Pydantic (422 قياسي بدل 404 الخاطئ) + توافق عكسي «test» · from_state/actor_role في Audit · 3 اختبارات جديدة + تحديثان (158 passed) |
 | 5 | فتح البوابة ① (Unlock) | ⬜ لم تبدأ | قائم جزئياً (0010) — hash-compare لإعادة اعتماد بنقرة + كود MDF جديد |
 | 6 | دورة النسخ (Reopen) | ⬜ لم تبدأ | الأكبر: `note_versions` + immutability + reopen + FHIR amended/relatesTo + HL7 MDM |
 | 7 | Idempotency واعٍ بالنسخة | ⬜ لم تبدأ | مفتاح `{visit_id}:{version}` + ifNoneExist + MSH-10 + `delivery_receipts` |
@@ -40,6 +40,7 @@
 | الكود | المرحلة | المعنى |
 |-------|---------|--------|
 | MDF-4234 | 2 | 409 — ملف الصوت غير مكتمل/غير مطابق عند finalize (قائمة الناقص في details) |
+| MDF-4235 | 4 | 410 — مخارج زيارة مُبطلة (Void ختمٌ للمحتوى) |
 
 ## قرارات اتُّخذت منفرداً
 
@@ -54,6 +55,7 @@
 - (م3) قرار «لا طوابير» (2026-08-02) فُسِّر على مقصده: لا تفريغ أثناء التسجيل ولا تأجيل للمعالجة — وضع queue يبدأ فوراً عند stop لكن خارج دورة الطلب (لا حجز HTTP وtransaction لدقائق backoff). inline يبقى للتطوير والاختبارات (بلا Redis).
 - (م3) الإعادات داخل `process_visit_pipeline` لا عبر arq retries (سجل موحّد وتخطي مراحل مكتملة idempotent). الفشل النهائي في queue يُبقي الزيارة transcribed ويُستأنف بـ/reprocess؛ وفي inline يُرجعها rollback إلى recording (زر الإنهاء يعيد).
 - (م3) نقطتا API جديدتان خارج DOC-05 بمقتضى المهمة: GET processing-status وPOST reprocess (+ حدث audit `visit.reprocess_requested`). المخرج غير المطابق للعقد من المحرك يُصنَّف non_retryable (فشل سريع).
+- (م4) أسماء الحقول السلكية بقيت reason/note (لا reason_code/reason_text) — الدلالة نفسها وواجهة قائمة، مع قبول «test» القديم كمرادف test_recording. زر الإبطال في الواجهة يظهر لـsummarized/in_review (approved لحظية — الرفع فوري؛ إبطالها متاح API/أدمن).
 
 ## BLOCKED
 

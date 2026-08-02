@@ -47,7 +47,7 @@ const PENDING_TEXT = /\[[^\]]*\]/;
 const VOID_REASONS: { key: string; ar: string; en: string }[] = [
   { key: "wrong_patient", ar: "سُجّلت على ملف المريض الخطأ", en: "Recorded on the wrong patient file" },
   { key: "duplicate", ar: "زيارة مكررة أُنشئت بالغلط", en: "Duplicate visit created by mistake" },
-  { key: "test", ar: "تسجيل تجريبي / تدريب", en: "Test recording / training" },
+  { key: "test_recording", ar: "تسجيل تجريبي / تدريب", en: "Test recording / training" },
   { key: "consent_withdrawn", ar: "المريض سحب موافقته", en: "Patient withdrew consent" },
   { key: "other", ar: "سبب آخر (يتطلب توضيحاً)", en: "Other (explanation required)" },
 ];
@@ -491,7 +491,8 @@ export default function ReviewPage() {
             <span className="badge success">{L("🔒 معتمدة — قراءة فقط (MDF-4226)", "🔒 Approved — read-only (MDF-4226)")}</span>
           ) : voided ? (
             <span className="badge" style={{ background: "#fbeaea", color: "#a13333" }}>{L("⊘ مُبطلة — قراءة فقط", "⊘ Voided — read-only")}</span>
-          ) : summary.state === "in_review" ? (
+          ) : ["summarized", "in_review", "approved"].includes(summary.state) ? (
+            // مصادر الإبطال الموسّعة (م4): قبل النقل — بعد النقل المسار reopen
             <button className="btn-danger-outline" style={{ height: 34 }} onClick={() => setVoidOpen(true)}
               title={L("زيارة لا يصح اعتمادها (مريض خطأ / مكررة / تجريبية / سحب موافقة) — إبطال بسبب مدوَّن في التدقيق",
                        "A visit that must not be approved (wrong patient / duplicate / test / consent withdrawn) — void with an audited reason")}>
