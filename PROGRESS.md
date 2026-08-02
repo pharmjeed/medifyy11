@@ -14,7 +14,7 @@
 | 5 | فتح البوابة ① (Unlock) | ✅ أُنجزت | الأساس القائم (0010) اكتمل: MDF-4236 الجديد (409) لحاجزي بعد-② وحالة-غير-مسموحة · مقارنة hash في الملخص (`note_unlock.text_unchanged`) — لم يتغيّر → «إعادة اعتماد بنقرة» بواجهة مميزة · قرارات الإرشادات محفوظة (مثبت سلفاً) · اختبار دورة hash كامل (159 passed) |
 | 6 | دورة النسخ (Reopen) | ✅ أُنجزت | هجرة 0014: `note_versions` (لقطات مشفّرة + بصمة حزمة + طوابع بوابتين + diff + سبب reopen) بtrigger تجميد بعد النقل · «الدورة» cycle على visits/note_approvals/approvals وtriggers 0010 صارت واعية بها · upload_jobs يربط approval_id مباشرة (مهمة لكل نسخة) · POST reopen (من uploaded، سبب إلزامي، مسودة v+1) · FHIR: entry.request صالح R4 + DocumentReference + amended + relatesTo/replaces للسابقة حصراً + ifNoneExist · محوّل HL7 MDM (T02/T09) + عميل MLLP + محرك hl7 · exports ?version= من اللقطات + تذييل النسخة + فصل retry-upload الصارم · واجهة: زر reopen + مودال + لافتة النسخة · 5 اختبارات (164 passed) |
 | 7 | Idempotency واعٍ بالنسخة | ✅ أُنجزت | هجرة 0015: `upload_jobs.idempotency_key` فريد ("{visit}:{version}" — backfill للقائم) + جدول `delivery_receipts` (فريد على مفتاح+وجهة) · الفحص قبل أي إرسال: إيصال قائم = نجاح مُعاد بلا إرسال (مُثبت باختبار «وجهة فاشلة + إيصال مزروع → نجاح») · الإيصال يُكتب فور الاستقبال بجلسة نظام · ifNoneExist وMSH-10 من م6 يكملان الدفاع بالطرف البعيد · 4 اختبارات (168 passed) |
-| 8 | سياسة الاحتفاظ الموحّدة | ⬜ لم تبدأ | `retention_policies` + `legal_hold` + مهمة ليلية + docs |
+| 8 | سياسة الاحتفاظ الموحّدة | ✅ أُنجزت | هجرة 0016: `retention_policies` لكل منشأة (الافتراضات: audio/transcript 90 · وسيطة 30 · ai_chat 90 · نسخ منقولة 365 · تدقيق 3650 · مجمّعة بلا حذف) + `visits.legal_hold` + `transcripts.deleted_at` + صمام `medify.retention='purge'` في triggers الإلحاقية · كنس موحّد soft→hard بسماح 7 أيام مع Audit (نوع+عدد بلا محتوى) · المُبطلة على الأقصر · نقاط GET/PATCH `/settings/retention` + `/admin/retention-status` + `POST /visits/{id}/legal-hold` · cron ليلي في العامل + توافق خلفي للسكربت · `docs/retention-policy.md` · 4 اختبارات جديدة + تحديث القديم (172 passed) |
 | 9 | أرشفة FLAC | ⬜ لم تبدأ | ffmpeg + تحقق hash إلزامي قبل حذف WAV |
 | 10 | إظهار السند | ⬜ لم تبدأ | تغيير عقد P2-verify ليُنتج evidence بدل الحذف الصامت + مشغّل صوت |
 | 11 | إبراز الثقة المنخفضة | ⬜ لم تبدأ | التقاط avg_logprob/no_speech_prob (whisper) + عتبات قابلة للضبط |
@@ -36,6 +36,7 @@
 | 0013_processing_attempts | 3 | جدول `processing_attempts` (stage/attempt_no/error_class/error_detail بلا PHI/أزمنة) + RLS قياسي | drop table + الفهارس |
 | 0014_note_versions | 6 | `note_versions` + trigger تجميد المنقولة + عمود cycle (visits/note_approvals/approvals) + approvals فريد (visit,cycle) + upload_jobs→approval_id + إعادة تعريف ثلاث دوال 0010 بوعي الدورة | يعيد دوال 0010 ويسقط note_versions؛ أعمدة cycle تبقى (بيانات) |
 | 0015_idempotency_receipts | 7 | `upload_jobs.idempotency_key` فريد + backfill + جدول `delivery_receipts` بقيد (مفتاح، وجهة) | يسقط الجدول والعمود والقيد |
+| 0016_retention_unified | 8 | `retention_policies` + `visits.legal_hold` + `transcripts.deleted_at` + صمام retention في `forbid_mutation` (audit_logs حصراً) و`forbid_uploaded_version_mutation` | يعيد الدوال الصارمة ويسقط الجدول والأعمدة |
 
 ## أكواد MDF الجديدة
 
@@ -65,6 +66,9 @@
 - (م6) diff النسخ يُخزَّن كاملاً مشفّراً في note_versions.diff_json وAudit يحمل الأعداد فقط (visit.version_diff) — لا PHI في سجل التدقيق. عرض diff داخل الواجهة مؤجل (البيانات جاهزة).
 - (م6) HL7: محوّل MDM مصغّر (MSH/EVN/PID/TXA/OBX) + MLLP client كمحرك INTEGRATION_ENGINE=hl7 — mllp://host:port في integration_configs. أول نقل T02 والاستبدال T09 بمرجع TXA-13 للوثيقة السابقة حصراً. اختُبر ضد خادم MLLP خيطي حقيقي.
 - (م6) بذر الزيارات المنقولة لا ينشئ note_versions (لقطات النسخ تُبنى بالتدفق الحقيقي) — reopen على زيارة seed القديمة يرفض بوضوح حتى تمر بالدورة الفعلية.
+- (م8) السياسات لكل منشأة (لا منصّية) — الأدمن يعدّل سياسات منشأته فقط، والافتراضات مضمّنة بالكود. retention_until المختوم على التسجيل هو الحاكم (السياسة تحكم الختم للجديد)؛ تغيير السياسة يسري على التسجيلات الجديدة — كما كان سلوك المنصة.
+- (م8) خريطة الأنواع: intermediate_drafts = edit_events (كتابة/إملاء) + processing_attempts · ai_chat_logs = edit_events (قناة ai_chat) · transcript_raw يشمل diarization داخل صف transcripts نفسه. صفوف recordings لا تُحذف أبداً (الملف يُتلف والصف أثر) — REVOKE قائم.
+- (م8) صمام medify.retention='purge' يسمح بالحذف الاحتفاظي فقط: على audit_logs في forbid_mutation المشترك (DELETE حصراً وعلى هذا الجدول حصراً) وعلى note_versions — دور التطبيق محجوب أصلاً بـ REVOKE فلا تغيير بوجهه. سقالة الاختبار للتقادم المفتعل: تعطيل مؤقت للـtrigger بدور المالك.
 
 ## BLOCKED
 

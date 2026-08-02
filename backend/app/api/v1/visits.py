@@ -40,6 +40,7 @@ from ...services.processing import (
     process_visit_pipeline,
     queue_mode_enabled,
 )
+from ...services.retention import resolve_retention_days
 from ...services.versions import start_reopen_draft
 from ...services.visits import get_visit_for_doctor, transition
 
@@ -293,12 +294,17 @@ def recording_start(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB):
     storage_dir.mkdir(parents=True, exist_ok=True)
     existing = db.execute(select(Recording).where(Recording.visit_id == visit.id)).scalar_one_or_none()
     if existing is None:
+        # م8: الختم من سياسة الاحتفاظ الموحّدة (audio=90 افتراضاً، تجاوز لكل منشأة؛
+        # NULL = «بلا حذف» فيُختم أفقاً بعيداً عملياً)
+        audio_days = resolve_retention_days(db, ctx.facility_id, "audio")
+        if audio_days is None:
+            audio_days = 36500
         db.add(Recording(
             visit_id=visit.id,
             facility_id=ctx.facility_id,
             storage_uri=str(storage_dir / f"{visit.id}.wav"),  # PCM16 من المتصفح يُحفظ WAV
             duration_sec=0,
-            retention_until=dt.datetime.now(dt.timezone.utc) + dt.timedelta(days=settings.recording_retention_days),
+            retention_until=dt.datetime.now(dt.timezone.utc) + dt.timedelta(days=audio_days),
         ))
     return ok({"state": "recording"})
 

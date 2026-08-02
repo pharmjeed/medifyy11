@@ -18,6 +18,7 @@ from .clinical import (
     PatientContextSnapshot,
     ProcessingAttempt,
     Recording,
+    RetentionPolicy,
     Summary,
     SummarySection,
     Template,

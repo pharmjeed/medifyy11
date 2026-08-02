@@ -42,6 +42,18 @@ async def process_visit(ctx: dict, visit_id: str) -> None:
     await asyncio.to_thread(_process_sync, visit_id)
 
 
+def _retention_sync() -> None:
+    from .services.retention import sweep_retention
+
+    with system_session() as db:
+        sweep_retention(db)
+
+
+async def retention_nightly(ctx: dict) -> None:
+    """المهمة الليلية (م8): soft-delete ثم hard-delete بعد سماح 7 أيام — Audit لكل حذف."""
+    await asyncio.to_thread(_retention_sync)
+
+
 def _redis_settings():
     from arq.connections import RedisSettings
 
@@ -51,8 +63,16 @@ def _redis_settings():
     return RedisSettings.from_dsn(url)
 
 
+def _cron_jobs():
+    from arq import cron
+
+    # 02:30 UTC ليلاً — الكنس الاحتفاظي الموحّد (م8)
+    return [cron(retention_nightly, hour=2, minute=30)]
+
+
 class WorkerSettings:
     functions = [process_visit]
+    cron_jobs = _cron_jobs()
     redis_settings = _redis_settings()  # يُقيَّم عند استيراد وحدة العامل (بيئة العامل فقط)
     job_timeout = 1800  # استشارة طويلة + إعادات 30/120/300 — سقف نصف ساعة
     max_tries = 1  # الإعادات داخل process_visit_pipeline لا عبر arq (سجل موحّد)

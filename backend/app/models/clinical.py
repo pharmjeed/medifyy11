@@ -98,6 +98,8 @@ class Visit(Base, TimestampMixin):
     state: Mapped[str] = mapped_column(VISIT_STATE, nullable=False, default="draft")
     # دورة النسخ (م6): يرتفع مع كل reopen — بوابتا كل نسخة مستقلتان (triggers 0014)
     cycle: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    # م8: تجميد كل حذف احتفاظي لأثار الزيارة (تحقيق/نزاع) — لا يُحذف منها شيء وهو مرفوع
+    legal_hold: Mapped[bool] = mapped_column(default=False, nullable=False, server_default="false")
     context_snapshot_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("patient_context_snapshots.id"), nullable=True
     )
@@ -180,6 +182,8 @@ class Transcript(Base, TimestampMixin):
     facility_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("facilities.id"), nullable=False, index=True)
     content_json: Mapped[Any] = mapped_column(EncryptedJSON, nullable=False)  # segments بطوابع زمنية
     language_stats: Mapped[Any | None] = mapped_column(JSONB, nullable=True)
+    # م8: مرحلة soft قبل الحذف الصلب (سماح 7 أيام) — transcript_raw=90 يوماً افتراضاً
+    deleted_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class Summary(Base, TimestampMixin):
@@ -388,6 +392,23 @@ class UploadAttempt(Base, TimestampMixin):
     started_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     result: Mapped[str | None] = mapped_column(Text, nullable=True)  # confirmed | failed
     error_code: Mapped[str | None] = mapped_column(Text, nullable=True)  # رموز DOC-13
+
+
+class RetentionPolicy(Base, TimestampMixin):
+    """تجاوز احتفاظ لكل منشأة (م8) — الافتراضات مضمّنة في services/retention.DEFAULTS.
+
+    retention_days = NULL يعني «بلا حذف» لهذا النوع. legal_hold على الزيارة يتقدم
+    على كل سياسة. الأدمن يعدّل سياسات منشأته من /settings/retention.
+    """
+
+    __tablename__ = "retention_policies"
+    __table_args__ = (UniqueConstraint("facility_id", "artifact_type", name="uq_retention_facility_artifact"),)
+
+    id: Mapped[uuid.UUID] = pk()
+    facility_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("facilities.id"), nullable=False, index=True)
+    artifact_type: Mapped[str] = mapped_column(Text, nullable=False)
+    retention_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    updated_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"), nullable=True)
 
 
 class DeliveryReceipt(Base, TimestampMixin):
