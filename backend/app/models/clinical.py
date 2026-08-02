@@ -24,7 +24,7 @@ from .base import Base, TimestampMixin, pk
 TEMPLATE_ORIGIN = Enum("system", "reverse_built", name="template_origin")
 VISIT_STATE = Enum(
     "draft", "recording", "transcribed", "summarized", "in_review",
-    "approved", "uploaded", "upload_failed", "cancelled",
+    "approved", "uploaded", "upload_failed", "cancelled", "voided",
     name="visit_state",
 )
 # توجيه المالك 2026-07-22: كل بند خطة كيان مهيكل بكوده — أُضيف نوعا الخدمة والجهاز
@@ -271,3 +271,32 @@ class UploadAttempt(Base, TimestampMixin):
     started_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     result: Mapped[str | None] = mapped_column(Text, nullable=True)  # confirmed | failed
     error_code: Mapped[str | None] = mapped_column(Text, nullable=True)  # رموز DOC-13
+
+
+class Addendum(Base, TimestampMixin):
+    """ملحق على مذكرة معتمدة نهائياً (قرار مالك 2026-08-03 — CBAHI).
+
+    الملحق مرتبط بزيارة معتمدة، يحصل على طابعه الزمني ونصه الخاص، ويمر بوابة ① مصغّرة (review)
+    ويحتمل بوابة ② مصغّرة إن غيّر الأكواد. الأصل يبقى كما هو حرفياً. عند التصدير: الأصل + الملاحق
+    بالترتيب الزمني، كلٌّ موسوم. FHIR: Composition.status = "amended" مع relatesTo.
+    """
+
+    __tablename__ = "addendums"
+
+    id: Mapped[uuid.UUID] = pk()
+    visit_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("visits.id"), nullable=False, index=True)
+    facility_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("facilities.id"), nullable=False, index=True)
+    created_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    # محتوى الملحق — بنية أقسام مثل الملخص الأصلي: {sections: [{section_key, content}]}
+    content_json: Mapped[Any] = mapped_column(EncryptedJSON, nullable=False)
+    # موافقة النص (بوابة ① مصغّرة)
+    note_approval_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("note_approvals.id"), nullable=True
+    )
+    # موافقة الأكواد (بوابة ② مصغّرة) — اختياري إن لم يكن في الملحق أكواد جديدة
+    approval_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("approvals.id"), nullable=True
+    )
+    # هل الملحق يتطلب موافقة؟ (pending) → approved بعد موافقة النص
+    is_approved: Mapped[bool] = mapped_column(default=False, nullable=False)

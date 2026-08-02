@@ -1,8 +1,10 @@
 """نماذج DOC-04 v1.1 (24 جدولاً) + طبقة المنصة (قرار مالك 2026-07-15: platform_admins, plans)
 + السجل المرجعي للأكواد registry_codes (قرار مالك 2026-08-02)
-+ نظام البرومبتات (قرار مالك 2026-08-02: platform_default_prompts, doctor_templates)."""
++ نظام البرومبتات (قرار مالك 2026-08-02: platform_default_prompts, doctor_templates)
++ مسار الملاحق Addendum (قرار مالك 2026-08-03 — CBAHI)."""
 from .base import Base
 from .clinical import (
+    Addendum,
     Approval,
     EditEvent,
     GuidanceItem,
@@ -41,7 +43,7 @@ __all__ = [
     "PasswordResetToken", "IntegrationConfig", "CodingSystemConfig", "DoctorTemplate",
     "Patient", "PatientContextSnapshot", "Template", "Visit", "VisitConsent", "Recording",
     "Transcript", "Summary", "SummarySection", "GuidanceItem", "EditEvent",
-    "NoteApproval", "Approval", "UploadJob", "UploadAttempt",
+    "NoteApproval", "Approval", "UploadJob", "UploadAttempt", "Addendum",
     "AuditLog", "Notification",
     "PlatformAdmin", "Plan", "PlatformAuditLog", "PlatformDefaultPrompt", "PlatformSetting",
     "RegistryCode",

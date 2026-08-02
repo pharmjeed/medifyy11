@@ -80,6 +80,7 @@ def health():
 
 
 from .api.v1 import (  # noqa: E402
+    addendums,
     admin_settings,
     approvals,
     auth,
@@ -102,6 +103,7 @@ app.include_router(clinics_doctors.router, prefix=API, tags=["clinics-doctors"])
 app.include_router(admin_settings.router, prefix=API, tags=["admin"])
 app.include_router(templates.router, prefix=API, tags=["templates"])
 app.include_router(visits.router, prefix=API, tags=["visits"])
+app.include_router(addendums.router, prefix=API, tags=["addendums"])
 app.include_router(summary.router, prefix=API, tags=["summary"])
 app.include_router(codes.router, prefix=API, tags=["codes"])
 app.include_router(approvals.router, prefix=API, tags=["approvals"])
