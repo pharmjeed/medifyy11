@@ -3,11 +3,16 @@
 لا تفريغ أثناء التسجيل: المتصفح يبث أجزاء PCM16 (250ms) والخادم يُلحقها بملف WAV
 الزيارة أولاً بأول مع بروتوكول الاستئناف (resume_from — NFR-09). التفريغ الكامل
 وإسناد المتحدث يجريان بعد إنهاء التسجيل على المحادثة كاملة (P1 في recording/stop).
+
+المرحلة 2 من التحصين: الترقيم عالمي معمَّر عبر الاتصالات — سجل audio_chunks هو
+مصدر الحقيقة: كل مقطع مكتوب له صف (index/offset/length/sha256) يُثبَّت قبل ack،
+والمقطع المكرر يُعاد إقراره بلا كتابة (idempotent — لا تكرار صوت عند ضياع ack).
 """
 from __future__ import annotations
 
 import base64
 import datetime as dt
+import hashlib
 import logging
 import uuid
 from pathlib import Path
@@ -17,9 +22,10 @@ from sqlalchemy import select
 
 from ...config import get_settings
 from ...db import rls_session
-from ...models import Recording, Visit
+from ...models import AudioChunk, Recording, Visit
 from ...pipelines.stt import pcm_to_wav
 from ...security import decode_token
+from ...services.audio_integrity import reconcile_ledger
 
 router = APIRouter()
 logger = logging.getLogger("medify.ws")
@@ -49,6 +55,8 @@ class _AudioSink:
                 self._path.write_bytes(pcm_to_wav(b"", self._sample_rate))  # ترويسة بأطوال صفرية تُصحَّح لاحقاً
             self._handle = self._path.open("ab")
         self._handle.write(pcm)
+        # ack يعني «كُتب فعلاً»: تفريغ عازل بايثون قبل تثبيت صف السجل — انهيار بعده يشفيه reconcile
+        self._handle.flush()
 
     def close(self) -> float:
         """يُغلق الملف ويعيد المدة الكلية بالثواني — شاملةً ما كتبته اتصالات سابقة لنفس الزيارة."""
@@ -99,11 +107,14 @@ async def transcribe_ws(websocket: WebSocket, visit_id: uuid.UUID, token: str = 
             return
         recording_row = db.execute(select(Recording).where(Recording.visit_id == visit_id)).scalar_one_or_none()
         recording_uri = recording_row.storage_uri if recording_row is not None else None
+        # موضع الاستئناف من السجل المعمَّر لا من ذاكرة الاتصال — مع شفاء الملف/السجل (المرحلة 2)
+        last_seq, total_bytes = (
+            reconcile_ledger(db, visit_id, recording_uri) if recording_uri is not None else (-1, 0)
+        )
 
     await websocket.accept()
     settings = get_settings()
-    last_seq = -1
-    paused = False
+    facility_uuid = uuid.UUID(facility_id)
     connected_at = dt.datetime.now(dt.timezone.utc)
     sink = _AudioSink(recording_uri, settings.audio_sample_rate) if recording_uri is not None else None
 
@@ -115,35 +126,54 @@ async def transcribe_ws(websocket: WebSocket, visit_id: uuid.UUID, token: str = 
             if msg_type == "audio_chunk":
                 seq = int(message.get("seq", 0))
                 if seq <= last_seq:
-                    continue  # جزء مكرر بعد إعادة اتصال
+                    # مكرر (ack سابق ضاع في الطريق): الصف مثبَّت — re-ack بلا كتابة (idempotent)
+                    await websocket.send_json({"type": "ack", "seq": seq})
+                    continue
                 if seq > last_seq + 1:
-                    # فجوة — اطلب الإعادة من آخر جزء مؤكد (NFR-09)
+                    # فجوة — اطلب الإعادة من آخر جزء مثبَّت (NFR-09)
                     await websocket.send_json({"type": "resume_from", "seq": last_seq + 1})
                     continue
-                last_seq = seq
-                if paused:
+                pcm = base64.b64decode(message.get("payload", ""))
+                digest = hashlib.sha256(pcm).hexdigest()
+                client_hash = message.get("sha256")
+                if client_hash and client_hash != digest:
+                    # تلف في الطريق — لا كتابة؛ العميل يعيد الإرسال من مخزنه الدائم
+                    await websocket.send_json({"type": "chunk_error", "seq": seq,
+                                               "reason": "checksum_mismatch"})
                     continue
-                if sink is not None:
-                    try:
-                        sink.write(base64.b64decode(message.get("payload", "")))
-                    except Exception as exc:
-                        logger.warning("audio write failed for visit %s: %s", visit_id, exc)
-                # إقرار دوري خفيف — يبقي القناة حيّة ويؤكد للعميل وصول الصوت
+                if sink is None:
+                    continue  # زيارة بلا صف تسجيل — لا وجهة كتابة
+                try:
+                    sink.write(pcm)
+                except Exception as exc:
+                    logger.warning("audio write failed for visit %s: %s", visit_id, exc)
+                    continue  # بلا ack — العميل يعيد لاحقاً
+                # الترتيب الحاكم: بايتات على القرص ← صف سجل مثبَّت ← ack (ضياع أي حلقة يشفيه reconcile)
+                with rls_session(facility_id, doctor_id, "doctor") as db:
+                    db.add(AudioChunk(
+                        visit_id=visit_id,
+                        facility_id=facility_uuid,
+                        chunk_index=seq,
+                        byte_offset=total_bytes,
+                        byte_length=len(pcm),
+                        sha256=digest,
+                        received_at=dt.datetime.now(dt.timezone.utc),
+                    ))
+                total_bytes += len(pcm)
+                last_seq = seq
                 await websocket.send_json({"type": "ack", "seq": seq})
 
             elif msg_type == "pause":
-                paused = True
+                # العميل هو سلطة الإيقاف (لا يلتقط ولا يرسل أثناءه) — الخادم صدى حالة فقط
                 await websocket.send_json({"type": "status", "state": "paused"})
             elif msg_type == "resume":
-                paused = False
                 await websocket.send_json({"type": "status", "state": "recording"})
             elif msg_type == "resume_query":
-                # Client reconnected — tell them where to resume from
-                # last_seq is -1 at start, so last_seq + 1 = 0 (first chunk)
+                # موضع الاستئناف من السجل المعمَّر — قتل التبويبة لا يعيد العدّاد للصفر
                 await websocket.send_json({
                     "type": "resume_from",
                     "seq": last_seq + 1,
-                    "buffered_at": connected_at.isoformat(),  # Client can use this for optimizations
+                    "buffered_at": connected_at.isoformat(),
                 })
                 logger.info("Resume query for visit %s — resuming from seq %d", visit_id, last_seq + 1)
             elif msg_type == "end":

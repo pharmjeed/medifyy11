@@ -12,11 +12,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, api, getSessionUser, wsUrl } from "@/lib/api";
 import { startMicCapture } from "@/lib/audio";
 import type { MicCapture } from "@/lib/audio";
-import { cleanupOldChunks, deleteVisitChunks, getPendingChunks, markSynced, storeChunk } from "@/lib/audio_storage";
+import { cleanupOldChunks, deleteVisitChunks, getMaxStoredSeq, getPendingChunks, markSynced, storeChunk } from "@/lib/audio_storage";
 import type { ConnectionState } from "@/lib/use_audio_ws";
 import { UploadStatus } from "./components/UploadStatus";
 import { useLang } from "@/lib/i18n";
-import type { ConsentState, CreatedPatient, CreatedVisit, Patient, PatientContext, Template } from "@/lib/types";
+import type { ConsentState, CreatedPatient, CreatedVisit, Patient, PatientContext, Template, VisitRow } from "@/lib/types";
 import { ProgressBar7 } from "@/components/ProgressBar7";
 import { Shell } from "@/components/Shell";
 import { Field, Modal, SpecBadge, SpecBar, useErrorScreen, useToast } from "@/components/ui";
@@ -24,6 +24,36 @@ import { Field, Modal, SpecBadge, SpecBar, useErrorScreen, useToast } from "@/co
 type Phase = "patient" | "template" | "consent" | "recording" | "generating" | "blocked";
 
 const EMPTY_PATIENT_FORM = { hospital_mrn: "", display_name: "", dob: "", gender: "" };
+
+/** مفتاح التسجيل النشط — ينجو من قتل التبويبة ليعرض «استئناف تسجيل منقطع» (المرحلة 2) */
+const ACTIVE_RECORDING_KEY = "medify_active_recording";
+
+interface ActiveRecordingMarker {
+  visitId: string;
+  startedAt: number;
+  seconds: number;
+  patientName: string;
+}
+
+function readActiveMarker(): ActiveRecordingMarker | null {
+  try {
+    const raw = localStorage.getItem(ACTIVE_RECORDING_KEY);
+    if (raw === null) return null;
+    const parsed = JSON.parse(raw) as ActiveRecordingMarker;
+    return typeof parsed.visitId === "string" && parsed.visitId !== "" ? parsed : null;
+  } catch { return null; }
+}
+
+/** بصمة sha256 لبايتات PCM (المخزنة base64) — يتحقق منها الخادم قبل كتابة المقطع */
+async function sha256OfBase64(payload: string): Promise<string | undefined> {
+  try {
+    const raw = atob(payload);
+    const bytes = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i += 1) bytes[i] = raw.charCodeAt(i);
+    const digest = await crypto.subtle.digest("SHA-256", bytes);
+    return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
+  } catch { return undefined; } // بيئة بلا WebCrypto — الخادم يحسبها بنفسه على أي حال
+}
 
 /** ينتظر إغلاق قناة التفريغ — الخادم يحفظ التفريغ قبل الإغلاق، فلا يبدأ التلخيص قبله */
 function waitForSocketClose(socket: WebSocket | null, timeoutMs = 25000): Promise<void> {
@@ -84,16 +114,20 @@ export default function NewVisitPage() {
 
   const ws = useRef<WebSocket | null>(null);
   const mic = useRef<MicCapture | null>(null); // الميكروفون الحي — PCM16 يُرسل كما هو للتفريغ
-  const seq = useRef(0);                       // الترقيم السلكي للاتصال الحالي — يُعاد بناؤه عند resume_from
-  const localSeq = useRef(0);                  // معرف محلي ثابت عبر الاتصالات — مفتاح المخزن الدائم IndexedDB
-  const pending = useRef<{ seq: number; payload: string }[]>([]); // قائمة الإرسال (seq = المعرف المحلي)
-  const wireToLocal = useRef(new Map<number, number>()); // ترقيم سلكي ← معرف محلي، لمطابقة إقرارات ack
+  // ترقيم واحد موحّد (المرحلة 2): seq المخزن الدائم هو نفسه chunk_index على الخادم —
+  // معمَّر عبر الاتصالات وقتل التبويبة، فلا ازدواج ترقيم ولا خريطة سلكي/محلي
+  const localSeq = useRef(0);
+  const pending = useRef<{ seq: number; payload: string; sha256?: string }[]>([]);
+  const sendChain = useRef<Promise<void>>(Promise.resolve()); // يسلسل الحفظ+البصمة حفاظاً على ترتيب seq
   const replaying = useRef(false);             // أثناء إعادة الإرسال بعد resume_from — الدفع الجديد مؤجل
   const unsynced = useRef(0);                  // أجزاء لم يقرّ الخادم كتابتها بعد
   const acked = useRef(0);
+  const reconnectAttempts = useRef(0);         // تراجع أُسّي لإعادة الاتصال (سقف 30 ثانية)
   const timers = useRef<ReturnType<typeof setInterval>[]>([]);
   const pausedRef = useRef(false);
+  const secondsRef = useRef(0);
   const stopped = useRef(false);
+  const [resumeCandidate, setResumeCandidate] = useState<ActiveRecordingMarker | null>(null);
 
   const suspended = getSessionUser()?.facility_status === "suspended";
 
@@ -129,15 +163,13 @@ export default function NewVisitPage() {
     ws.current?.close();
   }, [clearTimers]);
 
-  // يدفع قائمة الإرسال عبر القناة — الترقيم السلكي يُبنى هنا حصراً (يعمل على refs فقط)
+  // يدفع قائمة الإرسال عبر القناة — seq المخزَّن يُرسل كما هو (ترقيم موحّد معمَّر)
   const flushPending = useCallback(() => {
     const socket = ws.current;
     if (replaying.current || socket === null || socket.readyState !== WebSocket.OPEN) return;
     let chunk = pending.current.shift();
     while (chunk !== undefined) {
-      socket.send(JSON.stringify({ type: "audio_chunk", seq: seq.current, payload: chunk.payload }));
-      wireToLocal.current.set(seq.current, chunk.seq);
-      seq.current += 1;
+      socket.send(JSON.stringify({ type: "audio_chunk", seq: chunk.seq, payload: chunk.payload, sha256: chunk.sha256 }));
       chunk = pending.current.shift();
     }
   }, []);
@@ -149,44 +181,46 @@ export default function NewVisitPage() {
     socket.onopen = () => {
       setOnline(true);
       setConnState("resuming");
-      // لا نُرسل المخزَّن قبل أن يقول الخادم من أين يُكمل: الاتصال الجديد يبدأ عدّاداً جديداً،
-      // فإرسال الأرقام القديمة يُسقط ما حُفظ محلياً أثناء الانقطاع (NFR-09 · DOC-05 §٥).
+      // لا نُرسل المخزَّن قبل أن يقول الخادم من أين يُكمل — موضع الاستئناف من سجل
+      // audio_chunks المعمَّر (NFR-09 · المرحلة 2)، لا عدّاد جديد لكل اتصال.
       socket.send(JSON.stringify({ type: "resume_query" }));
     };
     socket.onmessage = (event) => {
       const message = JSON.parse(String(event.data)) as {
-        type: string; seq?: number; code?: string; state?: string;
+        type: string; seq?: number; code?: string; state?: string; reason?: string;
       };
       if (message.type === "ack" && message.seq !== undefined) {
-        // الخادم كتب الجزء فعلاً — يُعلَّم متزامناً في المخزن الدائم (يُحذف عند اكتمال الزيارة)
-        const localId = wireToLocal.current.get(message.seq);
-        if (localId !== undefined) {
-          wireToLocal.current.delete(message.seq);
-          unsynced.current = Math.max(0, unsynced.current - 1);
-          acked.current += 1;
-          void markSynced(visitId, [localId]).catch(() => undefined);
-        }
+        // الخادم ثبّت المقطع (ملف + صف سجل) — العدّاد الصادق من المخزن الدائم نفسه
+        acked.current += 1;
+        void markSynced(visitId, [message.seq])
+          .then((remaining) => {
+            unsynced.current = remaining;
+            setOfflineChunks(remaining);
+            setAckedChunks(acked.current);
+          })
+          .catch(() => undefined);
         setConnState("connected");
       } else if (message.type === "resume_from" && message.seq !== undefined) {
-        // إعادة الإرسال من المخزن الدائم — يشمل ما فات إرساله وما أُرسل بلا إقرار قبل الانقطاع
+        // إعادة الإرسال من المخزن الدائم بترقيمه الأصلي — الخادم يعيد إقرار المكرر بلا كتابة
         replaying.current = true;
-        const startSeq = message.seq;
+        const serverNext = message.seq;
         void (async () => {
-          let next = startSeq;
           try {
             const stored = await getPendingChunks(visitId);
             pending.current = []; // المخزن الدائم يشمل ما في الذاكرة — قائمة إرسال واحدة
-            wireToLocal.current.clear();
             for (const chunk of stored) {
-              socket.send(JSON.stringify({ type: "audio_chunk", seq: next, payload: chunk.payload }));
-              wireToLocal.current.set(next, chunk.seq);
-              next += 1;
+              socket.send(JSON.stringify({ type: "audio_chunk", seq: chunk.seq, payload: chunk.payload, sha256: chunk.sha256 }));
             }
+            const maxStored = stored.reduce((max, chunk) => Math.max(max, chunk.seq), -1);
+            localSeq.current = Math.max(localSeq.current, serverNext, maxStored + 1);
           } catch { /* تعذرت القراءة — ما في الذاكرة يُرسل من الدورة التالية */ }
-          seq.current = next;
           replaying.current = false;
+          reconnectAttempts.current = 0; // اتصال أثبت نفسه — يصفّر التراجع الأُسّي
           setConnState("connected");
         })();
+      } else if (message.type === "chunk_error" && message.seq !== undefined) {
+        // بصمة غير مطابقة (تلف في الطريق): المقطع باقٍ غير متزامن في المخزن — أعد المزامنة
+        socket.send(JSON.stringify({ type: "resume_query" }));
       }
       // status: قناة الصوت حيّة — لا تفريغ يُبث أثناء التسجيل (قرار مالك 2026-08-02)
     };
@@ -194,9 +228,12 @@ export default function NewVisitPage() {
       if (stopped.current) return;
       setOnline(false); // W-223 — انقطاع الشبكة أثناء التسجيل
       setConnState("disconnected");
+      // تراجع أُسّي بسقف 30 ثانية + عشوائية خفيفة — لا قصف للخادم عند عطل ممتد
+      const delay = Math.min(1000 * 1.5 ** reconnectAttempts.current, 30_000) + Math.random() * 300;
+      reconnectAttempts.current += 1;
       setTimeout(() => {
         if (!stopped.current && phaseRef.current === "recording") connectWs(visitId);
-      }, 2500);
+      }, delay);
     };
     socket.onerror = () => { /* onclose يتكفل */ };
   }, []);
@@ -206,6 +243,57 @@ export default function NewVisitPage() {
 
   // تنظيف أجزاء صوت قديمة (أقدم من ٢٤ ساعة) من زيارات سابقة لم تكتمل
   useEffect(() => { void cleanupOldChunks().catch(() => undefined); }, []);
+
+  // استئناف تسجيل منقطع (قتل تبويبة/انهيار متصفح): العلامة المحلية + تأكيد أن الزيارة
+  // ما تزال recording على الخادم — الصوت السابق محفوظ هناك والاستئناف يُكمل بعده (المرحلة 2)
+  useEffect(() => {
+    const marker = readActiveMarker();
+    if (marker === null) return;
+    void (async () => {
+      try {
+        const body = await api<VisitRow[]>("/visits?state=recording&per_page=50");
+        const row = body.data.find((candidate) => candidate.id === marker.visitId);
+        if (row !== undefined) {
+          setResumeCandidate({ ...marker, patientName: row.patient_name || marker.patientName });
+        } else {
+          localStorage.removeItem(ACTIVE_RECORDING_KEY); // انتهت خارج هذه التبويبة — علامة بائتة
+        }
+      } catch { /* الشبكة غير متاحة الآن — تبقى العلامة للمحاولة القادمة */ }
+    })();
+  }, []);
+
+  const dismissResume = () => {
+    localStorage.removeItem(ACTIVE_RECORDING_KEY);
+    setResumeCandidate(null);
+  };
+
+  const resumeRecording = async () => {
+    if (resumeCandidate === null) return;
+    let capture: MicCapture;
+    try {
+      capture = await startMicCapture();
+    } catch {
+      toast(L("تعذّر تشغيل الميكروفون — اسمح بالوصول ثم أعد المحاولة",
+              "Microphone unavailable — allow access, then try again"));
+      return;
+    }
+    mic.current = capture;
+    // زيارة مركّبة من علامة الاستئناف — recording لا يحتاج غير المعرّف واسم المريض للعرض
+    setVisit({
+      id: resumeCandidate.visitId,
+      state: "recording",
+      patient: { id: "", display_name: resumeCandidate.patientName, hospital_mrn: "" },
+      template: { id: "", name: "" },
+      context_snapshot: {},
+    });
+    setContext(null);
+    const maxStored = await getMaxStoredSeq(resumeCandidate.visitId).catch(() => -1);
+    localSeq.current = maxStored + 1; // resume_from من الخادم قد يرفعه أكثر
+    secondsRef.current = resumeCandidate.seconds;
+    setSeconds(resumeCandidate.seconds);
+    setResumeCandidate(null);
+    beginRecordingMechanics(resumeCandidate.visitId, resumeCandidate.patientName);
+  };
 
   // إضافة مريض من داخل الزيارة — MRN مكرر يعيد الملف القائم بدل ازدواج
   const submitNewPatient = async () => {
@@ -264,13 +352,34 @@ export default function NewVisitPage() {
   };
 
   // آليات التسجيل الحي — لا تُستدعى إلا بعد توثيق الموافقة (MDF-4230 خلاف ذلك)
-  const beginRecordingMechanics = (visitId: string) => {
+  const beginRecordingMechanics = (visitId: string, patientName?: string) => {
     setPhase("recording");
     stopped.current = false;
+    // علامة التسجيل النشط — تنجو من قتل التبويبة لعرض «استئناف» (تُمسح عند الإنهاء/الإلغاء)
+    try {
+      localStorage.setItem(ACTIVE_RECORDING_KEY, JSON.stringify({
+        visitId,
+        startedAt: Date.now(),
+        seconds: secondsRef.current,
+        patientName: patientName ?? selectedPatient?.display_name ?? "",
+      } satisfies ActiveRecordingMarker));
+    } catch { /* تخزين محلي معطّل — الاستئناف بعد قتل التبويبة غير متاح فقط */ }
     connectWs(visitId);
     // ساعة التسجيل + مرسل الأجزاء (250ms لكل جزء — بروتوكول DOC-05 §٥)
     timers.current.push(setInterval(() => {
-      if (!pausedRef.current) setSeconds((value) => value + 1);
+      if (pausedRef.current) return;
+      secondsRef.current += 1;
+      setSeconds(secondsRef.current);
+      if (secondsRef.current % 5 === 0) {
+        // تحديث دوري لعداد الثواني في العلامة — استئناف ما بعد الانهيار يعرض مدة صادقة
+        try {
+          const marker = readActiveMarker();
+          if (marker !== null && marker.visitId === visitId) {
+            localStorage.setItem(ACTIVE_RECORDING_KEY,
+              JSON.stringify({ ...marker, seconds: secondsRef.current }));
+          }
+        } catch { /* غير حرج */ }
+      }
     }, 1000));
     timers.current.push(setInterval(() => {
       if (pausedRef.current || stopped.current) return;
@@ -288,13 +397,19 @@ export default function NewVisitPage() {
       if (payload === "") return; // لا صوت متجمّع في هذه الدورة
       const localId = localSeq.current;
       localSeq.current += 1;
-      // الحفظ الدائم أولاً (IndexedDB) — الجزء ينجو من الانقطاع وتحديث الصفحة، ويُحذف بعد اكتمال الزيارة
-      void storeChunk({ visitId, seq: localId, payload, timestamp: Date.now(), synced: false }).catch(() => undefined);
-      unsynced.current += 1;
-      pending.current.push({ seq: localId, payload });
-      flushPending();
-      setOfflineChunks(unsynced.current);
-      setAckedChunks(acked.current);
+      // سلسلة تسلسلية: بصمة sha256 ثم الحفظ الدائم (IndexedDB) ثم الدفع — الترتيب محفوظ
+      // حتى مع تفاوت زمن حساب البصمات، والجزء ينجو من الانقطاع وتحديث الصفحة
+      sendChain.current = sendChain.current.then(async () => {
+        const digest = await sha256OfBase64(payload);
+        try {
+          await storeChunk({ visitId, seq: localId, payload, sha256: digest, timestamp: Date.now(), synced: false });
+        } catch { /* المخزن الدائم متعذر — الإرسال الحي يستمر */ }
+        unsynced.current += 1;
+        pending.current.push({ seq: localId, payload, sha256: digest });
+        flushPending();
+        setOfflineChunks(unsynced.current);
+        setAckedChunks(acked.current);
+      });
     }, 250));
   };
 
@@ -354,10 +469,17 @@ export default function NewVisitPage() {
     if (tail !== "") {
       const localId = localSeq.current;
       localSeq.current += 1;
-      void storeChunk({ visitId: visit.id, seq: localId, payload: tail, timestamp: Date.now(), synced: false }).catch(() => undefined);
-      unsynced.current += 1;
-      pending.current.push({ seq: localId, payload: tail });
+      sendChain.current = sendChain.current.then(async () => {
+        const digest = await sha256OfBase64(tail);
+        try {
+          await storeChunk({ visitId: visit.id, seq: localId, payload: tail, sha256: digest, timestamp: Date.now(), synced: false });
+        } catch { /* المخزن الدائم متعذر */ }
+        unsynced.current += 1;
+        pending.current.push({ seq: localId, payload: tail, sha256: digest });
+      });
     }
+    // تفريغ سلسلة الإرسال كاملة (بصمات + حفظ دائم) قبل الذيل والإنهاء — الترتيب حاكم
+    await sendChain.current.catch(() => undefined);
     if (socket !== null && socket.readyState === WebSocket.OPEN) {
       try {
         flushPending();
@@ -379,14 +501,23 @@ export default function NewVisitPage() {
       clearTimeout(flipToSummary);
       clearTimeout(flipToGuidance);
       setGenStep(3);
+      try { localStorage.removeItem(ACTIVE_RECORDING_KEY); } catch { /* غير حرج */ }
       // اكتمل الرفع بلا بقايا؟ يُنظَّف المخزن الدائم — وإلا يبقى للتعافي وتزيله مهلة 24 ساعة
       if (unsynced.current === 0) void deleteVisitChunks(visit.id).catch(() => undefined);
       setTimeout(() => router.push(`/doctor/visits/${visit.id}/review`), 700);
     } catch (err) {
       clearTimeout(flipToSummary);
       clearTimeout(flipToGuidance);
-      showError(err);
-      setPhase("recording");
+      // MDF-4234: مقاطع ناقصة/غير مطابقة على الخادم — عودة للتسجيل بقناة حيّة تعيد المزامنة
+      if (err instanceof ApiError && err.code === "MDF-4234") {
+        toast(L("الملف الصوتي لم يكتمل على الخادم — أُعيد فتح القناة للمزامنة، أنهِ مجدداً بعد اكتمالها",
+                "Audio not fully synced on the server — channel reopened to resync; finish again once synced"));
+      } else {
+        showError(err);
+      }
+      stopped.current = false;
+      mic.current = await startMicCapture().catch(() => null);
+      beginRecordingMechanics(visit.id, visit.patient.display_name);
     }
   };
 
@@ -400,6 +531,7 @@ export default function NewVisitPage() {
     try {
       await api(`/visits/${visit.id}/cancel`, { method: "POST" });
       void deleteVisitChunks(visit.id).catch(() => undefined); // زيارة ملغاة — لا حاجة لصوتها المخزّن
+      try { localStorage.removeItem(ACTIVE_RECORDING_KEY); } catch { /* غير حرج */ }
       toast(L("أُلغيت الزيارة — حالة نهائية cancelled: لا اعتماد ولا رفع (FR-606)",
               "Visit cancelled — final state cancelled: no approval, no upload (FR-606)"));
       router.push("/doctor/visits");
@@ -435,6 +567,23 @@ export default function NewVisitPage() {
             </p>
             <p style={{ fontSize: 12.5, color: "#5c7096" }}>{L("التعليق الكامل يوم 30 · البيانات محفوظة 90 يوماً ثم تُصدَّر وتُحذف وفق PDPL.", "Full suspension on day 30 · data retained for 90 days, then exported and deleted per PDPL.")}</p>
             <Link href="/doctor" className="btn-secondary" style={{ textDecoration: "none", display: "inline-flex" }}>{L("العودة للرئيسة", "Back to home")}</Link>
+          </div>
+        ) : null}
+
+        {phase === "patient" && resumeCandidate !== null ? (
+          <div className="card" style={{ marginBottom: 14, borderInlineStart: "4px solid var(--m-info)",
+                                         display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+            <div style={{ flex: 1, minWidth: 240 }}>
+              <strong>{L("تسجيل منقطع لم يكتمل", "Interrupted recording found")}</strong>
+              <div className="page-desc" style={{ margin: 0 }}>
+                {L(`زيارة ${resumeCandidate.patientName || "مريض"} ما تزال قيد التسجيل — الصوت السابق محفوظ على الخادم ويمكن الاستئناف من حيث توقف.`,
+                   `A visit for ${resumeCandidate.patientName || "a patient"} is still recording — earlier audio is safe on the server; you can resume where it stopped.`)}
+              </div>
+            </div>
+            <button className="btn btn-primary" onClick={() => void resumeRecording()}>
+              {L("استئناف التسجيل", "Resume recording")}
+            </button>
+            <button className="btn" onClick={dismissResume}>{L("تجاهل", "Dismiss")}</button>
           </div>
         ) : null}
 

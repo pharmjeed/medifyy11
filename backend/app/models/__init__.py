@@ -7,6 +7,7 @@ from .base import Base
 from .clinical import (
     Addendum,
     Approval,
+    AudioChunk,
     EditEvent,
     GuidanceItem,
     NoteApproval,

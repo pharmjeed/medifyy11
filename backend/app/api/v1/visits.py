@@ -30,6 +30,7 @@ from ...models import (
     VisitConsent,
 )
 from ...pipelines.run import run_guidance, run_summary, run_transcription
+from ...services.audio_integrity import verify_finalized_audio
 from ...services.consent import consent_document
 from ...services.history import build_context
 from ...services.visits import get_visit_for_doctor, transition
@@ -323,6 +324,9 @@ def recording_stop(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB, body: Recording
     → P2 (+P2-verify) → summarized → P3 → in_review — متزامنة بلا طوابير مؤجلة."""
     body = body or RecordingStopIn()
     visit = get_visit_for_doctor(db, visit_id)
+    # finalize صارم (المرحلة 2): لا-فجوات + حجم + bit-exact مقابل سجل المقاطع —
+    # فشله = MDF-4234 والزيارة تبقى recording ليعيد العميل المزامنة ثم المحاولة
+    verify_finalized_audio(db, visit)
     transition(db, visit, "transcribed", ctx.user_id)
 
     recording = db.execute(select(Recording).where(Recording.visit_id == visit.id)).scalar_one_or_none()

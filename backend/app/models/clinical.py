@@ -6,6 +6,7 @@ import uuid
 from typing import Any
 
 from sqlalchemy import (
+    BigInteger,
     CheckConstraint,
     DateTime,
     Enum,
@@ -110,6 +111,27 @@ class Recording(Base, TimestampMixin):
     duration_sec: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     retention_until: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     deleted_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class AudioChunk(Base, TimestampMixin):
+    """سجل مقاطع الصوت المتدفقة (المرحلة 2 من التحصين) — ترقيم عالمي معمَّر عبر الاتصالات.
+
+    القيد الفريد (visit_id, chunk_index) يجعل إعادة رفع نفس المقطع idempotent:
+    الخادم يعيد ack بلا كتابة — لا تكرار في WAV عند ضياع الإقرار. sha256 والإزاحة/الطول
+    يتيحان تحقق finalize الصارم (لا-فجوات + bit-exact) قبل إطلاق P1.
+    """
+
+    __tablename__ = "audio_chunks"
+    __table_args__ = (UniqueConstraint("visit_id", "chunk_index", name="uq_audio_chunks_visit_index"),)
+
+    id: Mapped[uuid.UUID] = pk()
+    visit_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("visits.id"), nullable=False, index=True)
+    facility_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("facilities.id"), nullable=False, index=True)
+    chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    byte_offset: Mapped[int] = mapped_column(BigInteger, nullable=False)  # إزاحة PCM (بلا ترويسة WAV)
+    byte_length: Mapped[int] = mapped_column(Integer, nullable=False)
+    sha256: Mapped[str] = mapped_column(Text, nullable=False)
+    received_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class VisitConsent(Base, TimestampMixin):
