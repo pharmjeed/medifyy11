@@ -37,7 +37,7 @@ services:
       args:
         INSTALL_WHISPER: "${INSTALL_WHISPER:-false}"
     restart: unless-stopped
-    environment:
+    environment: &backend-env
       DATABASE_URL: postgresql+psycopg://medify_app:${MEDIFY_APP_PASSWORD:?}@postgres:5432/medify
       MIGRATIONS_DATABASE_URL: postgresql+psycopg://medify_owner:${POSTGRES_PASSWORD}@postgres:5432/medify
       JWT_SECRET: ${JWT_SECRET:?}
@@ -67,6 +67,23 @@ services:
     command: >
       sh -c "alembic upgrade head &&
              uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2"
+
+  worker:
+    # عامل المعالجة (المرحلة 3): P1→P3 خارج دورة الطلب — نفس صورة backend وبيئته
+    build:
+      context: ../backend
+      args:
+        INSTALL_WHISPER: "${INSTALL_WHISPER:-false}"
+    restart: unless-stopped
+    environment: *backend-env
+    volumes:
+      - appdata:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: ["arq", "app.worker.WorkerSettings"]
 
   seed:
     build: ../backend

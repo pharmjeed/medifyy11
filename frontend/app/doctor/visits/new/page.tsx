@@ -110,6 +110,7 @@ export default function NewVisitPage() {
   // مؤشر صوت صادق: الأعمدة من ذروات العينات الفعلية لا من أنيميشن — صمت رقمي متواصل = تحذير
   const [levels, setLevels] = useState<number[]>(Array.from({ length: 16 }, () => 0));
   const [micSilent, setMicSilent] = useState(false);
+  const [procFailed, setProcFailed] = useState(false); // فشل معالجة نهائي (قابل للإعادة يدوياً)
   const silentTicks = useRef(0);
 
   const ws = useRef<WebSocket | null>(null);
@@ -457,6 +458,56 @@ export default function NewVisitPage() {
     } catch { /* الحالة المحلية تكفي */ }
   };
 
+  /** إنجاح الرحلة: تنظيف العلامات والمخزن ثم الانتقال للمراجعة */
+  const completeToReview = (visitId: string) => {
+    setGenStep(3);
+    try { localStorage.removeItem(ACTIVE_RECORDING_KEY); } catch { /* غير حرج */ }
+    if (unsynced.current === 0) void deleteVisitChunks(visitId).catch(() => undefined);
+    setTimeout(() => router.push(`/doctor/visits/${visitId}/review`), 700);
+  };
+
+  /** وضع الطابور (المرحلة 3): استطلاع processing-status حتى in_review أو فشل نهائي */
+  const pollProcessing = useCallback((visitId: string) => {
+    const timer = setInterval(() => {
+      void (async () => {
+        try {
+          const body = await api<{
+            state: string; failed_final: boolean;
+            last_attempt: { stage: string; error_class: string } | null;
+          }>(`/visits/${visitId}/processing-status`);
+          const stage = body.data.last_attempt?.stage;
+          if (body.data.state === "in_review") {
+            clearInterval(timer);
+            completeToReview(visitId);
+          } else if (body.data.failed_final) {
+            clearInterval(timer);
+            setProcFailed(true);
+          } else if (stage === "P3") {
+            setGenStep(2);
+          } else if (stage === "P2" || body.data.state === "summarized") {
+            setGenStep(1);
+          }
+        } catch { /* استطلاع لاحق — الشبكة قد تتقطع */ }
+      })();
+    }, 2000);
+    timers.current.push(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const retryProcessing = async () => {
+    if (visit === null) return;
+    setProcFailed(false);
+    setGenStep(0);
+    try {
+      const body = await api<{ state: string; processing?: string }>(`/visits/${visit.id}/reprocess`, { method: "POST" });
+      if (body.data.state === "in_review") completeToReview(visit.id);
+      else pollProcessing(visit.id);
+    } catch (err) {
+      setProcFailed(true);
+      showError(err);
+    }
+  };
+
   const finishRecording = async () => {
     if (visit === null) return;
     stopped.current = true;
@@ -494,17 +545,20 @@ export default function NewVisitPage() {
     // الخادم يُغلق القناة بعد اكتمال ملف الصوت — الانتظار يضمن أن التفريغ يقرأ المحادثة كاملة
     await waitForSocketClose(socket);
     try {
-      await api(`/visits/${visit.id}/recording/stop`, {
+      const stoppedBody = await api<{ state: string; processing?: string }>(`/visits/${visit.id}/recording/stop`, {
         method: "POST",
         body: { duration_sec: seconds, pauses_count: 0, offline_chunks: offlineChunks },
       });
       clearTimeout(flipToSummary);
       clearTimeout(flipToGuidance);
-      setGenStep(3);
-      try { localStorage.removeItem(ACTIVE_RECORDING_KEY); } catch { /* غير حرج */ }
-      // اكتمل الرفع بلا بقايا؟ يُنظَّف المخزن الدائم — وإلا يبقى للتعافي وتزيله مهلة 24 ساعة
-      if (unsynced.current === 0) void deleteVisitChunks(visit.id).catch(() => undefined);
-      setTimeout(() => router.push(`/doctor/visits/${visit.id}/review`), 700);
+      if (stoppedBody.data.state === "in_review") {
+        // inline: المعالجة اكتملت داخل الطلب
+        completeToReview(visit.id);
+      } else {
+        // queue (المرحلة 3): المعالجة في عامل الخلفية — استطلاع حتى الاكتمال أو الفشل
+        setGenStep(0);
+        pollProcessing(visit.id);
+      }
     } catch (err) {
       clearTimeout(flipToSummary);
       clearTimeout(flipToGuidance);
@@ -851,6 +905,21 @@ export default function NewVisitPage() {
                 </div>
               ))}
               <p style={{ fontSize: 12.5, color: "#5c7096", marginTop: 14 }}>{L("المحادثة تُفرَّغ كاملة أولاً ثم يُبنى الملخص — فشل التحليل لا يحجب الملخص (W-224).", "The whole conversation is transcribed first, then the summary is built — analysis failure does not block the summary (W-224).")}</p>
+              {procFailed ? (
+                <div style={{ marginTop: 14, padding: "12px 14px", borderRadius: 10, background: "var(--m-danger-bg)",
+                              border: "1px solid var(--m-danger)", textAlign: "start" }}>
+                  <strong style={{ color: "var(--m-danger)" }}>
+                    {L("توقفت المعالجة بعد استنفاد المحاولات", "Processing stopped after exhausting retries")}
+                  </strong>
+                  <div style={{ fontSize: 12.5, color: "#5c7096", margin: "4px 0 10px" }}>
+                    {L("الصوت محفوظ بأمان — أعد المعالجة الآن أو لاحقاً من سجل الزيارات. (MDF-5031)",
+                       "Your audio is safe — reprocess now, or later from the visits log. (MDF-5031)")}
+                  </div>
+                  <button className="btn btn-primary" onClick={() => void retryProcessing()}>
+                    {L("إعادة المعالجة", "Reprocess")}
+                  </button>
+                </div>
+              ) : null}
             </div>
           </section>
         ) : null}

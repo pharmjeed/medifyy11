@@ -32,7 +32,7 @@ from ..services.history import previous_visits
 from .deidentify import build_map
 from .llm import get_llm
 from .speaker import attribute_segments
-from .stt import get_stt, retry_with_backoff
+from .stt import get_stt
 
 logger = logging.getLogger("medify.pipelines")
 
@@ -118,11 +118,9 @@ def run_transcription(db: Session, visit: Visit) -> Transcript:
     """
     recording = db.execute(select(Recording).where(Recording.visit_id == visit.id)).scalar_one_or_none()
     audio_path = recording.storage_uri if recording is not None else ""
-    try:
-        segments = retry_with_backoff(lambda: get_stt().transcribe_visit(audio_path))
-    except Exception as exc:
-        logger.error("P1 فشل للزيارة %s بعد جميع المحاولات: %s", visit.id, exc)
-        raise MedifyError("MDF-5031", details={"visit_id": str(visit.id)}) from exc
+    # الاستثناءات تُرفع خاماً — التصنيف والإعادة (30ث/2د/5د على العابر) وتغليف MDF-5031
+    # في services/processing (المرحلة 3)
+    segments = get_stt().transcribe_visit(audio_path)
 
     # المحرك الذي لا يميّز المتحدث صوتياً → إسناد لغوي على المحادثة كاملة (سياق تبادل الأدوار كله)
     if segments and not all(segment.get("speaker") in ("doctor", "patient") for segment in segments):
@@ -189,23 +187,20 @@ def run_summary(db: Session, visit: Visit) -> Summary:
     # تحميل البرومبت من قاعدة البيانات (مخصص أو افتراضي أو من الملفات)
     custom_prompt = _load_prompt_content(db, template)
 
-    try:
-        output, model_ref = get_llm().complete_json(
-            "P2-summary",
-            version,
-            {
-                "transcript": transcript_scrubbed,
-                "template_structure": template.structure_json,
-                "specialty": template.specialty or "",
-                "visit_type": template.visit_type or "",
-                "custom_prompt": custom_prompt,
-            },
-        )
-        sections_out = output["sections"]
-        assert isinstance(sections_out, list) and sections_out
-    except Exception as exc:
-        logger.error("P2 فشل للزيارة %s: %s", visit.id, exc)
-        raise MedifyError("MDF-5032", details={"visit_id": str(visit.id)}) from exc
+    # الاستثناءات خام — التصنيف/الإعادة وتغليف MDF-5032 في services/processing (المرحلة 3)
+    output, model_ref = get_llm().complete_json(
+        "P2-summary",
+        version,
+        {
+            "transcript": transcript_scrubbed,
+            "template_structure": template.structure_json,
+            "specialty": template.specialty or "",
+            "visit_type": template.visit_type or "",
+            "custom_prompt": custom_prompt,
+        },
+    )
+    sections_out = output["sections"]
+    assert isinstance(sections_out, list) and sections_out
 
     # تمريرة السند قبل أن يرى الدكتور أي شيء — ما لا سند له في المحادثة يُحذف لا يُعلَّم
     sections_out = _verify_sections(transcript_scrubbed, sections_out)
@@ -239,7 +234,8 @@ def run_summary(db: Session, visit: Visit) -> Summary:
 
 
 def run_guidance(db: Session, visit: Visit, summary: Summary) -> bool:
-    """P3 — الإرشاد المدمج. الفشل لا يحجب التدفق: ملخص بلا إرشادات + W-224 (MDF-5033)."""
+    """P3 — الإرشاد المدمج. الاستثناءات خام؛ عدم الحجب (ملخص بلا إرشادات + W-224/MDF-5033)
+    تتولاه services/processing بعد استنفاد الإعادات (المرحلة 3)."""
     sections = db.execute(
         select(SummarySection).where(SummarySection.summary_id == summary.id).order_by(SummarySection.position)
     ).scalars().all()
@@ -262,27 +258,22 @@ def run_guidance(db: Session, visit: Visit, summary: Summary) -> bool:
     if history is None:
         history = previous_visits(db, visit.patient_id, visit.doctor_id, exclude_visit_id=visit.id)
 
-    try:
-        output, _model_ref = get_llm().complete_json(
-            "P3-guidance",
-            version,
-            {
-                "summary_sections": [
-                    {"section_key": s.section_key, "content": deid.scrub(s.content_current)} for s in sections
-                ],
-                "patient_context": deid.scrub(str(context_json)),
-                "previous_visits": deid.scrub(json.dumps(history, ensure_ascii=False)),
-                "transcript_highlights": deid.scrub(_transcript_text(transcript)[:2000] if transcript else ""),
-                "active_coding_systems": ", ".join(systems),
-            },
-        )
-        items = output["items"]
-        assert isinstance(items, list)
-    except Exception as exc:
-        logger.error("P3 فشل للزيارة %s: %s", visit.id, exc)
-        notify(db, visit.facility_id, visit.doctor_id, "dr.analysis_failed", {"visit_id": str(visit.id), "mdf": "MDF-5033"})
-        track("error.5xx", visit.facility_id, "doctor", visit.id, mdf_code="MDF-5033", pipeline_id="P3")
-        return False
+    # الاستثناءات خام — الإعادة على العابر وإخطار MDF-5033 غير المعطِّل في services/processing
+    output, _model_ref = get_llm().complete_json(
+        "P3-guidance",
+        version,
+        {
+            "summary_sections": [
+                {"section_key": s.section_key, "content": deid.scrub(s.content_current)} for s in sections
+            ],
+            "patient_context": deid.scrub(str(context_json)),
+            "previous_visits": deid.scrub(json.dumps(history, ensure_ascii=False)),
+            "transcript_highlights": deid.scrub(_transcript_text(transcript)[:2000] if transcript else ""),
+            "active_coding_systems": ", ".join(systems),
+        },
+    )
+    items = output["items"]
+    assert isinstance(items, list)
 
     counts_by_kind: dict[str, int] = {}
     per_section: dict[str, int] = {}

@@ -47,6 +47,10 @@ class Settings(BaseSettings):
 
     redis_url: str = ""  # فارغ = حدود المعدل والقفل في الذاكرة
 
+    # المرحلة 3 — المعالجة بمحاولات: "" = آلي (queue مع Redis وإلا inline) | inline | queue
+    processing_mode: str = ""
+    processing_retry_delays: str = "30,120,300"  # تباعد إعادات العابر بالثواني
+
     # حصر المعدل (DOC-05 §١) — طلب/دقيقة
     rate_limit_default: int = 240
     rate_limit_ai: int = 20

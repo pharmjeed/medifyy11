@@ -134,6 +134,27 @@ class AudioChunk(Base, TimestampMixin):
     received_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class ProcessingAttempt(Base, TimestampMixin):
+    """محاولة معالجة لمرحلة P1/P2/P3 (المرحلة 3 من التحصين) — سجل معمَّر بلا PHI.
+
+    يُكتب بجلسة نظام مستقلة عن معاملة الطلب: الفشل النهائي يُرجِع rollback للطلب
+    لكن سجل محاولاته يبقى (المرجع عند MDF-5031/5032 وتقرير processing-status).
+    """
+
+    __tablename__ = "processing_attempts"
+
+    id: Mapped[uuid.UUID] = pk()
+    visit_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("visits.id"), nullable=False, index=True)
+    facility_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("facilities.id"), nullable=False, index=True)
+    stage: Mapped[str] = mapped_column(Text, nullable=False)  # P1 | P2 | P3
+    attempt_no: Mapped[int] = mapped_column(Integer, nullable=False)
+    error_class: Mapped[str] = mapped_column(Text, nullable=False)  # retryable | non_retryable | none
+    error_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    succeeded: Mapped[bool] = mapped_column(default=False, nullable=False)
+    started_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    finished_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class VisitConsent(Base, TimestampMixin):
     """موافقة المريض الموثّقة — إلحاقي فقط. لا تسجيل قبلها (trigger القاعدة يرفض draft→recording)."""
 

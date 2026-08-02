@@ -34,6 +34,9 @@ os.environ.update({
     "EMAIL_ENGINE": "mock",
     "RATE_LIMIT_DEFAULT": "100000",
     "RATE_LIMIT_AI": "100000",
+    # المرحلة 3: inline بلا انتظار — منطق المحاولات يُختبر بذاته، لا أزمنة الجدار
+    "PROCESSING_MODE": "inline",
+    "PROCESSING_RETRY_DELAYS": "0,0,0",
     "RECORDINGS_DIR": str(BACKEND / "var" / "test-recordings"),
     "OUTBOX_DIR": str(BACKEND / "var" / "test-outbox"),
 })

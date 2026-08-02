@@ -21,6 +21,7 @@ from ...models import (
     Facility,
     Patient,
     PatientContextSnapshot,
+    ProcessingAttempt,
     Recording,
     Template,
     Transcript,
@@ -29,10 +30,15 @@ from ...models import (
     Visit,
     VisitConsent,
 )
-from ...pipelines.run import run_guidance, run_summary, run_transcription
 from ...services.audio_integrity import verify_finalized_audio
 from ...services.consent import consent_document
 from ...services.history import build_context
+from ...services.processing import (
+    attempts_total,
+    enqueue_process_visit,
+    process_visit_pipeline,
+    queue_mode_enabled,
+)
 from ...services.visits import get_visit_for_doctor, transition
 
 router = APIRouter()
@@ -319,9 +325,9 @@ class RecordingStopIn(BaseModel):
 
 @router.post("/visits/{visit_id}/recording/stop")
 def recording_stop(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB, body: RecordingStopIn | None = None):
-    """stop يطلق المعالجة كاملة فوراً (FR-605 + قرار مالك 2026-08-02):
-    transcribed → P1 (تفريغ الملف الكامل + إسناد المتحدث من كامل المحادثة)
-    → P2 (+P2-verify) → summarized → P3 → in_review — متزامنة بلا طوابير مؤجلة."""
+    """stop يطلق المعالجة فوراً (FR-605 + قرار مالك 2026-08-02 + المرحلة 3):
+    inline (بلا Redis): P1→P2→P3 داخل الطلب كما كان · queue (النشر): مهمة arq
+    والواجهة تستطلع processing-status — المعالجة تبدأ فوراً في الحالتين، لا تأجيل."""
     body = body or RecordingStopIn()
     visit = get_visit_for_doctor(db, visit_id)
     # finalize صارم (المرحلة 2): لا-فجوات + حجم + bit-exact مقابل سجل المقاطع —
@@ -335,11 +341,59 @@ def recording_stop(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB, body: Recording
     track("recording.completed", ctx.facility_id, "doctor", visit.id,
           duration_sec=body.duration_sec, pauses_count=body.pauses_count, offline_chunks=body.offline_chunks)
 
-    run_transcription(db, visit)              # P1 — فشل المحرك → MDF-5031 (يرفع خطأ)
-    summary = run_summary(db, visit)          # P2 + تمريرة السند — فشل → MDF-5032 (يرفع خطأ)
-    transition(db, visit, "summarized", ctx.user_id)
-    guidance_ok = run_guidance(db, visit, summary)  # فشل → W-224 دون حجب
-    transition(db, visit, "in_review", ctx.user_id)
+    if queue_mode_enabled():
+        db.flush()
+        db.commit()  # الحالة transcribed تُثبَّت قبل الإدراج — العامل يقرأها من جلسة أخرى
+        enqueue_process_visit(visit.id)
+        return ok({"state": visit.state, "processing": "queued"})
+
+    guidance_ok = process_visit_pipeline(db, visit, ctx.user_id)
+    return ok({"state": visit.state, "guidance_ok": guidance_ok})
+
+
+@router.get("/visits/{visit_id}/processing-status")
+def processing_status(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB):
+    """حالة المعالجة للاستطلاع (المرحلة 3) — آخر محاولة لكل تشغيل + حكم الفشل النهائي."""
+    visit = get_visit_for_doctor(db, visit_id)
+    last = db.execute(
+        select(ProcessingAttempt)
+        .where(ProcessingAttempt.visit_id == visit.id)
+        .order_by(ProcessingAttempt.started_at.desc(), ProcessingAttempt.id.desc())
+    ).scalars().first()
+    total = attempts_total()
+    failed_final = (
+        last is not None and not last.succeeded
+        and (last.error_class == "non_retryable" or last.attempt_no >= total)
+        and visit.state in ("recording", "transcribed")
+    )
+    return ok({
+        "state": visit.state,
+        "failed_final": failed_final,
+        "attempts_total": total,
+        "last_attempt": None if last is None else {
+            "stage": last.stage,
+            "attempt_no": last.attempt_no,
+            "error_class": last.error_class,
+            "succeeded": last.succeeded,
+            "finished_at": last.finished_at.isoformat(),
+        },
+    })
+
+
+@router.post("/visits/{visit_id}/reprocess")
+def reprocess_visit(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB):
+    """إعادة معالجة زيارة توقفت بعد فشل نهائي (المرحلة 3) — من transcribed حصراً.
+
+    inline يعالج داخل الطلب؛ queue يعيد الإدراج. المراحل المكتملة تُتخطى (idempotent).
+    """
+    visit = get_visit_for_doctor(db, visit_id)
+    if visit.state != "transcribed":
+        raise MedifyError("MDF-4223", details={"state": visit.state, "action": "reprocess"})
+    audit(db, ctx.facility_id, "visit.reprocess_requested", "visit", visit.id, ctx.user_id)
+    if queue_mode_enabled():
+        enqueue_process_visit(visit.id)
+        return ok({"state": visit.state, "processing": "queued"})
+    guidance_ok = process_visit_pipeline(db, visit, ctx.user_id)
     return ok({"state": visit.state, "guidance_ok": guidance_ok})
 
 

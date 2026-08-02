@@ -14,6 +14,7 @@ from .clinical import (
     NoteUnlock,
     Patient,
     PatientContextSnapshot,
+    ProcessingAttempt,
     Recording,
     Summary,
     SummarySection,
