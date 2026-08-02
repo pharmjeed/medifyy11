@@ -13,7 +13,7 @@
 | 4 | الإبطال (Void) | ✅ أُنجزت | المصادر الموسّعة summarized/in_review/approved-قبل-النقل (trigger 0011 + API) · RBAC: الدكتور صاحب الزيارة أو الأدمن (سياسة doctor_scope تمرّره) · exports → 410 بكود MDF-4235 الجديد · reason enum بمصادقة Pydantic (422 قياسي بدل 404 الخاطئ) + توافق عكسي «test» · from_state/actor_role في Audit · 3 اختبارات جديدة + تحديثان (158 passed) |
 | 5 | فتح البوابة ① (Unlock) | ✅ أُنجزت | الأساس القائم (0010) اكتمل: MDF-4236 الجديد (409) لحاجزي بعد-② وحالة-غير-مسموحة · مقارنة hash في الملخص (`note_unlock.text_unchanged`) — لم يتغيّر → «إعادة اعتماد بنقرة» بواجهة مميزة · قرارات الإرشادات محفوظة (مثبت سلفاً) · اختبار دورة hash كامل (159 passed) |
 | 6 | دورة النسخ (Reopen) | ✅ أُنجزت | هجرة 0014: `note_versions` (لقطات مشفّرة + بصمة حزمة + طوابع بوابتين + diff + سبب reopen) بtrigger تجميد بعد النقل · «الدورة» cycle على visits/note_approvals/approvals وtriggers 0010 صارت واعية بها · upload_jobs يربط approval_id مباشرة (مهمة لكل نسخة) · POST reopen (من uploaded، سبب إلزامي، مسودة v+1) · FHIR: entry.request صالح R4 + DocumentReference + amended + relatesTo/replaces للسابقة حصراً + ifNoneExist · محوّل HL7 MDM (T02/T09) + عميل MLLP + محرك hl7 · exports ?version= من اللقطات + تذييل النسخة + فصل retry-upload الصارم · واجهة: زر reopen + مودال + لافتة النسخة · 5 اختبارات (164 passed) |
-| 7 | Idempotency واعٍ بالنسخة | ⬜ لم تبدأ | مفتاح `{visit_id}:{version}` + ifNoneExist + MSH-10 + `delivery_receipts` |
+| 7 | Idempotency واعٍ بالنسخة | ✅ أُنجزت | هجرة 0015: `upload_jobs.idempotency_key` فريد ("{visit}:{version}" — backfill للقائم) + جدول `delivery_receipts` (فريد على مفتاح+وجهة) · الفحص قبل أي إرسال: إيصال قائم = نجاح مُعاد بلا إرسال (مُثبت باختبار «وجهة فاشلة + إيصال مزروع → نجاح») · الإيصال يُكتب فور الاستقبال بجلسة نظام · ifNoneExist وMSH-10 من م6 يكملان الدفاع بالطرف البعيد · 4 اختبارات (168 passed) |
 | 8 | سياسة الاحتفاظ الموحّدة | ⬜ لم تبدأ | `retention_policies` + `legal_hold` + مهمة ليلية + docs |
 | 9 | أرشفة FLAC | ⬜ لم تبدأ | ffmpeg + تحقق hash إلزامي قبل حذف WAV |
 | 10 | إظهار السند | ⬜ لم تبدأ | تغيير عقد P2-verify ليُنتج evidence بدل الحذف الصامت + مشغّل صوت |
@@ -35,6 +35,7 @@
 | 0012_audio_chunks | 2 | جدول `audio_chunks` بقيد فريد (visit_id, chunk_index) + sha256 + offset/length + RLS قياسي | drop table + الفهارس |
 | 0013_processing_attempts | 3 | جدول `processing_attempts` (stage/attempt_no/error_class/error_detail بلا PHI/أزمنة) + RLS قياسي | drop table + الفهارس |
 | 0014_note_versions | 6 | `note_versions` + trigger تجميد المنقولة + عمود cycle (visits/note_approvals/approvals) + approvals فريد (visit,cycle) + upload_jobs→approval_id + إعادة تعريف ثلاث دوال 0010 بوعي الدورة | يعيد دوال 0010 ويسقط note_versions؛ أعمدة cycle تبقى (بيانات) |
+| 0015_idempotency_receipts | 7 | `upload_jobs.idempotency_key` فريد + backfill + جدول `delivery_receipts` بقيد (مفتاح، وجهة) | يسقط الجدول والعمود والقيد |
 
 ## أكواد MDF الجديدة
 

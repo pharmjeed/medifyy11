@@ -329,12 +329,17 @@ class UploadJob(Base, TimestampMixin):
     """
 
     __tablename__ = "upload_jobs"
-    __table_args__ = (UniqueConstraint("approval_id", name="uq_upload_jobs_approval"),)
+    __table_args__ = (
+        UniqueConstraint("approval_id", name="uq_upload_jobs_approval"),
+        UniqueConstraint("idempotency_key", name="uq_upload_jobs_idempotency"),
+    )
 
     id: Mapped[uuid.UUID] = pk()
     visit_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("visits.id"), nullable=False, index=True)
     facility_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("facilities.id"), nullable=False, index=True)
     approval_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("approvals.id"), nullable=False)
+    # م7: "{visit_id}:{version}" — الـretry بنفس المفتاح، والنسخة الجديدة مفتاح جديد
+    idempotency_key: Mapped[str] = mapped_column(Text, nullable=False)
     fhir_payload_ref: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(UPLOAD_STATUS, nullable=False, default="queued")
     attempts_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -383,6 +388,27 @@ class UploadAttempt(Base, TimestampMixin):
     started_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     result: Mapped[str | None] = mapped_column(Text, nullable=True)  # confirmed | failed
     error_code: Mapped[str | None] = mapped_column(Text, nullable=True)  # رموز DOC-13
+
+
+class DeliveryReceipt(Base, TimestampMixin):
+    """إيصال تسليم لنظام المستشفى (م7) — كل استقبال ناجح يكتب إيصاله فوراً.
+
+    الفحص قبل أي إرسال: إيصال قائم بنفس (المفتاح، الوجهة) = النجاح السابق يُرجَع
+    بلا إرسال — انهيار بعد الإيصال وقبل تحديث المهمة لا يسبب كتابة مزدوجة في HIS.
+    الكتابة بجلسة نظام مستقلة (commit فوري) والقيد الفريد صمام الأمان الأخير.
+    """
+
+    __tablename__ = "delivery_receipts"
+    __table_args__ = (
+        UniqueConstraint("idempotency_key", "target_system", name="uq_delivery_receipts_key_target"),
+    )
+
+    id: Mapped[uuid.UUID] = pk()
+    facility_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("facilities.id"), nullable=False, index=True)
+    idempotency_key: Mapped[str] = mapped_column(Text, nullable=False, index=True)
+    target_system: Mapped[str] = mapped_column(Text, nullable=False)  # mock | http | hl7
+    delivered_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    response_hash: Mapped[str] = mapped_column(Text, nullable=False)  # بصمة ردّ الوجهة — لا محتوى
 
 
 class Addendum(Base, TimestampMixin):

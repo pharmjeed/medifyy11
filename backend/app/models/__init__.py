@@ -8,6 +8,7 @@ from .clinical import (
     Addendum,
     Approval,
     AudioChunk,
+    DeliveryReceipt,
     EditEvent,
     GuidanceItem,
     NoteApproval,

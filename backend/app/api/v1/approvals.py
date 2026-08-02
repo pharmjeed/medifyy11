@@ -239,6 +239,7 @@ def approve_visit(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB):
         visit_id=visit.id,
         facility_id=ctx.facility_id,
         approval_id=approval.id,
+        idempotency_key=f"{visit.id}:{visit.cycle}",  # م7: retry نفس المفتاح؛ نسخة جديدة مفتاح جديد
         fhir_payload_ref=payload_ref,
         status="queued",
         attempts_count=0,

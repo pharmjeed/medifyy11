@@ -2,10 +2,13 @@
 
 م6: mock/http يرسلان حزمة FHIR (transaction) · hl7 يرسل MDM عبر MLLP (T02 أول
 نقل، T09 استبدال النسخ ≥2) — وكل نتيجة تُختم على صف النسخة في note_versions.
+م7: إيصالات التسليم — الفحص قبل أي إرسال (إيصال قائم = نجاح مُعاد بلا إرسال)،
+وكل استقبال ناجح يكتب إيصاله فوراً بجلسة نظام مستقلة.
 """
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import logging
 import uuid
 
@@ -16,20 +19,47 @@ from sqlalchemy.orm import Session
 from ..analytics import track
 from ..audit import audit
 from ..config import get_settings
-from ..models import Approval, IntegrationConfig, Patient, UploadAttempt, UploadJob, User, Visit
+from ..db import system_session
+from ..models import (
+    Approval,
+    DeliveryReceipt,
+    IntegrationConfig,
+    Patient,
+    UploadAttempt,
+    UploadJob,
+    User,
+    Visit,
+)
 from ..notify import notify, notify_admins
 from .fhir import medify_doc_identifier
 from .hl7 import build_mdm, parse_mllp_target, send_mllp
 from .versions import get_version, mark_version_upload_result
 from .visits import transition
 
+
+def _record_receipt(facility_id: uuid.UUID, idempotency_key: str,
+                    target_system: str, response_digest: str) -> None:
+    """الإيصال يُثبَّت فور الاستقبال الناجح — جلسة مستقلة تنجو من أي فشل لاحق (م7)."""
+    try:
+        with system_session() as sdb:
+            sdb.add(DeliveryReceipt(
+                facility_id=facility_id,
+                idempotency_key=idempotency_key,
+                target_system=target_system,
+                delivered_at=dt.datetime.now(dt.timezone.utc),
+                response_hash=response_digest,
+            ))
+    except Exception:  # قيد فريد (إيصال قائم) أو عطل عابر — لا يُسقط مسار النجاح
+        logger.info("إيصال قائم أو تعذّر تدوينه للمفتاح %s", idempotency_key)
+
 logger = logging.getLogger("medify.uploader")
 
 
 class UploadOutcome:
-    def __init__(self, ok: bool, error_code: str | None = None):
+    def __init__(self, ok: bool, error_code: str | None = None, response_digest: str = ""):
         self.ok = ok
         self.error_code = error_code
+        self.response_digest = response_digest  # بصمة ردّ الوجهة — للإيصال (م7)
 
 
 def _send_bundle(config: IntegrationConfig | None, payload_ref: str | None) -> UploadOutcome:
@@ -41,7 +71,7 @@ def _send_bundle(config: IntegrationConfig | None, payload_ref: str | None) -> U
             return UploadOutcome(False, "MDF-5051")
         if "fail-unreachable" in endpoint:
             return UploadOutcome(False, "MDF-5052")
-        return UploadOutcome(True)
+        return UploadOutcome(True, response_digest=hashlib.sha256(b"mock-accepted").hexdigest())
     try:
         with open(payload_ref or "", "r", encoding="utf-8") as handle:
             body = handle.read()
@@ -55,7 +85,7 @@ def _send_bundle(config: IntegrationConfig | None, payload_ref: str | None) -> U
             timeout=30,
         )
         if response.status_code in (200, 201, 202):
-            return UploadOutcome(True)
+            return UploadOutcome(True, response_digest=hashlib.sha256(response.content).hexdigest())
         if 400 <= response.status_code < 500:
             return UploadOutcome(False, "MDF-5051")
         return UploadOutcome(False, "MDF-5052")
@@ -90,7 +120,7 @@ def _send_hl7(db: Session, config: IntegrationConfig | None, visit: Visit, versi
         host, port = parse_mllp_target(config.endpoint_url)
         delivered, ack = send_mllp(host, port, message)
         if delivered:
-            return UploadOutcome(True)
+            return UploadOutcome(True, response_digest=hashlib.sha256(ack.encode()).hexdigest())
         return UploadOutcome(False, "MDF-5051" if ack in ("AE", "AR") else "MDF-5052")
     except (OSError, ValueError):
         return UploadOutcome(False, "MDF-5052")
@@ -110,6 +140,32 @@ def process_upload_job(db: Session, job_id: uuid.UUID, manual: bool = False) -> 
     approval = db.execute(select(Approval).where(Approval.id == job.approval_id)).scalar_one()
     version_number = approval.cycle
 
+    # م7: فحص الإيصالات قبل أي إرسال — تسليم سابق مؤكد لهذا المفتاح/الوجهة =
+    # النجاح يُعاد بلا إرسال (انهيار بعد الإيصال لا يكرر الكتابة في HIS)
+    engine_name = s.integration_engine
+    receipt = db.execute(
+        select(DeliveryReceipt).where(
+            DeliveryReceipt.idempotency_key == job.idempotency_key,
+            DeliveryReceipt.target_system == engine_name,
+        )
+    ).scalars().first()
+    if receipt is not None:
+        job.status = "confirmed"
+        job.attempts_count += 1
+        db.add(UploadAttempt(job_id=job.id, started_at=dt.datetime.now(dt.timezone.utc),
+                             result="confirmed", error_code=None))
+        if visit.state in ("approved", "upload_failed"):
+            transition(db, visit, "uploaded")
+        mark_version_upload_result(db, visit.id, version_number, ok=True)
+        db.flush()
+        notify(db, job.facility_id, visit.doctor_id, "dr.upload_success", {"visit_id": str(visit.id)})
+        audit(db, job.facility_id, "upload.confirmed", "upload_job", job.id, None,
+              {"attempts": job.attempts_count, "version": version_number,
+               "replayed_from_receipt": True})
+        track("upload.result", job.facility_id, "doctor", visit.id,
+              status=job.status, attempts=job.attempts_count, error_code=None)
+        return
+
     max_attempts = 1 if manual else s.upload_max_auto_attempts
     outcome = UploadOutcome(False, "MDF-5052")
     for _ in range(max_attempts):
@@ -128,7 +184,11 @@ def process_upload_job(db: Session, job_id: uuid.UUID, manual: bool = False) -> 
             )
         )
         db.flush()
-        if outcome.ok or outcome.error_code == "MDF-5051":
+        if outcome.ok:
+            # الإيصال أولاً وفوراً (م7) — قبل أي تحديث حالة قد ينهار بعده
+            _record_receipt(job.facility_id, job.idempotency_key, engine_name, outcome.response_digest)
+            break
+        if outcome.error_code == "MDF-5051":
             break  # الرفض البنيوي لا يُعاد آلياً — يحتاج تدخلاً
 
     if outcome.ok:
