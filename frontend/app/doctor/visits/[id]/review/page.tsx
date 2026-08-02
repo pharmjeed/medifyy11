@@ -111,6 +111,10 @@ export default function ReviewPage() {
   const [unlockOpen, setUnlockOpen] = useState(false);
   const [unlockReason, setUnlockReason] = useState("");
   const [unlockBusy, setUnlockBusy] = useState(false);
+  // مسار Reopen (م6) — نسخة جديدة ببوابتين بعد النقل
+  const [reopenOpen, setReopenOpen] = useState(false);
+  const [reopenReason, setReopenReason] = useState("");
+  const [reopenBusy, setReopenBusy] = useState(false);
   const chatRef = useRef<HTMLDivElement | null>(null);
   const dictTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -409,6 +413,31 @@ export default function ReviewPage() {
     }
   };
 
+  // م6: إعادة فتح زيارة منقولة — نسخة جديدة ببوابتين (المبدأ 2: لا تحرير بعد النقل إلا هكذا)
+  const reopenVisit = async () => {
+    if (reopenReason.trim().length === 0) {
+      toast(L("سبب إعادة الفتح إلزامي — يُسجّل مع النسخة الجديدة", "A reopen reason is required — recorded with the new version"));
+      return;
+    }
+    setReopenBusy(true);
+    try {
+      const body = await api<{ state: string; version: number }>(`/visits/${visitId}/reopen`, {
+        method: "POST",
+        body: { reason: reopenReason.trim() },
+      });
+      setReopenOpen(false);
+      setReopenReason("");
+      setUpload({ phase: "idle" });
+      toast(L(`فُتحت النسخة ${body.data.version} — النسخة السابقة منقولة ومجمّدة، وتلزم إعادة البوابتين`,
+              `Version ${body.data.version} opened — the previous version is transferred and frozen; both gates are required again`));
+      await load();
+    } catch (err) {
+      handleMutationError(err);
+    } finally {
+      setReopenBusy(false);
+    }
+  };
+
   const downloadPdf = async () => {
     // التوكن يُرسل كترويسة Bearer لا ككوكي، فلا يصلح window.open — نجلب PDF كـ blob بالمصادقة
     try {
@@ -528,6 +557,24 @@ export default function ReviewPage() {
             <span style={{ fontSize: 12.5, color: "#5c7096" }}>
               {L("الملخص متاح بلا إرشادات — المراجعة والاعتماد متاحان، وسجّلنا إشعاراً بذلك.",
                  "The summary is available without guidance — review and approval remain available, and a notification was logged.")}
+            </span>
+          </div>
+        ) : null}
+
+        {/* لافتة النسخة الجديدة (م6): reopen جارٍ — السابقة منقولة ومجمّدة */}
+        {summary.version > 1 && summary.state === "in_review" ? (
+          <div className="card" style={{ marginTop: 12, borderInlineStart: "4px solid var(--m-info)",
+                                         display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+            <span className="badge info">{L(`النسخة ${summary.version} قيد الإعداد`, `Version ${summary.version} in progress`)}</span>
+            <span style={{ fontSize: 12.5, color: "#5c7096", flex: 1 }}>
+              {L(`النسخة ${summary.version - 1} منقولة ومجمّدة لدى المستشفى — هذه النسخة تستبدلها بعد إعادة البوابتين (① بنقرة إن لم يتغيّر النص، و② كاملة).`,
+                 `Version ${summary.version - 1} is transferred and frozen at the hospital — this version replaces it after both gates (① one-click if the text is unchanged, ② in full).`)}
+              {(() => {
+                const current = summary.versions.find((row) => row.version_number === summary.version);
+                return current?.reopen_reason
+                  ? " " + L(`سبب الفتح: «${current.reopen_reason}»`, `Reopen reason: "${current.reopen_reason}"`)
+                  : "";
+              })()}
             </span>
           </div>
         ) : null}
@@ -817,6 +864,31 @@ export default function ReviewPage() {
               <button className="btn-secondary" onClick={() => router.push("/doctor/visits")}>{L("سجل الزيارات", "Visit log")}</button>
             </span>
           ) : null}
+          {/* زيارة معتمدة/منقولة محمّلة من جديد — قراءة فقط + مسار reopen (م6) */}
+          {upload.phase === "idle" && approvedLocked && summary !== null ? (
+            <span style={{ display: "flex", alignItems: "center", gap: 10, flex: 1, flexWrap: "wrap" }}>
+              <span className={`badge ${summary.state === "upload_failed" ? "danger" : "success"}`}>
+                {summary.state === "uploaded"
+                  ? L(`منقولة ✓ — النسخة ${summary.versions.filter(v => v.upload_status === "uploaded").length || 1}`,
+                      `Uploaded ✓ — version ${summary.versions.filter(v => v.upload_status === "uploaded").length || 1}`)
+                  : summary.state === "upload_failed"
+                    ? L("فشل الرفع — أعد المحاولة (نفس النسخة، بلا بوابات)", "Upload failed — retry (same version, no gates)")
+                    : L("معتمدة — بانتظار الرفع", "Approved — awaiting upload")}
+              </span>
+              <span style={{ flex: 1 }} />
+              {canExport ? <ExportButtons L={L} onPdf={() => void downloadPdf()} onCopy={() => void copyForEmr()} /> : null}
+              {summary.state === "upload_failed" ? (
+                <button className="btn" onClick={() => void retryUpload()}>{L("إعادة محاولة الرفع", "Retry upload")}</button>
+              ) : null}
+              {summary.state === "uploaded" ? (
+                <button className="btn-secondary" onClick={() => setReopenOpen(true)}
+                  title={L("تعديل بعد النقل؟ نسخة جديدة ببوابتين تستبدل السابقة لدى المستشفى (replace) — السابقة تبقى مجمّدة",
+                           "Editing after transfer? A new version with both gates replaces the previous one at the hospital — the old version stays frozen")}>
+                  {L("↺ إعادة فتح — نسخة جديدة", "↺ Reopen — new version")}
+                </button>
+              ) : null}
+            </span>
+          ) : null}
           {/* مؤشر البوابتين */}
           {upload.phase === "idle" && !locked ? (
             <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 700 }}>
@@ -1001,6 +1073,28 @@ export default function ReviewPage() {
               {unlockBusy ? L("جارٍ الفتح…", "Unlocking…") : L("🔓 فتح المذكرة وإلغاء اعتماد ①", "🔓 Unlock note & revoke gate ①")}
             </button>
             <button className="btn-neutral" onClick={() => setUnlockOpen(false)}>{L("تراجع", "Back")}</button>
+          </div>
+        </Modal>
+      ) : null}
+
+      {/* مودال إعادة الفتح (م6) — نسخة جديدة ببوابتين تستبدل المنقولة */}
+      {reopenOpen ? (
+        <Modal title={L("إعادة فتح — نسخة جديدة تستبدل المنقولة", "Reopen — a new version replacing the transferred one")} onClose={() => setReopenOpen(false)}>
+          <p style={{ fontSize: 14, color: "#5c7096", marginTop: 0 }}>
+            {L("التحرير حصراً داخل Medify: تُفتح نسخة جديدة تنسخ الأخيرة، تعدّلها ثم تعيد البوابتين (① بنقرة إن لم يتغيّر النص، و② كاملة)، فتُنقل بدلالة استبدال (replace) تستهدف وثيقة Medify السابقة حصراً. النسخة المنقولة تبقى مجمّدة حرفياً لدى الطرفين. عطل تقني في الرفع؟ استخدم «إعادة محاولة الرفع» لا إعادة الفتح.",
+               "Editing happens only inside Medify: a new version copies the last one; you edit it, redo both gates (① one-click if the text is unchanged, ② in full), and it transfers with replace semantics targeting the previous Medify document only. The transferred version stays frozen verbatim on both sides. Technical upload failure? Use “Retry upload”, not reopen.")}
+          </p>
+          <label className="field-label" style={{ fontSize: 12.5 }}>
+            {L("سبب إعادة الفتح — إلزامي، يُخزَّن مع النسخة الجديدة", "Reopen reason — required, stored with the new version")}
+          </label>
+          <textarea className="field" rows={3} maxLength={2000} value={reopenReason}
+            onChange={(event) => setReopenReason(event.target.value)}
+            placeholder={L("مثال: وصلت نتيجة مختبر تغيّر التقييم والخطة", "e.g., a lab result arrived that changes the assessment and plan")} />
+          <div className="modal-actions">
+            <button className="btn" disabled={reopenBusy || reopenReason.trim().length === 0} onClick={() => void reopenVisit()}>
+              {reopenBusy ? L("جارٍ الفتح…", "Reopening…") : L("↺ فتح نسخة جديدة", "↺ Open a new version")}
+            </button>
+            <button className="btn-neutral" onClick={() => setReopenOpen(false)}>{L("تراجع", "Back")}</button>
           </div>
         </Modal>
       ) : null}

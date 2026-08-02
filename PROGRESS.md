@@ -12,7 +12,7 @@
 | 3 | إعادة المحاولة التلقائية | ✅ أُنجزت | هجرة 0013 `processing_attempts` (يُكتب بجلسة نظام — ينجو من rollback) · مصنّف مبني على الأنواع (`pipelines/classify.py` — أصلح عدّ FileNotFoundError عابراً) · `services/processing.py`: محاولة + 3 إعادات 30ث/2د/5د على العابر فقط، non_retryable فوري، فشل P3 غير معطِّل · وضعان: inline (dev/tests) وqueue (عامل arq بخدمة worker في compose) · نقطتا `processing-status` و`reprocess` + استطلاع الواجهة بتقدم صادق · 4 اختبارات (155 passed) |
 | 4 | الإبطال (Void) | ✅ أُنجزت | المصادر الموسّعة summarized/in_review/approved-قبل-النقل (trigger 0011 + API) · RBAC: الدكتور صاحب الزيارة أو الأدمن (سياسة doctor_scope تمرّره) · exports → 410 بكود MDF-4235 الجديد · reason enum بمصادقة Pydantic (422 قياسي بدل 404 الخاطئ) + توافق عكسي «test» · from_state/actor_role في Audit · 3 اختبارات جديدة + تحديثان (158 passed) |
 | 5 | فتح البوابة ① (Unlock) | ✅ أُنجزت | الأساس القائم (0010) اكتمل: MDF-4236 الجديد (409) لحاجزي بعد-② وحالة-غير-مسموحة · مقارنة hash في الملخص (`note_unlock.text_unchanged`) — لم يتغيّر → «إعادة اعتماد بنقرة» بواجهة مميزة · قرارات الإرشادات محفوظة (مثبت سلفاً) · اختبار دورة hash كامل (159 passed) |
-| 6 | دورة النسخ (Reopen) | ⬜ لم تبدأ | الأكبر: `note_versions` + immutability + reopen + FHIR amended/relatesTo + HL7 MDM |
+| 6 | دورة النسخ (Reopen) | ✅ أُنجزت | هجرة 0014: `note_versions` (لقطات مشفّرة + بصمة حزمة + طوابع بوابتين + diff + سبب reopen) بtrigger تجميد بعد النقل · «الدورة» cycle على visits/note_approvals/approvals وtriggers 0010 صارت واعية بها · upload_jobs يربط approval_id مباشرة (مهمة لكل نسخة) · POST reopen (من uploaded، سبب إلزامي، مسودة v+1) · FHIR: entry.request صالح R4 + DocumentReference + amended + relatesTo/replaces للسابقة حصراً + ifNoneExist · محوّل HL7 MDM (T02/T09) + عميل MLLP + محرك hl7 · exports ?version= من اللقطات + تذييل النسخة + فصل retry-upload الصارم · واجهة: زر reopen + مودال + لافتة النسخة · 5 اختبارات (164 passed) |
 | 7 | Idempotency واعٍ بالنسخة | ⬜ لم تبدأ | مفتاح `{visit_id}:{version}` + ifNoneExist + MSH-10 + `delivery_receipts` |
 | 8 | سياسة الاحتفاظ الموحّدة | ⬜ لم تبدأ | `retention_policies` + `legal_hold` + مهمة ليلية + docs |
 | 9 | أرشفة FLAC | ⬜ لم تبدأ | ffmpeg + تحقق hash إلزامي قبل حذف WAV |
@@ -34,6 +34,7 @@
 | 0011_state_machine_expansion | 1 | قيمة `reopened` + استبدال `enforce_visit_state_machine` (مصادر voided الموسّعة + دورة reopen) | يعيد دالة 0008؛ قيمة enum تبقى معزولة (قيد PostgreSQL) |
 | 0012_audio_chunks | 2 | جدول `audio_chunks` بقيد فريد (visit_id, chunk_index) + sha256 + offset/length + RLS قياسي | drop table + الفهارس |
 | 0013_processing_attempts | 3 | جدول `processing_attempts` (stage/attempt_no/error_class/error_detail بلا PHI/أزمنة) + RLS قياسي | drop table + الفهارس |
+| 0014_note_versions | 6 | `note_versions` + trigger تجميد المنقولة + عمود cycle (visits/note_approvals/approvals) + approvals فريد (visit,cycle) + upload_jobs→approval_id + إعادة تعريف ثلاث دوال 0010 بوعي الدورة | يعيد دوال 0010 ويسقط note_versions؛ أعمدة cycle تبقى (بيانات) |
 
 ## أكواد MDF الجديدة
 
@@ -58,6 +59,11 @@
 - (م3) نقطتا API جديدتان خارج DOC-05 بمقتضى المهمة: GET processing-status وPOST reprocess (+ حدث audit `visit.reprocess_requested`). المخرج غير المطابق للعقد من المحرك يُصنَّف non_retryable (فشل سريع).
 - (م4) أسماء الحقول السلكية بقيت reason/note (لا reason_code/reason_text) — الدلالة نفسها وواجهة قائمة، مع قبول «test» القديم كمرادف test_recording. زر الإبطال في الواجهة يظهر لـsummarized/in_review (approved لحظية — الرفع فوري؛ إبطالها متاح API/أدمن).
 - (م5) اسم النقطة بقي note-unlock (لا unlock-note) — منشور ومستخدم. «لا اعتماد نشط يُنقض» بقي MDF-4231 (422 أدق دلالة) وMDF-4236 (409) للحاجزين البنيويين — المواصفة طلبت كوداً جديداً للرفض وقد أُضيف.
+- (م6) مفهوم «الدورة» cycle بدل تعقيد ربط الاعتمادات بالنسخ زمنياً: عدّاد على الزيارة يرتفع مع reopen وتحمله بوابتا كل نسخة — triggers القاعدة (تجميد/نشط واحد/حظر unlock بعد ②) صارت تفحص الدورة الحالية فقط. reopen ينفّذ uploaded→reopened→in_review في نداء واحد (المرور مسجَّل في audit).
+- (م6) صف النسخة يُنشأ مسودةً عند reopen (يحمل سبب الفتح مشفّراً + نسخة لقطة السابقة) ويكتمل حرفياً لحظة البوابة ② — القيد «immutable» يسري بعد uploaded فقط (قبلها الحالة تتقدم draft→pending→uploaded/upload_failed).
+- (م6) diff النسخ يُخزَّن كاملاً مشفّراً في note_versions.diff_json وAudit يحمل الأعداد فقط (visit.version_diff) — لا PHI في سجل التدقيق. عرض diff داخل الواجهة مؤجل (البيانات جاهزة).
+- (م6) HL7: محوّل MDM مصغّر (MSH/EVN/PID/TXA/OBX) + MLLP client كمحرك INTEGRATION_ENGINE=hl7 — mllp://host:port في integration_configs. أول نقل T02 والاستبدال T09 بمرجع TXA-13 للوثيقة السابقة حصراً. اختُبر ضد خادم MLLP خيطي حقيقي.
+- (م6) بذر الزيارات المنقولة لا ينشئ note_versions (لقطات النسخ تُبنى بالتدفق الحقيقي) — reopen على زيارة seed القديمة يرفض بوضوح حتى تمر بالدورة الفعلية.
 
 ## BLOCKED
 

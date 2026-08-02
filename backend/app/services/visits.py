@@ -38,16 +38,21 @@ def transition(db: Session, visit: Visit, new_state: str,
           {"from": old_state, "to": new_state})
 
 
-def active_note_approval(db: Session, visit_id: uuid.UUID) -> NoteApproval | None:
-    """اعتماد البوابة ① النشط — ما لم يُنقض بمسار Unlock (قرار مالك 2026-08-03).
+def active_note_approval(db: Session, visit: Visit) -> NoteApproval | None:
+    """اعتماد البوابة ① النشط للدورة الحالية — ما لم يُنقض بمسار Unlock.
 
     بعد كل نقض يتراكم التاريخ في note_approvals؛ النشط هو ما لا صف نقض له في note_unlocks
-    (trigger القاعدة يضمن ألا يوجد أكثر من نشط واحد قبل البوابة ②).
+    (trigger القاعدة يضمن ألا يوجد أكثر من نشط واحد قبل البوابة ②). م6: النشاط محصور
+    بدورة النسخة الحالية (visit.cycle) — اعتمادات الدورات المنقولة تاريخ مجمّد.
     """
     unlocked = select(NoteUnlock.note_approval_id)
     return db.execute(
         select(NoteApproval)
-        .where(NoteApproval.visit_id == visit_id, NoteApproval.id.not_in(unlocked))
+        .where(
+            NoteApproval.visit_id == visit.id,
+            NoteApproval.cycle == visit.cycle,
+            NoteApproval.id.not_in(unlocked),
+        )
         .order_by(NoteApproval.approved_at.desc())
     ).scalars().first()
 

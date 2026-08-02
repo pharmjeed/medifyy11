@@ -260,6 +260,17 @@ export interface VisitSummary {
   note_unlock: NoteUnlockInfo | null;
   can_export: boolean;
   approval: ApprovalRecord | null;
+  /** م6: دورة النسخ — version = الدورة الحالية، وversions تاريخ اللقطات */
+  version: number;
+  versions: NoteVersionInfo[];
+}
+
+export interface NoteVersionInfo {
+  version_number: number;
+  upload_status: "draft" | "pending" | "uploaded" | "upload_failed";
+  uploaded_at: string | null;
+  reopen_reason: string | null;
+  diff_counts: { sections_changed: number; codes_added: number; codes_removed: number } | null;
 }
 
 export interface NoteUnlockInfo {

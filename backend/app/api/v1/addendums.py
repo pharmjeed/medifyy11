@@ -78,10 +78,11 @@ async def create_addendum(
         # الملحق لمذكرة معتمدة نهائياً فقط — قبلها التحرير المباشر/Unlock هو المسار
         raise MedifyError("MDF-4223", details={"state": visit.state, "reason": "addendum_requires_approved"})
 
-    # تحقق من وجود اعتماد أصلي (note_approval)
+    # تحقق من وجود اعتماد أصلي (note_approval) — قد تتعدد الصفوف بعد Unlock/النسخ (م5/م6)
     original_approval = db.execute(
         select(NoteApproval).where(NoteApproval.visit_id == visit_id)
-    ).scalar_one_or_none()
+        .order_by(NoteApproval.approved_at.desc())
+    ).scalars().first()
     if original_approval is None:
         raise MedifyError("MDF-4231", details={"reason": "original_note_approval_missing"})
 
@@ -168,7 +169,7 @@ async def approve_addendum(
     if addendum is None:
         raise MedifyError("MDF-4041")
 
-    get_visit_for_doctor(db, addendum.visit_id)  # RLS + وجود الزيارة
+    addendum_visit = get_visit_for_doctor(db, addendum.visit_id)  # RLS + وجود الزيارة
 
     if addendum.is_approved:
         raise MedifyError("MDF-4223", details={"reason": "addendum_already_approved"})
@@ -181,6 +182,7 @@ async def approve_addendum(
     note_approval = NoteApproval(
         visit_id=addendum.visit_id,
         facility_id=auth.facility_id,
+        cycle=addendum_visit.cycle,
         approved_by=auth.user_id,
         approved_at=dt.datetime.now(dt.timezone.utc),
         summary_hash=summary_hash,

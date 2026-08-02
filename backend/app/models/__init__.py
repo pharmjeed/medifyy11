@@ -12,6 +12,7 @@ from .clinical import (
     GuidanceItem,
     NoteApproval,
     NoteUnlock,
+    NoteVersion,
     Patient,
     PatientContextSnapshot,
     ProcessingAttempt,

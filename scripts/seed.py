@@ -448,6 +448,7 @@ def seed(db: Session) -> None:
         db.add(approval)
         db.flush()
         job = UploadJob(visit_id=visit.id, facility_id=fid,
+                        approval_id=approval.id,  # م6: المهمة مربوطة باعتماد نسختها
                         fhir_payload_ref=f"var/fhir/{visit.id}.json",
                         status="confirmed" if ok else "failed",
                         attempts_count=1 if ok else 3)

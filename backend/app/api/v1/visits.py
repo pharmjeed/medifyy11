@@ -40,6 +40,7 @@ from ...services.processing import (
     process_visit_pipeline,
     queue_mode_enabled,
 )
+from ...services.versions import start_reopen_draft
 from ...services.visits import get_visit_for_doctor, transition
 
 router = APIRouter()
@@ -449,6 +450,39 @@ def void_visit(visit_id: uuid.UUID, body: VoidIn, ctx: Auth, db: DB):
     audit(db, ctx.facility_id, "visit.voided", "visit", visit.id, ctx.user_id,
           {"reason": reason, "note": note, "from_state": from_state, "actor_role": ctx.role})
     return ok({"state": "voided", "reason": reason})
+
+
+# ===== إعادة الفتح Reopen (م6) — نسخة جديدة ببوابتين =====
+
+class ReopenIn(BaseModel):
+    reason: str = Field(min_length=1, max_length=2000)
+
+
+@router.post("/visits/{visit_id}/reopen")
+def reopen_visit(visit_id: uuid.UUID, body: ReopenIn, ctx: DoctorAuth, db: DB):
+    """المبدأ 2: التعديل بعد النقل = reopen حصراً — من uploaded فقط، بسبب إلزامي.
+
+    الأثر: uploaded → reopened → in_review، دورة جديدة (cycle+1)، مسودة نسخة v+1
+    منسوخة من آخر منقولة (سبب الفتح مشفّر معها)، وإعادة البوابتين إلزامية —
+    ① بنقرة إن لم يتغيّر النص (مقارنة hash — م5)، و② كاملة دائماً.
+    يقابله /upload-retry: نفس النسخة بلا بوابات (عطل تقني لا قرار سريري).
+    """
+    visit = get_visit_for_doctor(db, visit_id)
+    reason = body.reason.strip()
+    if not reason:
+        raise MedifyError("MDF-4225", details={"missing": "reason"})
+    if visit.state != "uploaded":
+        raise MedifyError("MDF-4223", details={"state": visit.state, "action": "reopen"})
+
+    transition(db, visit, "reopened", ctx.user_id)
+    visit.cycle += 1  # بوابتا الدورة الجديدة مستقلتان — triggers 0014 واعية بالدورة
+    db.flush()
+    draft = start_reopen_draft(db, visit, reason)
+    transition(db, visit, "in_review", ctx.user_id)
+    # السبب محتوى سريري محتمل — مكانه note_versions المشفّر؛ التدقيق يحمل المرجع والأرقام
+    audit(db, ctx.facility_id, "visit.reopened", "visit", visit.id, ctx.user_id,
+          {"new_version": draft.version_number, "draft_version_id": str(draft.id)})
+    return ok({"state": visit.state, "version": draft.version_number})
 
 
 @router.get("/visits/{visit_id}/transcript")

@@ -96,6 +96,8 @@ class Visit(Base, TimestampMixin):
     patient_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("patients.id"), nullable=False)
     template_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("templates.id"), nullable=False)
     state: Mapped[str] = mapped_column(VISIT_STATE, nullable=False, default="draft")
+    # دورة النسخ (م6): يرتفع مع كل reopen — بوابتا كل نسخة مستقلتان (triggers 0014)
+    cycle: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
     context_snapshot_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("patient_context_snapshots.id"), nullable=True
     )
@@ -268,6 +270,7 @@ class NoteApproval(Base, TimestampMixin):
     id: Mapped[uuid.UUID] = pk()
     visit_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("visits.id"), nullable=False, index=True)
     facility_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("facilities.id"), nullable=False, index=True)
+    cycle: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")  # دورة النسخة (م6)
     approved_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
     approved_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     summary_hash: Mapped[str] = mapped_column(Text, nullable=False)  # بصمة البوابة ①
@@ -299,13 +302,16 @@ class Approval(Base, TimestampMixin):
     """بوابة الاعتماد ② — اعتماد الأكواد. إلحاقي فقط (REVOKE + trigger). بصمة ما اعتُمد (NFR-10).
 
     لا تُنشأ إلا بوجود note_approval (①)، ولا رفع/تصدير إلا بوجودها هي (upload_jobs FK).
+    م6: اعتماد واحد لكل دورة (visit_id, cycle) — كل نسخة reopen تعيد بوابتها ②.
     """
 
     __tablename__ = "approvals"
+    __table_args__ = (UniqueConstraint("visit_id", "cycle", name="uq_approvals_visit_cycle"),)
 
     id: Mapped[uuid.UUID] = pk()
-    visit_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("visits.id"), unique=True, nullable=False)
+    visit_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("visits.id"), nullable=False, index=True)
     facility_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("facilities.id"), nullable=False, index=True)
+    cycle: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
     note_approval_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("note_approvals.id"), nullable=False
     )
@@ -316,18 +322,57 @@ class Approval(Base, TimestampMixin):
 
 
 class UploadJob(Base, TimestampMixin):
-    """لا يُنشأ صف إلا بوجود approval — FK إلى approvals.visit_id يفرض FR-803 على مستوى القاعدة."""
+    """لا يُنشأ صف إلا بوجود approval — FK إلى approvals.id يفرض FR-803 على مستوى القاعدة.
+
+    م6: مهمة رفع لكل نسخة (approval_id UNIQUE) — retry-upload يعيد نفس المهمة/النسخة
+    بلا بوابات (عطل تقني)، بينما reopen نسخة واعتماد ومهمة جديدة (قرار سريري).
+    """
 
     __tablename__ = "upload_jobs"
+    __table_args__ = (UniqueConstraint("approval_id", name="uq_upload_jobs_approval"),)
 
     id: Mapped[uuid.UUID] = pk()
-    visit_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("approvals.visit_id"), unique=True, nullable=False
-    )
+    visit_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("visits.id"), nullable=False, index=True)
     facility_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("facilities.id"), nullable=False, index=True)
+    approval_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("approvals.id"), nullable=False)
     fhir_payload_ref: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(UPLOAD_STATUS, nullable=False, default="queued")
     attempts_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
+class NoteVersion(Base, TimestampMixin):
+    """لقطة نسخة معتمدة (م6) — المبدأ 3: المنقولة immutable (trigger القاعدة يرفض أي UPDATE).
+
+    تُنشأ مكتملة لحظة اعتماد البوابة ② (نص الأقسام + الأكواد المعتمدة + بصمة الحزمة
+    + طوابع البوابتين)، وتتحدث حالتها حتى `uploaded` فتتجمد للأبد. reopen لا يمسها —
+    ينشئ دورة جديدة تنتهي بصف نسخة جديد. diff عن السابقة يُخزن هنا مشفراً (محتوى
+    سريري) — audit_logs يحمل الأعداد فقط.
+    """
+
+    __tablename__ = "note_versions"
+    __table_args__ = (UniqueConstraint("visit_id", "version_number", name="uq_note_versions_visit_number"),)
+
+    id: Mapped[uuid.UUID] = pk()
+    visit_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("visits.id"), nullable=False, index=True)
+    facility_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("facilities.id"), nullable=False, index=True)
+    version_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    # {sections: [{section_key, position, content}]} — عند reopen نسخة من السابقة (مسودة)
+    # ثم تُستبدل بالنص المعتمد حرفياً لحظة البوابة ②
+    note_snapshot: Mapped[Any] = mapped_column(EncryptedJSON, nullable=False)
+    # الأكواد المعتمدة (accepted|modified) بأنظمتها وربط تشخيصها ونصها
+    approved_codes_snapshot: Mapped[Any] = mapped_column(EncryptedJSON, nullable=False)
+    # حقول الاعتماد تكتمل عند البوابة ② — المسودة (draft) قبلها بلا بصمة ولا طوابع
+    bundle_hash: Mapped[str | None] = mapped_column(Text, nullable=True)  # sha256 لحزمة FHIR الكاملة
+    note_approved_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    note_approved_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    codes_approved_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    codes_approved_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    uploaded_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    upload_status: Mapped[str] = mapped_column(Text, nullable=False, default="draft")  # draft|pending|uploaded|upload_failed
+    # سبب إعادة الفتح الذي أنتج هذه النسخة (v≥2) — محتوى سريري محتمل، مشفر
+    reopen_reason: Mapped[str | None] = mapped_column(EncryptedText, nullable=True)
+    # diff نصي + أكواد عن النسخة السابقة (v≥2) — {sections: [...], codes: {...}, counts: {...}}
+    diff_json: Mapped[Any | None] = mapped_column(EncryptedJSON, nullable=True)
 
 
 class UploadAttempt(Base, TimestampMixin):

@@ -19,6 +19,7 @@ from ...models import (
     GuidanceItem,
     NoteApproval,
     NoteUnlock,
+    NoteVersion,
     Summary,
     SummarySection,
     Visit,
@@ -41,8 +42,11 @@ def _get_summary(db, visit: Visit) -> Summary:
 
 def _guard_not_approved(db, visit: Visit) -> None:
     """حسم الأكواد مفتوح حتى البوابة ② — يُغلق بعدها. المبطلة voided مختومة كذلك:
-    محتواها يبقى للقراءة (سجل ما حدث) ولا يُعدَّل بعد الإبطال (قرار مالك 2026-08-03)."""
-    approval = db.execute(select(Approval).where(Approval.visit_id == visit.id)).scalar_one_or_none()
+    محتواها يبقى للقراءة (سجل ما حدث) ولا يُعدَّل بعد الإبطال (قرار مالك 2026-08-03).
+    م6: الفحص بدورة النسخة الحالية — اعتماد نسخة منقولة سابقة لا يغلق الدورة الجديدة."""
+    approval = db.execute(
+        select(Approval).where(Approval.visit_id == visit.id, Approval.cycle == visit.cycle)
+    ).scalar_one_or_none()
     if approval is not None or visit.state in ("approved", "uploaded", "upload_failed", "voided"):
         raise MedifyError("MDF-4226")
 
@@ -54,7 +58,7 @@ def _guard_note_open(db, visit: Visit) -> None:
     حتى إعادة الاعتماد — لذا يُفحص الاعتماد النشط (غير المنقوض) لا مجرد وجود صف.
     """
     _guard_not_approved(db, visit)
-    if active_note_approval(db, visit.id) is not None:
+    if active_note_approval(db, visit) is not None:
         raise MedifyError("MDF-4226", details={"reason": "note_approved_gate_1"})
 
 
@@ -138,7 +142,10 @@ def get_summary(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB, response: Response
         row = db.execute(select(User).where(User.id == user_id)).scalar_one_or_none()
         return row.full_name if row else "—"
 
-    approval = db.execute(select(Approval).where(Approval.visit_id == visit.id)).scalar_one_or_none()
+    # م6: اعتماد الدورة الحالية فقط — اعتمادات النسخ المنقولة السابقة تاريخ مجمّد لا يظهر كبوابة
+    approval = db.execute(
+        select(Approval).where(Approval.visit_id == visit.id, Approval.cycle == visit.cycle)
+    ).scalar_one_or_none()
     # بعد البوابة ② تُعرض بصمة ① المرتبطة بالاعتماد النهائي نفسه؛ قبلها الاعتماد النشط
     # (غير المنقوض بمسار Unlock — قرار مالك 2026-08-03)
     if approval is not None:
@@ -146,7 +153,7 @@ def get_summary(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB, response: Response
             select(NoteApproval).where(NoteApproval.id == approval.note_approval_id)
         ).scalar_one_or_none()
     else:
-        note_approval = active_note_approval(db, visit.id)
+        note_approval = active_note_approval(db, visit)
     # مذكرة مفتوحة بعد نقض: آخر نقض يُعرض للدكتور (السبب + الوقت) حتى يعيد الاعتماد
     note_unlock_out = None
     if note_approval is None:
@@ -195,6 +202,22 @@ def get_summary(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB, response: Response
     )
     # المراجعات السابقة لهذا المريض — سياق المراجعة نفسه الذي رآه الإرشاد (تعديل مالك 2026-07-26)
     history = previous_visits(db, visit.patient_id, visit.doctor_id, exclude_visit_id=visit.id)
+    # م6: تاريخ النسخ — للواجهة (لافتة النسخة + قائمة التصدير ?version=)
+    version_rows = db.execute(
+        select(NoteVersion).where(NoteVersion.visit_id == visit.id)
+        .order_by(NoteVersion.version_number)
+    ).scalars().all()
+    versions_out = [
+        {
+            "version_number": row.version_number,
+            "upload_status": row.upload_status,
+            "uploaded_at": row.uploaded_at.isoformat() if row.uploaded_at else None,
+            "reopen_reason": row.reopen_reason,
+            "diff_counts": (row.diff_json or {}).get("counts") if row.diff_json else None,
+        }
+        for row in version_rows
+    ]
+    has_uploaded_version = any(row.upload_status == "uploaded" for row in version_rows)
     return ok({
         "visit_id": str(visit.id),
         "state": visit.state,
@@ -207,8 +230,11 @@ def get_summary(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB, response: Response
         "gates": gates,
         "note_approved": note_approval is not None,
         "note_unlock": note_unlock_out,
-        "can_export": approval is not None,
+        # آخر منقولة تبقى قابلة للتصدير حتى أثناء إعداد نسخة جديدة (م6)
+        "can_export": approval is not None or has_uploaded_version,
         "approval": approval_out,
+        "version": visit.cycle,
+        "versions": versions_out,
         "previous_visits": history,
     })
 
