@@ -8,7 +8,7 @@ import { Shell } from "@/components/Shell";
 import { Field, Modal, SpecBar, useErrorScreen, useToast } from "@/components/ui";
 import { ApiError, api } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
-import type { Clinic, Doctor, SubscriptionInfo } from "@/lib/types";
+import type { Clinic, Doctor, SubscriptionInfo, Template } from "@/lib/types";
 
 const COLS = "1.6fr 1fr 1fr 1.2fr 1fr .8fr 1.6fr";
 const SPECIALTIES: { ar: string; en: string }[] = [
@@ -26,6 +26,7 @@ function DoctorsInner() {
   const [doctors, setDoctors] = useState<Doctor[]>([]);
   const [sub, setSub] = useState<SubscriptionInfo | null>(null);
   const [clinics, setClinics] = useState<Clinic[]>([]);
+  const [templates, setTemplates] = useState<Template[]>([]);
   const [loading, setLoading] = useState(true);
 
   // نافذة الإنشاء W-104
@@ -35,6 +36,7 @@ function DoctorsInner() {
   const [password, setPassword] = useState("");
   const [specialty, setSpecialty] = useState("باطنة");
   const [clinicId, setClinicId] = useState("");
+  const [selectedTemplateIds, setSelectedTemplateIds] = useState<string[]>([]);
   const [seatError, setSeatError] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -43,14 +45,16 @@ function DoctorsInner() {
 
   const load = useCallback(async () => {
     try {
-      const [docB, subB, clinB] = await Promise.all([
+      const [docB, subB, clinB, tplB] = await Promise.all([
         api<Doctor[]>("/doctors?per_page=50"),
         api<SubscriptionInfo>("/subscription"),
         api<Clinic[]>("/clinics"),
+        api<Template[]>("/templates"),
       ]);
       setDoctors(docB.data);
       setSub(subB.data);
       setClinics(clinB.data.filter((clinic) => clinic.archived_at === null));
+      setTemplates(tplB.data);
     } catch (err) {
       showError(err);
     } finally {
@@ -66,6 +70,7 @@ function DoctorsInner() {
     setPassword("");
     setSpecialty("باطنة");
     setClinicId(clinics[0]?.id ?? "");
+    setSelectedTemplateIds([]);
     setSeatError(false);
     setModalOpen(true);
   };
@@ -95,6 +100,7 @@ function DoctorsInner() {
           password,
           specialty,
           clinic_id: clinicId,
+          template_ids: selectedTemplateIds,
         },
       });
       toast(L("أُنشئ حساب الدكتور واستُهلك مقعد", "Doctor account created — one seat consumed"));
@@ -249,6 +255,35 @@ function DoctorsInner() {
             {clinics.length === 0 ? <option value="">{L("لا عيادات — أنشئ عيادة أولاً", "No clinics — create a clinic first")}</option> : null}
             {clinics.map((clinic) => <option key={clinic.id} value={clinic.id}>{clinic.name}</option>)}
           </select>
+
+          <label className="field-label">{L("القوالب المخصصة للدكتور", "Doctor Templates")}</label>
+          {templates.length === 0 ? (
+            <p style={{ fontSize: 13, color: "#5c7096", margin: "8px 0" }}>
+              {L("لا قوالب متاحة", "No templates available")}
+            </p>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 12 }}>
+              {templates.map((template) => (
+                <label key={template.id} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+                  <input
+                    type="checkbox"
+                    checked={selectedTemplateIds.includes(template.id)}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setSelectedTemplateIds([...selectedTemplateIds, template.id]);
+                      } else {
+                        setSelectedTemplateIds(selectedTemplateIds.filter((id) => id !== template.id));
+                      }
+                    }}
+                  />
+                  <span style={{ fontSize: 14 }}>{template.name}</span>
+                  {template.specialty && (
+                    <span style={{ fontSize: 12, color: "#5c7096" }}>({template.specialty})</span>
+                  )}
+                </label>
+              ))}
+            </div>
+          )}
 
           <div className="modal-actions">
             <button className="btn" onClick={() => void submit()} disabled={busy}>
