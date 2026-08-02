@@ -99,11 +99,12 @@ def note_unlock_visit(visit_id: uuid.UUID, body: NoteUnlockIn, ctx: DoctorAuth, 
     reason = body.reason.strip()
     if not reason:
         raise MedifyError("MDF-4225", details={"missing": "reason"})
+    # حاجزا Unlock البنيويان → MDF-4236 (م5): بعد ② المسار Addendum، وبعد النقل المسار Reopen
     if visit.state != "in_review":
-        raise MedifyError("MDF-4223", details={"state": visit.state, "after_final_approval": "addendum"})
+        raise MedifyError("MDF-4236", details={"state": visit.state, "after_final_approval": "addendum"})
     approval = db.execute(select(Approval).where(Approval.visit_id == visit.id)).scalar_one_or_none()
     if approval is not None:
-        raise MedifyError("MDF-4223", details={"reason": "gate2_completed", "path": "addendum"})
+        raise MedifyError("MDF-4236", details={"reason": "gate2_completed", "path": "addendum"})
     note_approval = active_note_approval(db, visit.id)
     if note_approval is None:
         raise MedifyError("MDF-4231", details={"reason": "nothing_to_unlock"})

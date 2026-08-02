@@ -32,6 +32,7 @@ MDF_CATALOG: dict[str, tuple[int, str, str]] = {
     "MDF-4233": (422, "الكود غير موجود أو ملغى في السجل المرجعي — اختر كوداً نشطاً.", "Code not found or inactive in the reference registry — pick an active code."),
     "MDF-4234": (409, "ملف الصوت غير مكتمل أو غير مطابق — أعد مزامنة التسجيل قبل الإنهاء.", "Audio file incomplete or mismatched — resync the recording before finalizing."),
     "MDF-4235": (410, "المحتوى أُبطل سريرياً (Void) — لا مخارج لزيارة مُبطلة.", "Content clinically voided — no exports for a voided visit."),
+    "MDF-4236": (409, "فتح المذكرة غير متاح — البوابة ② أُنجزت أو حالة الزيارة لا تسمح (المسار Addendum/Reopen).", "Note unlock unavailable — gate 2 completed or visit state disallows it (use Addendum/Reopen)."),
     "MDF-4291": (429, "تجاوزت حد المعدل — أعد المحاولة بعد قليل.", "Rate limit exceeded — retry shortly."),
     # ٣ — المعالجة والتكامل (50xx)
     "MDF-5031": (500, "انقطاع خط التفريغ الفوري.", "Live transcription pipeline interrupted."),
@@ -43,11 +44,11 @@ MDF_CATALOG: dict[str, tuple[int, str, str]] = {
     "MDF-5001": (500, "خطأ داخلي غير مصنّف.", "Unclassified internal error."),
 }
 
-assert len(MDF_CATALOG) == 30, (
-    "30 رمزاً لا غير: 22 (DOC-13 v1.2) + MDF-4015/4229 (DOC-20) "
+assert len(MDF_CATALOG) == 31, (
+    "31 رمزاً لا غير: 22 (DOC-13 v1.2) + MDF-4015/4229 (DOC-20) "
     "+ MDF-4230/4231/4232 (بوابتا الاعتماد وموافقة المريض — توجيه المالك 2026-07-22) "
     "+ MDF-4233 (السجل المرجعي للأكواد — قرار مالك 2026-08-02) "
-    "+ MDF-4234/4235 (سلامة ملف الصوت · مخارج المُبطلة — مهمة التحصين م2/م4، 2026-08-03)"
+    "+ MDF-4234/4235/4236 (سلامة الصوت · مخارج المُبطلة · حواجز Unlock — التحصين م2/م4/م5)"
 )
 
 

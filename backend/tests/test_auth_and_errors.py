@@ -14,16 +14,18 @@ def test_health(client):
     assert response.json()["data"]["status"] == "ok"
 
 
-def test_mdf_catalog_is_exactly_30():
+def test_mdf_catalog_is_exactly_31():
     """22 (DOC-13 v1.2) + MDF-4015/4229 (DOC-20) + MDF-4230/4231/4232 (بوابتا الاعتماد
     وموافقة المريض — توجيه المالك 2026-07-22) + MDF-4233 (السجل المرجعي — قرار مالك 2026-08-02)
-    + MDF-4234/4235 (سلامة ملف الصوت · مخارج المُبطلة — مهمة التحصين م2/م4، 2026-08-03)."""
-    assert len(MDF_CATALOG) == 30
+    + MDF-4234/4235/4236 (سلامة الصوت · مخارج المُبطلة · حواجز Unlock — التحصين م2/م4/م5)."""
+    assert len(MDF_CATALOG) == 31
     assert "MDF-4015" in MDF_CATALOG and "MDF-4229" in MDF_CATALOG
     # رموز توجيه المالك: موافقة المريض + بوابتا الاعتماد + السجل المرجعي + رموز التحصين
-    assert {"MDF-4230", "MDF-4231", "MDF-4232", "MDF-4233", "MDF-4234", "MDF-4235"} <= set(MDF_CATALOG)
+    assert {"MDF-4230", "MDF-4231", "MDF-4232", "MDF-4233",
+            "MDF-4234", "MDF-4235", "MDF-4236"} <= set(MDF_CATALOG)
     assert MDF_CATALOG["MDF-4234"][0] == 409  # فجوة مقاطع = تعارض حالة قابل للإصلاح بالمزامنة
     assert MDF_CATALOG["MDF-4235"][0] == 410  # المُبطلة مختومة — Gone
+    assert MDF_CATALOG["MDF-4236"][0] == 409  # حاجز Unlock بنيوي — المسار Addendum/Reopen
     for code, (status, ar, en) in MDF_CATALOG.items():
         assert code.startswith("MDF-")
         assert ar and en  # ثنائية اللغة إلزامية

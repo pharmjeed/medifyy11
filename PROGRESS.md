@@ -11,7 +11,7 @@
 | 2 | الرفع المجزّأ | ✅ أُنجزت | هجرة 0012 `audio_chunks` (قيد فريد visit+index، sha256، offset/length) · ترقيم موحّد معمَّر عبر الاتصالات (idempotent re-ack — قتل ثغرة تكرار الصوت) · reconcile ذاتي الشفاء عند الاتصال · finalize صارم في stop (لا-فجوات/حجم/bit-exact → MDF-4234 جديد 409) · واجهة: sha256 لكل مقطع + backoff أُسّي + لافتة «استئناف تسجيل منقطع» بعد قتل التبويبة · 5 اختبارات جديدة (151 passed) |
 | 3 | إعادة المحاولة التلقائية | ✅ أُنجزت | هجرة 0013 `processing_attempts` (يُكتب بجلسة نظام — ينجو من rollback) · مصنّف مبني على الأنواع (`pipelines/classify.py` — أصلح عدّ FileNotFoundError عابراً) · `services/processing.py`: محاولة + 3 إعادات 30ث/2د/5د على العابر فقط، non_retryable فوري، فشل P3 غير معطِّل · وضعان: inline (dev/tests) وqueue (عامل arq بخدمة worker في compose) · نقطتا `processing-status` و`reprocess` + استطلاع الواجهة بتقدم صادق · 4 اختبارات (155 passed) |
 | 4 | الإبطال (Void) | ✅ أُنجزت | المصادر الموسّعة summarized/in_review/approved-قبل-النقل (trigger 0011 + API) · RBAC: الدكتور صاحب الزيارة أو الأدمن (سياسة doctor_scope تمرّره) · exports → 410 بكود MDF-4235 الجديد · reason enum بمصادقة Pydantic (422 قياسي بدل 404 الخاطئ) + توافق عكسي «test» · from_state/actor_role في Audit · 3 اختبارات جديدة + تحديثان (158 passed) |
-| 5 | فتح البوابة ① (Unlock) | ⬜ لم تبدأ | قائم جزئياً (0010) — hash-compare لإعادة اعتماد بنقرة + كود MDF جديد |
+| 5 | فتح البوابة ① (Unlock) | ✅ أُنجزت | الأساس القائم (0010) اكتمل: MDF-4236 الجديد (409) لحاجزي بعد-② وحالة-غير-مسموحة · مقارنة hash في الملخص (`note_unlock.text_unchanged`) — لم يتغيّر → «إعادة اعتماد بنقرة» بواجهة مميزة · قرارات الإرشادات محفوظة (مثبت سلفاً) · اختبار دورة hash كامل (159 passed) |
 | 6 | دورة النسخ (Reopen) | ⬜ لم تبدأ | الأكبر: `note_versions` + immutability + reopen + FHIR amended/relatesTo + HL7 MDM |
 | 7 | Idempotency واعٍ بالنسخة | ⬜ لم تبدأ | مفتاح `{visit_id}:{version}` + ifNoneExist + MSH-10 + `delivery_receipts` |
 | 8 | سياسة الاحتفاظ الموحّدة | ⬜ لم تبدأ | `retention_policies` + `legal_hold` + مهمة ليلية + docs |
@@ -41,6 +41,7 @@
 |-------|---------|--------|
 | MDF-4234 | 2 | 409 — ملف الصوت غير مكتمل/غير مطابق عند finalize (قائمة الناقص في details) |
 | MDF-4235 | 4 | 410 — مخارج زيارة مُبطلة (Void ختمٌ للمحتوى) |
+| MDF-4236 | 5 | 409 — حاجز Unlock بنيوي: البوابة ② أُنجزت أو الحالة لا تسمح (المسار Addendum/Reopen) |
 
 ## قرارات اتُّخذت منفرداً
 
@@ -56,6 +57,7 @@
 - (م3) الإعادات داخل `process_visit_pipeline` لا عبر arq retries (سجل موحّد وتخطي مراحل مكتملة idempotent). الفشل النهائي في queue يُبقي الزيارة transcribed ويُستأنف بـ/reprocess؛ وفي inline يُرجعها rollback إلى recording (زر الإنهاء يعيد).
 - (م3) نقطتا API جديدتان خارج DOC-05 بمقتضى المهمة: GET processing-status وPOST reprocess (+ حدث audit `visit.reprocess_requested`). المخرج غير المطابق للعقد من المحرك يُصنَّف non_retryable (فشل سريع).
 - (م4) أسماء الحقول السلكية بقيت reason/note (لا reason_code/reason_text) — الدلالة نفسها وواجهة قائمة، مع قبول «test» القديم كمرادف test_recording. زر الإبطال في الواجهة يظهر لـsummarized/in_review (approved لحظية — الرفع فوري؛ إبطالها متاح API/أدمن).
+- (م5) اسم النقطة بقي note-unlock (لا unlock-note) — منشور ومستخدم. «لا اعتماد نشط يُنقض» بقي MDF-4231 (422 أدق دلالة) وMDF-4236 (409) للحاجزين البنيويين — المواصفة طلبت كوداً جديداً للرفض وقد أُضيف.
 
 ## BLOCKED
 

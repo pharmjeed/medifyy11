@@ -266,6 +266,8 @@ export interface NoteUnlockInfo {
   reason: string;
   unlocked_at: string;
   unlocked_by: string;
+  /** م5: النص الحالي ببصمة الاعتماد المنقوض نفسها → إعادة اعتماد بنقرة بلا مراجعة diff */
+  text_unchanged: boolean;
 }
 
 export interface ConsentDocument {

@@ -27,7 +27,7 @@ from ...pipelines.run import run_edit_chat
 from ...pipelines.stt import get_stt
 from ...services.code_registry import check_code, registry_systems
 from ...services.history import previous_visits
-from ...services.visits import active_note_approval, get_visit_for_doctor, summary_etag
+from ...services.visits import active_note_approval, get_visit_for_doctor, summary_etag, summary_hashes
 
 router = APIRouter()
 
@@ -155,10 +155,17 @@ def get_summary(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB, response: Response
             .order_by(NoteUnlock.unlocked_at.desc())
         ).scalars().first()
         if last_unlock is not None:
+            # مقارنة hash (م5): النص الحالي مقابل بصمة الاعتماد المنقوض — لم يتغيّر →
+            # الواجهة تعرض «إعادة اعتماد بنقرة» بلا مراجعة diff
+            revoked = db.execute(
+                select(NoteApproval).where(NoteApproval.id == last_unlock.note_approval_id)
+            ).scalar_one_or_none()
+            current_content_hash, _codes = summary_hashes(db, visit)
             note_unlock_out = {
                 "reason": last_unlock.reason,
                 "unlocked_at": last_unlock.unlocked_at.isoformat(),
                 "unlocked_by": _actor(last_unlock.unlocked_by),
+                "text_unchanged": revoked is not None and revoked.summary_hash == current_content_hash,
             }
     approval_out = None
     if approval is not None:

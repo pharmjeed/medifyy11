@@ -834,14 +834,19 @@ export default function ReviewPage() {
             <>
               <span style={{ fontSize: 12.5, color: summary.note_unlock !== null ? "#9c6f00" : "#5c7096", fontWeight: 700, flex: 1 }}>
                 {summary.note_unlock !== null
-                  ? L(`فُتحت المذكرة بعد نقض الاعتماد — السبب: «${summary.note_unlock.reason}». عدّل النص ثم أعد اعتماده (①). قرارات الأكواد السابقة محفوظة.`,
-                      `Note unlocked after revoking approval — reason: "${summary.note_unlock.reason}". Edit the text, then re-approve it (①). Previous code decisions are preserved.`)
+                  ? summary.note_unlock.text_unchanged
+                    ? L(`فُتحت المذكرة — السبب: «${summary.note_unlock.reason}». النص لم يتغيّر منذ الاعتماد المنقوض (البصمة مطابقة) — أعد الاعتماد بنقرة واحدة أو عدّل أولاً.`,
+                        `Note unlocked — reason: "${summary.note_unlock.reason}". The text is unchanged since the revoked approval (hash matches) — re-approve with one click, or edit first.`)
+                    : L(`فُتحت المذكرة بعد نقض الاعتماد — السبب: «${summary.note_unlock.reason}». النص تغيّر؛ راجعه ثم أعد اعتماده (①). قرارات الأكواد السابقة محفوظة.`,
+                        `Note unlocked after revoking approval — reason: "${summary.note_unlock.reason}". The text changed; review it, then re-approve (①). Previous code decisions are preserved.`)
                   : L("راجع نص المذكرة ثم اعتمده (البوابة ①). بعدها يتجمّد النص ويُفتح حسم الأكواد.",
                       "Review the note text, then approve it (gate ①). The text then freezes and code resolution opens.")}
               </span>
               <button className="btn-success btn-approve" onClick={() => void approveNote()}>
                 {summary.note_unlock !== null
-                  ? L("① إعادة اعتماد النص", "① Re-approve note")
+                  ? summary.note_unlock.text_unchanged
+                    ? L("① إعادة الاعتماد — النص لم يتغيّر", "① Re-approve — text unchanged")
+                    : L("① إعادة اعتماد النص", "① Re-approve note")
                   : L("① اعتماد نص المذكرة", "① Approve note")}
               </button>
             </>
