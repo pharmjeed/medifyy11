@@ -15,6 +15,7 @@ from sqlalchemy import (
     Numeric,
     Text,
     UniqueConstraint,
+    func,
 )
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -148,8 +149,11 @@ class CodingSystemConfig(Base, TimestampMixin):
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
 
-class DoctorTemplate(Base, TimestampMixin):
-    """ربط الدكتور بالقوالب المتاحة له — مستأجري مع RLS على facility_id (FR-500+)."""
+class DoctorTemplate(Base):
+    """ربط الدكتور بالقوالب المتاحة له — مستأجري مع RLS على facility_id (FR-500+).
+
+    جدول ربط إلحاقي (إدراج/حذف فقط — UPDATE محجوب في الهجرة 0007) فلا updated_at.
+    """
 
     __tablename__ = "doctor_templates"
     __table_args__ = (
@@ -160,4 +164,6 @@ class DoctorTemplate(Base, TimestampMixin):
     doctor_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
     template_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("templates.id"), nullable=False, index=True)
     facility_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("facilities.id"), nullable=False, index=True)
-    # created_at (من TimestampMixin)
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
