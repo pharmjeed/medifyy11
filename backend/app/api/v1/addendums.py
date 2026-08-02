@@ -124,10 +124,10 @@ async def create_addendum(
         addendum.id, {"visit_id": str(visit_id), "reason": payload.reason or ""}
     )
 
-    # إشعار الدكتور
+    # إشعار الدكتور (dr.summary_ready: ملخص جاهز للمراجعة، وهنا ملحق جاهز)
     notify(
-        db, auth.facility_id, auth.user_id, "dr.addendum_pending",
-        {"visit_id": str(visit_id), "addendum_id": str(addendum.id)}
+        db, auth.facility_id, auth.user_id, "dr.summary_ready",
+        {"visit_id": str(visit_id), "addendum_id": str(addendum.id), "type": "addendum"}
     )
 
     track(
