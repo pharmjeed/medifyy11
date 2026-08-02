@@ -14,6 +14,7 @@ from ..audit import audit
 from ..config import get_settings
 from ..models import IntegrationConfig, UploadAttempt, UploadJob, Visit
 from ..notify import notify, notify_admins
+from .visits import transition
 
 logger = logging.getLogger("medify.uploader")
 
@@ -86,14 +87,14 @@ def process_upload_job(db: Session, job_id: uuid.UUID, manual: bool = False) -> 
 
     if outcome.ok:
         job.status = "confirmed"
-        visit.state = "uploaded"
+        transition(db, visit, "uploaded")  # فاعل النظام — Audit موحّد للانتقال (المرحلة 1)
         db.flush()
         notify(db, job.facility_id, visit.doctor_id, "dr.upload_success", {"visit_id": str(visit.id)})
         audit(db, job.facility_id, "upload.confirmed", "upload_job", job.id, None, {"attempts": job.attempts_count})
     else:
         job.status = "failed"
         if visit.state == "approved":
-            visit.state = "upload_failed"
+            transition(db, visit, "upload_failed")  # فاعل النظام
         db.flush()
         notify(db, job.facility_id, visit.doctor_id, "dr.upload_failed",
                {"visit_id": str(visit.id), "mdf": outcome.error_code})

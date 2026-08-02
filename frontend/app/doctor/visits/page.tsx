@@ -15,7 +15,7 @@ const LIST_GRID = "1.2fr .9fr 1.7fr .8fr .8fr 1.1fr 1.1fr";
 
 const STATE_ORDER: VisitState[] = [
   "draft", "recording", "transcribed", "summarized",
-  "in_review", "approved", "uploaded", "upload_failed", "cancelled", "voided",
+  "in_review", "approved", "uploaded", "upload_failed", "reopened", "cancelled", "voided",
 ];
 
 /** عناوين الأقسام المعروفة (الأقسام ديناميكية من القالب — fallback بحرف المفتاح). */
@@ -37,6 +37,7 @@ function actionFor(row: VisitRow): { label: { ar: string; en: string }; href: st
     case "summarized": return { label: { ar: "بدء المراجعة", en: "Start review" }, href: `/doctor/visits/${row.id}/review` };
     // المبطلة تبقى مقروءة (Void ≠ Delete) — محتواها مختوم خارج المخارج والإحصائيات
     case "voided": return { label: { ar: "مُبطلة — عرض", en: "Voided — view" }, href: `/doctor/visits?open=${row.id}` };
+    case "reopened": return { label: { ar: "متابعة النسخة الجديدة", en: "Continue new version" }, href: `/doctor/visits/${row.id}/review` };
     default: return null;
   }
 }

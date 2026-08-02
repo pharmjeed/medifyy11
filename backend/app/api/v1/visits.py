@@ -278,7 +278,7 @@ def recording_start(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB):
         consent = db.execute(select(VisitConsent).where(VisitConsent.visit_id == visit.id)).scalar_one_or_none()
         if consent is None:
             raise MedifyError("MDF-4230", details={"visit_id": str(visit.id)})
-    transition(db, visit, "recording")
+    transition(db, visit, "recording", ctx.user_id)
     settings = get_settings()
     storage_dir = Path(settings.recordings_dir)
     storage_dir.mkdir(parents=True, exist_ok=True)
@@ -323,7 +323,7 @@ def recording_stop(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB, body: Recording
     → P2 (+P2-verify) → summarized → P3 → in_review — متزامنة بلا طوابير مؤجلة."""
     body = body or RecordingStopIn()
     visit = get_visit_for_doctor(db, visit_id)
-    transition(db, visit, "transcribed")
+    transition(db, visit, "transcribed", ctx.user_id)
 
     recording = db.execute(select(Recording).where(Recording.visit_id == visit.id)).scalar_one_or_none()
     if recording is not None and body.duration_sec:
@@ -333,9 +333,9 @@ def recording_stop(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB, body: Recording
 
     run_transcription(db, visit)              # P1 — فشل المحرك → MDF-5031 (يرفع خطأ)
     summary = run_summary(db, visit)          # P2 + تمريرة السند — فشل → MDF-5032 (يرفع خطأ)
-    transition(db, visit, "summarized")
+    transition(db, visit, "summarized", ctx.user_id)
     guidance_ok = run_guidance(db, visit, summary)  # فشل → W-224 دون حجب
-    transition(db, visit, "in_review")
+    transition(db, visit, "in_review", ctx.user_id)
     return ok({"state": visit.state, "guidance_ok": guidance_ok})
 
 
@@ -345,7 +345,7 @@ def cancel_visit(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB):
     visit = get_visit_for_doctor(db, visit_id)
     if visit.state not in ("draft", "recording"):
         raise MedifyError("MDF-4227", details={"state": visit.state})
-    transition(db, visit, "cancelled")
+    transition(db, visit, "cancelled", ctx.user_id)
     return ok({"state": "cancelled"})
 
 
@@ -376,7 +376,7 @@ def void_visit(visit_id: uuid.UUID, body: VoidIn, ctx: DoctorAuth, db: DB):
     if visit.state != "in_review":
         # قبل المعالجة مساره «إلغاء» (FR-606)؛ بعد الاعتماد لا رجوع — الحكم النهائي للـtrigger
         raise MedifyError("MDF-4223", details={"state": visit.state, "to": "voided"})
-    transition(db, visit, "voided")
+    transition(db, visit, "voided", ctx.user_id)
     # سبب الإبطال بيان إداري لا محتوى سريرياً (DOC-16) — يُدوَّن كاملاً مع هوية الفاعل والوقت
     audit(db, ctx.facility_id, "visit.voided", "visit", visit.id, ctx.user_id,
           {"reason": body.reason, "note": note})

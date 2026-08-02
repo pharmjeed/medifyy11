@@ -226,7 +226,11 @@ def audit_logs(ctx: AdminAuth, db: DB, page: int = 1, per_page: int = 25, action
     if action:
         base = base.where(AuditLog.action.like(f"{action}%"))
     total = db.execute(select(func.count()).select_from(base.subquery())).scalar_one()
-    rows = db.execute(base.order_by(AuditLog.at.desc()).offset((page - 1) * per_page).limit(per_page)).scalars().all()
+    # id (UUID v7) كاسر تعادل — أسطر المعاملة الواحدة تتشارك at نفسه (server now())
+    rows = db.execute(
+        base.order_by(AuditLog.at.desc(), AuditLog.id.desc())
+        .offset((page - 1) * per_page).limit(per_page)
+    ).scalars().all()
     actor_ids = {r.actor_user_id for r in rows if r.actor_user_id}
     actors = {
         u.id: u.full_name

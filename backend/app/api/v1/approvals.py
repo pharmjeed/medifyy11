@@ -218,7 +218,7 @@ def approve_visit(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB):
     )
     db.add(approval)
     db.flush()  # الاعتماد أولاً — قيد FK على upload_jobs يفرض الترتيب
-    transition(db, visit, "approved")
+    transition(db, visit, "approved", ctx.user_id)
 
     bundle = build_bundle(db, visit)
     payload_ref = store_bundle(visit.id, bundle)

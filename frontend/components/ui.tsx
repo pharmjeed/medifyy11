@@ -40,6 +40,7 @@ const VSTATES: Record<VisitState, { ar: string; en: string; bg: string; fg: stri
   upload_failed: { ar: "فشل الرفع", en: "Upload failed", bg: "#fbeaea", fg: "#d94b4b" },
   cancelled: { ar: "ملغاة", en: "Cancelled", bg: "#f7f9fb", fg: "#5c7096" },
   voided: { ar: "مُبطلة", en: "Voided", bg: "#fbeaea", fg: "#a13333" },
+  reopened: { ar: "أُعيد فتحها", en: "Reopened", bg: "rgba(42,111,151,.12)", fg: "#3b82c4" },
 };
 
 export function VisitStateBadge({ state }: { state: VisitState }) {

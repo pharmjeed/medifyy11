@@ -120,7 +120,8 @@ export interface Template {
 
 export type VisitState =
   | "draft" | "recording" | "transcribed" | "summarized"
-  | "in_review" | "approved" | "uploaded" | "upload_failed" | "cancelled" | "voided";
+  | "in_review" | "approved" | "uploaded" | "upload_failed" | "cancelled" | "voided"
+  | "reopened";
 
 export interface VisitRow {
   id: string;

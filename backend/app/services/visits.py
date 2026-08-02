@@ -8,13 +8,20 @@ from sqlalchemy import select
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.orm import Session
 
+from ..audit import audit
 from ..errors import MedifyError
 from ..models import GuidanceItem, NoteApproval, NoteUnlock, Summary, SummarySection, Visit
 
 
-def transition(db: Session, visit: Visit, new_state: str) -> None:
-    """تحديث الحالة — أي انتقال ممنوع يرفضه trigger القاعدة → MDF-4223."""
+def transition(db: Session, visit: Visit, new_state: str,
+               actor_user_id: uuid.UUID | None = None) -> None:
+    """تحديث الحالة — أي انتقال ممنوع يرفضه trigger القاعدة → MDF-4223.
+
+    كل انتقال ناجح يكتب سطراً موحّداً visit.state_changed في audit_logs (المرحلة 1):
+    من/إلى + الفاعل (None = النظام) — بلا معرّفات مرضى.
+    """
     visit_id = str(visit.id)  # قبل flush — rollback يفقد سياق RLS للمعاملة (SET LOCAL)
+    old_state = visit.state
     visit.state = new_state
     try:
         db.flush()
@@ -27,6 +34,8 @@ def transition(db: Session, visit: Visit, new_state: str) -> None:
         if "MDF-4223" in message:
             raise MedifyError("MDF-4223", details={"visit_id": visit_id, "to": new_state}) from exc
         raise
+    audit(db, visit.facility_id, "visit.state_changed", "visit", visit.id, actor_user_id,
+          {"from": old_state, "to": new_state})
 
 
 def active_note_approval(db: Session, visit_id: uuid.UUID) -> NoteApproval | None:
