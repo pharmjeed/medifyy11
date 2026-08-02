@@ -37,6 +37,7 @@ from ...models import (
     Plan,
     PlatformAdmin,
     PlatformAuditLog,
+    PlatformDefaultPrompt,
     SeatEvent,
     Subscription,
     User,
@@ -1189,3 +1190,143 @@ def sa_registry_clear(system: str, ctx: SuperAuth, request: Request, db: SystemD
     sa_audit(db, ctx, "sa.registry_cleared", "registry_codes", system,
              meta={"system": system, "removed": removed})
     return ok({"system": system, "removed": removed, "systems": registry_overview(db)})
+
+
+# ════════════════ البرومبتات (FR-500+) ════════════════
+
+class SaPromptIn(BaseModel):
+    """حفظ إصدار جديد من برومبت ديفولت."""
+    prompt_content: str = Field(min_length=10)
+    version: str = Field(default="1.0", pattern=r"^\d+\.\d+$")
+
+
+@router.get("/prompts")
+def sa_list_prompts(ctx: SuperAuth, db: SystemDB):
+    """قائمة جميع البرومبتات الديفولت مع إصداراتها."""
+    from ...models import PlatformDefaultPrompt
+
+    prompts = db.execute(
+        select(PlatformDefaultPrompt).order_by(
+            PlatformDefaultPrompt.template_type,
+            PlatformDefaultPrompt.version.desc()
+        )
+    ).scalars().all()
+
+    by_type = {}
+    for p in prompts:
+        if p.template_type not in by_type:
+            by_type[p.template_type] = []
+        by_type[p.template_type].append({
+            "id": str(p.id),
+            "version": p.version,
+            "is_active": p.is_active,
+            "created_at": p.created_at.isoformat(),
+            "updated_by": str(p.updated_by) if p.updated_by else None,
+        })
+
+    return ok(by_type)
+
+
+@router.get("/prompts/{template_type}")
+def sa_get_prompt(template_type: str, ctx: SuperAuth, db: SystemDB):
+    """معاينة البرومبت النشط لنوع قالب معين."""
+    from ...models import PlatformDefaultPrompt
+
+    prompt = db.execute(
+        select(PlatformDefaultPrompt).where(
+            PlatformDefaultPrompt.template_type == template_type,
+            PlatformDefaultPrompt.is_active == True
+        )
+    ).scalar_one_or_none()
+
+    if prompt is None:
+        raise MedifyError("MDF-4041", details={"template_type": template_type, "reason": "not_found"})
+
+    return ok({
+        "id": str(prompt.id),
+        "template_type": prompt.template_type,
+        "version": prompt.version,
+        "content": prompt.prompt_content,
+        "is_active": prompt.is_active,
+        "created_at": prompt.created_at.isoformat(),
+    })
+
+
+@router.post("/prompts/{template_type}")
+def sa_create_prompt(template_type: str, body: SaPromptIn, ctx: SuperAuth, db: SystemDB):
+    """حفظ إصدار جديد من برومبت ديفولت (لا يُفعّل تلقائياً)."""
+    from ...models import PlatformDefaultPrompt
+
+    require_cap(ctx, "prompts.write")
+
+    # التحقق من أن الإصدار لا يوجد بالفعل
+    existing = db.execute(
+        select(PlatformDefaultPrompt).where(
+            PlatformDefaultPrompt.template_type == template_type,
+            PlatformDefaultPrompt.version == body.version
+        )
+    ).scalar_one_or_none()
+
+    if existing is not None:
+        raise MedifyError("MDF-4040", details={"template_type": template_type, "version": body.version})
+
+    prompt = PlatformDefaultPrompt(
+        template_type=template_type,
+        prompt_content=body.prompt_content,
+        version=body.version,
+        is_active=False,  # يتطلب تفعيل منفصل
+        created_by=ctx.admin_id,
+    )
+    db.add(prompt)
+    db.flush()
+
+    sa_audit(db, ctx, "sa.prompt_created", "platform_default_prompts", str(prompt.id),
+             meta={"template_type": template_type, "version": body.version})
+
+    return ok({
+        "id": str(prompt.id),
+        "template_type": prompt.template_type,
+        "version": prompt.version,
+        "is_active": False,
+    })
+
+
+@router.patch("/prompts/{template_type}/activate")
+def sa_activate_prompt(template_type: str, version: str, ctx: SuperAuth, request: Request, db: SystemDB):
+    """تفعيل إصدار من برومبت (يُلغي تفعيل الإصدارات السابقة) — requires reauth."""
+    from ...models import PlatformDefaultPrompt
+
+    require_cap(ctx, "prompts.write")
+    require_reauth(ctx, request)
+
+    # البحث عن الإصدار المطلوب
+    target = db.execute(
+        select(PlatformDefaultPrompt).where(
+            PlatformDefaultPrompt.template_type == template_type,
+            PlatformDefaultPrompt.version == version
+        )
+    ).scalar_one_or_none()
+
+    if target is None:
+        raise MedifyError("MDF-4041", details={"template_type": template_type, "version": version})
+
+    # إلغاء تفعيل الإصدارات السابقة
+    db.execute(
+        sa_delete(PlatformDefaultPrompt.__table__).where(
+            PlatformDefaultPrompt.template_type == template_type,
+            PlatformDefaultPrompt.is_active == True
+        )
+    )
+    # تفعيل الإصدار الجديد
+    target.is_active = True
+    target.updated_by = ctx.admin_id
+
+    sa_audit(db, ctx, "sa.prompt_activated", "platform_default_prompts", str(target.id),
+             meta={"template_type": template_type, "version": version})
+
+    return ok({
+        "id": str(target.id),
+        "template_type": target.template_type,
+        "version": target.version,
+        "is_active": True,
+    })

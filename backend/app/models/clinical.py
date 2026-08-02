@@ -79,6 +79,10 @@ class Template(Base, TimestampMixin):
     source_sample_text: Mapped[str | None] = mapped_column(EncryptedText, nullable=True)
     is_default: Mapped[bool] = mapped_column(default=False, nullable=False)
     archived_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # برومبتات (FR-500+)
+    prompt_content: Mapped[str | None] = mapped_column(Text, nullable=True)  # محتوى البرومبت الفعلي
+    prompt_source: Mapped[str] = mapped_column(Text, nullable=False, default="default")  # default أو custom
+    prompt_template_type: Mapped[str | None] = mapped_column(Text, nullable=True)  # ربط بـ platform_default_prompts
 
 
 class Visit(Base, TimestampMixin):

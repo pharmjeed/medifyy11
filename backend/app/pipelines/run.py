@@ -18,6 +18,7 @@ from ..models import (
     GuidanceItem,
     Patient,
     PatientContextSnapshot,
+    PlatformDefaultPrompt,
     Recording,
     Summary,
     SummarySection,
@@ -68,6 +69,44 @@ def _active_coding_systems(db: Session, facility_id: uuid.UUID) -> list[str]:
         )
     ).scalars().all()
     return [row.system for row in rows] or ["ICD10AM"]
+
+
+def _load_prompt_content(db: Session, template: Template) -> str:
+    """تحميل محتوى البرومبت من Database:
+    1. إن كان للقالب prompt_content مخصص (custom) → استخدمه
+    2. وإلا استخدم البرومبت الافتراضي من SuperAdmin
+    (FR-500+)
+    """
+    # إن كان البرومبت مخصصاً، استخدمه
+    if template.prompt_source == "custom" and template.prompt_content:
+        return template.prompt_content
+
+    # استخدم البرومبت الافتراضي من SuperAdmin
+    if template.prompt_template_type:
+        default_prompt = db.execute(
+            select(PlatformDefaultPrompt).where(
+                PlatformDefaultPrompt.template_type == template.prompt_template_type,
+                PlatformDefaultPrompt.is_active == True,  # noqa: E712
+            )
+        ).scalar_one_or_none()
+        if default_prompt:
+            return default_prompt.prompt_content
+
+    # fallback: من الملفات (للتوافقية العكسية مع البيانات القديمة)
+    from .llm import load_prompt
+    # استنتاج نوع البرومبت من اسم القالب
+    if "كشف" in (template.name or "") or "أول" in (template.name or ""):
+        prompt_type = "first_visit"
+    elif "استشارة" in (template.name or ""):
+        prompt_type = "consultation"
+    else:
+        prompt_type = "follow_up"
+    try:
+        version = PROMPT_VERSIONS.get("P2-summary", "1.0")
+        return load_prompt("P2-summary", version)
+    except Exception:
+        # إن فشل التحميل، رجّع نص فارغ والخطأ سيظهر من المحرك
+        return ""
 
 
 def run_transcription(db: Session, visit: Visit) -> Transcript:
@@ -146,6 +185,10 @@ def run_summary(db: Session, visit: Visit) -> Summary:
     deid = build_map(patient.display_name, patient.hospital_mrn)
     transcript_scrubbed = deid.scrub(_transcript_text(transcript))
     version = PROMPT_VERSIONS["P2-summary"]
+
+    # تحميل البرومبت من قاعدة البيانات (مخصص أو افتراضي أو من الملفات)
+    custom_prompt = _load_prompt_content(db, template)
+
     try:
         output, model_ref = get_llm().complete_json(
             "P2-summary",
@@ -155,6 +198,7 @@ def run_summary(db: Session, visit: Visit) -> Summary:
                 "template_structure": template.structure_json,
                 "specialty": template.specialty or "",
                 "visit_type": template.visit_type or "",
+                "custom_prompt": custom_prompt,
             },
         )
         sections_out = output["sections"]

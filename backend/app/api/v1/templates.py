@@ -15,7 +15,7 @@ from ...analytics import track
 from ...deps import Auth, DoctorAuth, DB
 from ...envelope import ok
 from ...errors import MedifyError
-from ...models import Template
+from ...models import DoctorTemplate, Template
 from ...pipelines.llm import get_llm
 from ...pipelines.run import PROMPT_VERSIONS, run_reverse_template
 
@@ -38,11 +38,25 @@ def _template_out(template: Template) -> dict[str, Any]:
 
 @router.get("/templates")
 def list_templates(ctx: Auth, db: DB, include_archived: bool = False):
-    """الجاهزة (العامة) + الشخصية — RLS يفلتر شخصيات الآخرين (FR-501)."""
-    query = select(Template).where(Template.facility_id == ctx.facility_id)
-    if not include_archived:
-        query = query.where(Template.archived_at.is_(None))
-    templates = db.execute(query.order_by(Template.created_at)).scalars().all()
+    """الأدمن: جميع قوالب المنشأة · الدكتور: فقط قوالبه من doctor_templates (FR-501+FR-500)."""
+    # للدكاترة: قوالبهم فقط من doctor_templates (FR-500+)
+    if ctx.role == "doctor":
+        doctor_tpls = db.execute(
+            select(DoctorTemplate).where(DoctorTemplate.doctor_id == ctx.user_id)
+        ).scalars().all()
+        template_ids = [dt.template_id for dt in doctor_tpls]
+        if not template_ids:
+            return ok([])
+        templates = db.execute(
+            select(Template).where(Template.id.in_(template_ids))
+        ).scalars().all()
+    else:
+        # للأدمن: جميع القوالب
+        query = select(Template).where(Template.facility_id == ctx.facility_id)
+        if not include_archived:
+            query = query.where(Template.archived_at.is_(None))
+        templates = db.execute(query.order_by(Template.created_at)).scalars().all()
+
     return ok([_template_out(template) for template in templates])
 
 

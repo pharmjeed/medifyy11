@@ -282,3 +282,80 @@ def retry_uploads(body: RetryUploadsIn, ctx: AdminAuth, db: DB):
     audit(db, ctx.facility_id, "uploads.bulk_retry", "upload_jobs", None, ctx.user_id,
           {"count": len(body.job_ids)})
     return ok({"results": results})
+
+
+# ===== البرومبتات (FR-500+) =====
+
+@router.get("/templates/prompts")
+def admin_list_template_prompts(ctx: AdminAuth, db: DB):
+    """قائمة بالبرومبتات الافتراضية والمخصصة."""
+    from ...models import PlatformDefaultPrompt, Template
+
+    # الحصول على البرومبتات الافتراضية النشطة
+    default_prompts = db.execute(
+        select(PlatformDefaultPrompt).where(PlatformDefaultPrompt.is_active == True)
+    ).scalars().all()
+
+    defaults_map = {p.template_type: p.prompt_content for p in default_prompts}
+
+    # الحصول على جميع قوالب المنشأة
+    templates = db.execute(
+        select(Template).where(
+            Template.facility_id == ctx.facility_id,
+            Template.archived_at.is_(None)
+        )
+    ).scalars().all()
+
+    result = []
+    for tpl in templates:
+        prompt = tpl.prompt_content or defaults_map.get(tpl.prompt_template_type)
+        result.append({
+            "template_id": str(tpl.id),
+            "template_name": tpl.name,
+            "prompt_source": tpl.prompt_source,
+            "prompt_template_type": tpl.prompt_template_type,
+            "has_custom_prompt": tpl.prompt_source == "custom" and tpl.prompt_content is not None,
+            "prompt_preview": (prompt[:100] + "...") if prompt else None,
+        })
+
+    return ok(result)
+
+
+class AdminUpdatePromptIn(BaseModel):
+    """تحديث برومبت قالب معين."""
+    prompt_content: str = None  # None = استخدام الديفولت
+    prompt_source: str = "custom"  # custom أو default
+
+
+@router.patch("/templates/{template_id}/prompt")
+def admin_update_template_prompt(template_id: uuid.UUID, body: AdminUpdatePromptIn, ctx: AdminAuth, db: DB):
+    """تحديث/حذف برومبت مخصص للقالب."""
+    from ...models import Template
+
+    tpl = db.execute(
+        select(Template).where(
+            Template.id == template_id,
+            Template.facility_id == ctx.facility_id
+        )
+    ).scalar_one_or_none()
+
+    if tpl is None:
+        raise MedifyError("MDF-4041", details={"template_id": str(template_id)})
+
+    # إذا كان body.prompt_content None، يتم حذف البرومبت المخصص والعودة للديفولت
+    if body.prompt_content is None:
+        tpl.prompt_content = None
+        tpl.prompt_source = "default"
+    else:
+        tpl.prompt_content = body.prompt_content
+        tpl.prompt_source = body.prompt_source
+
+    tpl.updated_at = dt.datetime.now(dt.timezone.utc)
+    audit(db, ctx.facility_id, "template.prompt_updated", "templates", template_id, ctx.user_id,
+          {"prompt_source": tpl.prompt_source})
+
+    return ok({
+        "template_id": str(tpl.id),
+        "prompt_source": tpl.prompt_source,
+        "message": "Prompt updated successfully",
+    })

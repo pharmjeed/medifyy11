@@ -9,6 +9,8 @@ from fastapi import APIRouter
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
+from sqlalchemy import delete as sa_delete
+
 from ...audit import audit
 from ...deps import AdminAuth, Auth, DB, pagination
 from ...envelope import ok, paginated
@@ -115,11 +117,14 @@ class DoctorIn(BaseModel):
     password: str = Field(min_length=8)
     specialty: str = Field(min_length=2)
     clinic_id: uuid.UUID
+    template_ids: list[uuid.UUID] = []  # القوالب المتاحة للدكتور (FR-500+)
 
 
 @router.post("/doctors", status_code=201)
 def create_doctor(body: DoctorIn, ctx: AdminAuth, db: DB):
     """يفشل بـ MDF-4221 إن لم تتوفر مقاعد (FR-202) + إشعار ad.seats_exhausted."""
+    from ...models import DoctorTemplate, Template
+
     try:
         ensure_seat_available(db, ctx.facility_id)
     except MedifyError as exc:
@@ -149,9 +154,27 @@ def create_doctor(body: DoctorIn, ctx: AdminAuth, db: DB):
     )
     db.add(doctor)
     db.flush()
+
+    # إضافة doctor_templates (FR-500+)
+    for template_id in body.template_ids:
+        template = db.execute(
+            select(Template).where(
+                Template.id == template_id,
+                Template.facility_id == ctx.facility_id
+            )
+        ).scalar_one_or_none()
+        if template is None:
+            raise MedifyError("MDF-4041", details={"template_id": str(template_id)})
+        db.add(DoctorTemplate(
+            doctor_id=doctor.id,
+            template_id=template.id,
+            facility_id=ctx.facility_id,
+        ))
+
     subscription = get_subscription(db, ctx.facility_id)
     db.add(SeatEvent(subscription_id=subscription.id, delta=0, reason="activate_dr", actor_user_id=ctx.user_id))
-    audit(db, ctx.facility_id, "doctor.created", "user", doctor.id, ctx.user_id, {"specialty": body.specialty})
+    audit(db, ctx.facility_id, "doctor.created", "user", doctor.id, ctx.user_id,
+          {"specialty": body.specialty, "template_count": len(body.template_ids)})
     return ok({"id": str(doctor.id), "username": doctor.username})
 
 
@@ -160,11 +183,14 @@ class DoctorPatchIn(BaseModel):
     specialty: str | None = None
     clinic_id: uuid.UUID | None = None
     is_active: bool | None = None
+    template_ids: list[uuid.UUID] | None = None  # تحديث القوالب المتاحة (FR-500+)
 
 
 @router.patch("/doctors/{doctor_id}")
 def update_doctor(doctor_id: uuid.UUID, body: DoctorPatchIn, ctx: AdminAuth, db: DB):
-    """تعديل/تفعيل/تعطيل — التعطيل يحرر المقعد فوراً (FR-203)."""
+    """تعديل/تفعيل/تعطيل — التعطيل يحرر المقعد فوراً (FR-203) + تحديث القوالب (FR-500+)."""
+    from ...models import DoctorTemplate, Template
+
     doctor = db.execute(
         select(User).where(User.id == doctor_id, User.role == "doctor")
     ).scalar_one_or_none()
@@ -190,7 +216,32 @@ def update_doctor(doctor_id: uuid.UUID, body: DoctorPatchIn, ctx: AdminAuth, db:
             reason="activate_dr" if body.is_active else "deactivate_dr",
             actor_user_id=ctx.user_id,
         ))
-    audit(db, ctx.facility_id, "doctor.updated", "user", doctor.id, ctx.user_id, body.model_dump(exclude_none=True, mode="json"))
+
+    # تحديث قوالب الدكتور (FR-500+)
+    if body.template_ids is not None:
+        from ...models import DoctorTemplate
+        # حذف القوالب القديمة
+        db.execute(
+            sa_delete(DoctorTemplate).where(DoctorTemplate.doctor_id == doctor_id)
+        )
+        # إضافة القوالب الجديدة
+        for template_id in body.template_ids:
+            template = db.execute(
+                select(Template).where(
+                    Template.id == template_id,
+                    Template.facility_id == ctx.facility_id
+                )
+            ).scalar_one_or_none()
+            if template is None:
+                raise MedifyError("MDF-4041", details={"template_id": str(template_id)})
+            db.add(DoctorTemplate(
+                doctor_id=doctor.id,
+                template_id=template.id,
+                facility_id=ctx.facility_id,
+            ))
+
+    audit(db, ctx.facility_id, "doctor.updated", "user", doctor.id, ctx.user_id,
+          {**body.model_dump(exclude_none=True, mode="json"), "template_count": len(body.template_ids or [])})
     return ok({"id": str(doctor.id), "is_active": doctor.is_active})
 
 

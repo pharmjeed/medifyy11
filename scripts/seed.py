@@ -18,8 +18,9 @@ from sqlalchemy.orm import Session  # noqa: E402
 
 from app.config import get_settings  # noqa: E402
 from app.models import (  # noqa: E402
-    Approval, AuditLog, Clinic, CodingSystemConfig, Facility, GuidanceItem, NoteApproval,
+    Approval, AuditLog, Clinic, CodingSystemConfig, DoctorTemplate, Facility, GuidanceItem, NoteApproval,
     IntegrationConfig, Invoice, Notification, Patient, PatientContextSnapshot,
+    PlatformAdmin, PlatformDefaultPrompt,
     Recording, SeatEvent, Subscription, Summary, SummarySection, Template,
     Transcript, UploadAttempt, UploadJob, User, Visit, VisitConsent,
 )
@@ -41,6 +42,40 @@ SUPER_ADMIN_PASSWORD = os.environ.get("SEED_SUPER_ADMIN_PASSWORD", "")
 
 def d(days: int = 0, hour: int = 9, minute: int = 0) -> dt.datetime:
     return (TODAY - dt.timedelta(days=days)).replace(hour=hour, minute=minute)
+
+
+# البرومبتات الافتراضية (FR-500+)
+PROMPTS_DEFAULT = {
+    "first_visit": """You are a medical scribe. Analyze the patient's first visit and generate a comprehensive SOAP note with historical context.
+
+Rules:
+- S: Capture chief complaint, history of present illness, relevant past medical/surgical/family/social history, and medication history.
+- O: Record vital signs and physical examination findings.
+- A: List diagnoses/assessments based on the clinical encounter.
+- P: Document the plan including treatments, investigations, and follow-up.
+
+Generate a structured JSON response with these sections.""",
+
+    "follow_up": """You are a medical scribe. Analyze the patient's follow-up visit and generate a SOAP note focused on interval changes.
+
+Rules:
+- S: Summarize patient's current status, adherence, and new symptoms since last visit.
+- O: Record current vital signs and relevant exam findings.
+- A: Assess response to treatment and any new findings.
+- P: Update medications, investigations, and follow-up plan.
+
+Generate a structured JSON response with these sections.""",
+
+    "consultation": """You are a medical scribe. Analyze the specialist consultation and generate a focused SOAP note.
+
+Rules:
+- S: Document the consultation reason and relevant history for the specialty.
+- O: Record relevant specialist examination findings.
+- A: Specialist's assessment and opinion.
+- P: Recommendations and proposed interventions.
+
+Generate a structured JSON response with these sections.""",
+}
 
 
 SOAP4 = {"sections": [
@@ -156,6 +191,31 @@ REGISTRY_SAMPLE = [
 ]
 
 
+def seed_platform_prompts(db: Session) -> None:
+    """بذر البرومبتات الافتراضية من SuperAdmin — idempotent (FR-500+)."""
+    # التحقق من أن البرومبتات موجودة بالفعل
+    if db.execute(select(PlatformDefaultPrompt.id).limit(1)).scalar_one_or_none() is not None:
+        return  # البرومبتات موجودة — idempotent
+
+    # الحصول على SuperAdmin (يجب أن يكون موجوداً من seed_platform)
+    owner = db.execute(
+        select(PlatformAdmin).where(PlatformAdmin.role == "owner").limit(1)
+    ).scalar_one_or_none()
+    if owner is None:
+        return  # لا SuperAdmin — تخطٍّ
+
+    # إضافة البرومبتات الافتراضية
+    for template_type, content in PROMPTS_DEFAULT.items():
+        db.add(PlatformDefaultPrompt(
+            template_type=template_type,
+            prompt_content=content,
+            version="1.0",
+            is_active=True,
+            created_by=owner.id,
+        ))
+    db.flush()
+
+
 def seed_registry(db: Session) -> None:
     from app.models import RegistryCode
     from app.services.code_registry import normalize_code
@@ -175,6 +235,7 @@ def seed_registry(db: Session) -> None:
 
 def seed(db: Session) -> None:
     seed_platform(db)
+    seed_platform_prompts(db)
     seed_registry(db)
     if db.execute(select(Facility).where(Facility.commercial_reg == "1010456789")).scalar_one_or_none():
         print("seed: المنشأة موجودة — تخطٍّ (idempotent)")
@@ -258,22 +319,60 @@ def seed(db: Session) -> None:
         patients[mrn] = patient
 
     templates = {}
-    for key, name, specialty, visit_type, structure, origin, owner in [
-        ("r1", "باطنة — متابعة عامة SOAP", "باطنة", "متابعة", SOAP4, "system", None),
-        ("r2", "باطنة — كشف أول", "باطنة", "كشف أول", SOAP5_FIRST, "system", None),
-        ("r3", "أطفال — كشف عام", "أطفال", "كشف", SOAP4, "system", None),
-        ("r4", "جلدية — استشارة", "جلدية", "استشارة", SOAP4, "system", None),
-        ("pt1", "متابعة سكري وضغط — مختصر", "باطنة", "متابعة", SOAP5_E, "reverse_built", ahmad.id),
+    for key, name, specialty, visit_type, structure, origin, owner, prompt_type in [
+        ("r1", "باطنة — متابعة عامة SOAP", "باطنة", "متابعة", SOAP4, "system", None, "follow_up"),
+        ("r2", "باطنة — كشف أول", "باطنة", "كشف أول", SOAP5_FIRST, "system", None, "first_visit"),
+        ("r3", "أطفال — كشف عام", "أطفال", "كشف", SOAP4, "system", None, "first_visit"),
+        ("r4", "جلدية — استشارة", "جلدية", "استشارة", SOAP4, "system", None, "consultation"),
+        ("pt1", "متابعة سكري وضغط — مختصر", "باطنة", "متابعة", SOAP5_E, "reverse_built", ahmad.id, "follow_up"),
     ]:
-        template = Template(facility_id=fid, owner_user_id=owner, name=name, specialty=specialty,
-                            visit_type=visit_type, structure_json=structure, origin=origin,
-                            is_default=(key == "pt1"),
-                            source_sample_text="S: Follow-up of T2DM and HTN..." if key == "pt1" else None)
+        template = Template(
+            facility_id=fid, owner_user_id=owner, name=name, specialty=specialty,
+            visit_type=visit_type, structure_json=structure, origin=origin,
+            is_default=(key == "pt1"),
+            source_sample_text="S: Follow-up of T2DM and HTN..." if key == "pt1" else None,
+            # البرومبتات (FR-500+)
+            prompt_source="default",
+            prompt_template_type=prompt_type,
+        )
         db.add(template)
         db.flush()
         templates[key] = template
 
     baladona = clinics["عيادة الباطنة"]
+
+    # ربط القوالب بالدكاترة (FR-500+)
+    # أحمد (باطنة): r1, r2, pt1
+    for tpl_key in ["r1", "r2", "pt1"]:
+        db.add(DoctorTemplate(
+            doctor_id=ahmad.id,
+            template_id=templates[tpl_key].id,
+            facility_id=fid,
+        ))
+    # نورة (أطفال): r3
+    db.add(DoctorTemplate(
+        doctor_id=doctors["dr.noura"].id,
+        template_id=templates["r3"].id,
+        facility_id=fid,
+    ))
+    # خالد (جلدية): r4
+    db.add(DoctorTemplate(
+        doctor_id=doctors["dr.khaled"].id,
+        template_id=templates["r4"].id,
+        facility_id=fid,
+    ))
+    # فهد (طب أسرة): r1
+    db.add(DoctorTemplate(
+        doctor_id=doctors["dr.fahad"].id,
+        template_id=templates["r1"].id,
+        facility_id=fid,
+    ))
+    # ريم (باطنة، معطّل): r1
+    db.add(DoctorTemplate(
+        doctor_id=doctors["dr.reem"].id,
+        template_id=templates["r1"].id,
+        facility_id=fid,
+    ))
 
     def make_visit(mrn: str, state: str, created: dt.datetime, template_key: str = "r1") -> Visit:
         patient = patients[mrn]

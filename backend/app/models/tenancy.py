@@ -146,3 +146,18 @@ class CodingSystemConfig(Base, TimestampMixin):
     system: Mapped[str] = mapped_column(CODING_SYSTEM, nullable=False)
     version: Mapped[str] = mapped_column(Text, nullable=False, default="2024")
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+
+class DoctorTemplate(Base, TimestampMixin):
+    """ربط الدكتور بالقوالب المتاحة له — مستأجري مع RLS على facility_id (FR-500+)."""
+
+    __tablename__ = "doctor_templates"
+    __table_args__ = (
+        UniqueConstraint("doctor_id", "template_id", name="uq_doctor_templates"),
+    )
+
+    id: Mapped[uuid.UUID] = pk()
+    doctor_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    template_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("templates.id"), nullable=False, index=True)
+    facility_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("facilities.id"), nullable=False, index=True)
+    # created_at (من TimestampMixin)
