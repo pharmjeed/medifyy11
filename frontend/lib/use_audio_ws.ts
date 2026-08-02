@@ -74,9 +74,10 @@ export function useAudioWs(options: UseAudioWsOptions): UseAudioWsReturn {
 
       if (message.type === "resume_from" && message.seq !== undefined) {
         // Server says "start from this seq" — retransmit pending chunks
-        lastAckedSeqRef.current = message.seq - 1;
+        const resumeSeq = message.seq;
+        lastAckedSeqRef.current = resumeSeq - 1;
         const pendingChunks = await getPendingChunks(options.visitId);
-        const toResend = pendingChunks.filter((c) => c.seq >= message.seq);
+        const toResend = pendingChunks.filter((c) => c.seq >= resumeSeq);
 
         options.onResumeFrom?.(message.seq, toResend.length);
 

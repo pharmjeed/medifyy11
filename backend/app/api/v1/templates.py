@@ -38,24 +38,22 @@ def _template_out(template: Template) -> dict[str, Any]:
 
 @router.get("/templates")
 def list_templates(ctx: Auth, db: DB, include_archived: bool = False):
-    """الأدمن: جميع قوالب المنشأة · الدكتور: فقط قوالبه من doctor_templates (FR-501+FR-500)."""
-    # للدكاترة: قوالبهم فقط من doctor_templates (FR-500+)
+    """الأدمن: جميع قوالب المنشأة · الدكتور: المسندة لعيادته + قوالبه الشخصية (FR-501+FR-500)."""
+    query = select(Template).where(Template.facility_id == ctx.facility_id)
+    if not include_archived:
+        query = query.where(Template.archived_at.is_(None))
+    templates = db.execute(query.order_by(Template.created_at)).scalars().all()
+
     if ctx.role == "doctor":
-        doctor_tpls = db.execute(
-            select(DoctorTemplate).where(DoctorTemplate.doctor_id == ctx.user_id)
-        ).scalars().all()
-        template_ids = [dt.template_id for dt in doctor_tpls]
-        if not template_ids:
-            return ok([])
-        templates = db.execute(
-            select(Template).where(Template.id.in_(template_ids))
-        ).scalars().all()
-    else:
-        # للأدمن: جميع القوالب
-        query = select(Template).where(Template.facility_id == ctx.facility_id)
-        if not include_archived:
-            query = query.where(Template.archived_at.is_(None))
-        templates = db.execute(query.order_by(Template.created_at)).scalars().all()
+        assigned = {
+            row.template_id
+            for row in db.execute(
+                select(DoctorTemplate).where(DoctorTemplate.doctor_id == ctx.user_id)
+            ).scalars()
+        }
+        # مع إسناد: المسندة + الشخصية · بلا إسناد: كل قوالب المنشأة (توافق عكسي حتى يُسند الأدمن)
+        if assigned:
+            templates = [t for t in templates if t.id in assigned or t.owner_user_id == ctx.user_id]
 
     return ok([_template_out(template) for template in templates])
 
