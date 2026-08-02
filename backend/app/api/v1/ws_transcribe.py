@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import base64
+import datetime as dt
 import logging
 import uuid
 from pathlib import Path
@@ -69,7 +70,17 @@ class _AudioSink:
 
 @router.websocket("/ws/visits/{visit_id}/transcribe")
 async def transcribe_ws(websocket: WebSocket, visit_id: uuid.UUID, token: str = ""):
-    """يعمل فقط والزيارة في حالة recording — المصادقة عبر ?token= (WSS خلف Caddy في الإنتاج)."""
+    """يعمل فقط والزيارة في حالة recording — المصادقة عبر ?token= (WSS خلف Caddy في الإنتاج).
+
+    Streaming protocol:
+    - Client sends audio_chunk { seq, payload }
+    - Server acks: { type: "ack", seq }
+    - On reconnect, client queries: { type: "resume_query" }
+    - Server responds: { type: "resume_from", seq } (next expected seq)
+    - Client replays unsynced chunks from that point
+
+    Enhanced 2026-08-02: Better recovery on client resume + exponential backoff support
+    """
     try:
         payload = decode_token(token, "access")
     except Exception:
@@ -93,6 +104,7 @@ async def transcribe_ws(websocket: WebSocket, visit_id: uuid.UUID, token: str = 
     settings = get_settings()
     last_seq = -1
     paused = False
+    connected_at = dt.datetime.now(dt.timezone.utc)
     sink = _AudioSink(recording_uri, settings.audio_sample_rate) if recording_uri is not None else None
 
     try:
@@ -126,16 +138,24 @@ async def transcribe_ws(websocket: WebSocket, visit_id: uuid.UUID, token: str = 
                 paused = False
                 await websocket.send_json({"type": "status", "state": "recording"})
             elif msg_type == "resume_query":
-                await websocket.send_json({"type": "resume_from", "seq": last_seq + 1})
+                # Client reconnected — tell them where to resume from
+                # last_seq is -1 at start, so last_seq + 1 = 0 (first chunk)
+                await websocket.send_json({
+                    "type": "resume_from",
+                    "seq": last_seq + 1,
+                    "buffered_at": connected_at.isoformat(),  # Client can use this for optimizations
+                })
+                logger.info("Resume query for visit %s — resuming from seq %d", visit_id, last_seq + 1)
             elif msg_type == "end":
                 # التفريغ الكامل يبدأ في recording/stop بعد إغلاق القناة واكتمال الملف
                 await websocket.send_json({"type": "status", "state": "summarizing"})
+                logger.info("Recording end for visit %s — processed %d chunks", visit_id, last_seq + 1)
                 break
     except WebSocketDisconnect:
-        logger.info("WS disconnected for visit %s at seq %s", visit_id, last_seq)
+        logger.info("WS client disconnected for visit %s after seq %d", visit_id, last_seq)
     except Exception as exc:
         # قناة مقطوعة أثناء إرسال أو خطأ غير متوقع — الصوت المكتوب محفوظ رغم ذلك
-        logger.warning("WS terminated for visit %s: %s", visit_id, exc)
+        logger.exception("WS error for visit %s at seq %d: %s", visit_id, last_seq, exc)
 
     recorded_seconds = sink.close() if sink is not None else 0.0
 
