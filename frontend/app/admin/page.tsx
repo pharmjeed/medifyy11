@@ -13,7 +13,7 @@ import type {
 } from "@/lib/types";
 
 const ALL_STATES: VisitState[] = [
-  "draft", "recording", "transcribed", "summarized", "in_review", "approved", "uploaded", "upload_failed", "cancelled",
+  "draft", "recording", "transcribed", "summarized", "in_review", "approved", "uploaded", "upload_failed", "cancelled", "voided",
 ];
 
 const FACILITY_STATUS: Record<Me["facility_status"], { ar: string; en: string }> = {

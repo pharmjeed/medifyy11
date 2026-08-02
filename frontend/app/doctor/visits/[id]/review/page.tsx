@@ -43,6 +43,15 @@ const STATUS_META: Record<GuidanceItem["status"], { label: { ar: string; en: str
 
 const PENDING_TEXT = /\[[^\]]*\]/;
 
+/* أسباب الإبطال (قرار مالك 2026-08-03) — القائمة نفسها في POST /visits/{id}/void */
+const VOID_REASONS: { key: string; ar: string; en: string }[] = [
+  { key: "wrong_patient", ar: "سُجّلت على ملف المريض الخطأ", en: "Recorded on the wrong patient file" },
+  { key: "duplicate", ar: "زيارة مكررة أُنشئت بالغلط", en: "Duplicate visit created by mistake" },
+  { key: "test", ar: "تسجيل تجريبي / تدريب", en: "Test recording / training" },
+  { key: "consent_withdrawn", ar: "المريض سحب موافقته", en: "Patient withdrew consent" },
+  { key: "other", ar: "سبب آخر (يتطلب توضيحاً)", en: "Other (explanation required)" },
+];
+
 interface ChatMessage { who: "doctor" | "ai"; text: string; patches?: ChatPatch[]; undone?: boolean[] }
 
 type UploadView = { phase: "idle" } | { phase: "uploading" } | { phase: "done"; status: UploadStatus };
@@ -94,6 +103,14 @@ export default function ReviewPage() {
   const [transcriptLoaded, setTranscriptLoaded] = useState(false);
   const [conflict, setConflict] = useState<{ sectionId: string; mine: string } | null>(null);
   const [upload, setUpload] = useState<UploadView>({ phase: "idle" });
+  const [voidOpen, setVoidOpen] = useState(false);
+  const [voidReason, setVoidReason] = useState("wrong_patient");
+  const [voidNote, setVoidNote] = useState("");
+  const [voidBusy, setVoidBusy] = useState(false);
+  // مسار Unlock للبوابة ① (قرار مالك 2026-08-03) — فتح المذكرة بسبب مسجّل قبل إتمام ②
+  const [unlockOpen, setUnlockOpen] = useState(false);
+  const [unlockReason, setUnlockReason] = useState("");
+  const [unlockBusy, setUnlockBusy] = useState(false);
   const chatRef = useRef<HTMLDivElement | null>(null);
   const dictTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -121,7 +138,9 @@ export default function ReviewPage() {
 
   useEffect(() => { void load(); }, [load]);
 
-  const locked = summary !== null && ["approved", "uploaded", "upload_failed"].includes(summary.state);
+  const approvedLocked = summary !== null && ["approved", "uploaded", "upload_failed"].includes(summary.state);
+  const voided = summary !== null && summary.state === "voided";
+  const locked = approvedLocked || voided;                // المبطلة مختومة كالمعتمدة — قراءة فقط
   const noteApproved = summary?.note_approved ?? false;   // البوابة ① أُنجزت
   const canExport = summary?.can_export ?? false;         // البوابة ② أُنجزت
   const allGuidance = summary?.sections.flatMap((section) => section.guidance) ?? [];
@@ -335,6 +354,51 @@ export default function ReviewPage() {
     }
   };
 
+  // فتح المذكرة — نقض البوابة ① قبل إتمام ② (قرار مالك 2026-08-03، حلقة CDI):
+  // مراجعة الأكواد كشفت نقص توثيق → سبب مسجّل → تعديل → إعادة اعتماد. قرارات الأكواد محفوظة.
+  const unlockNote = async () => {
+    const reason = unlockReason.trim();
+    if (reason.length === 0) return;
+    setUnlockBusy(true);
+    try {
+      await api(`/visits/${visitId}/note-unlock`, { method: "POST", body: { reason } });
+      setUnlockOpen(false);
+      setUnlockReason("");
+      toast(L("فُتحت المذكرة — عدّل النص ثم أعد اعتماده (البوابة ①). قرارات الأكواد محفوظة.",
+              "Note unlocked — edit the text, then re-approve it (gate ①). Code decisions are preserved."));
+      void load();
+    } catch (err) {
+      handleMutationError(err);
+      void load();
+    } finally {
+      setUnlockBusy(false);
+    }
+  };
+
+  // إبطال الزيارة من in_review (قرار مالك 2026-08-03) — Void ≠ Delete:
+  // المحتوى يُختم ويخرج من المخارج والإحصائيات، وواقعة الإبطال تبقى في التدقيق
+  const voidVisit = async () => {
+    if (voidReason === "other" && voidNote.trim().length === 0) {
+      toast(L("اختيار «سبب آخر» يتطلب توضيحاً نصياً", "Choosing \"other\" requires a written explanation"));
+      return;
+    }
+    setVoidBusy(true);
+    try {
+      await api(`/visits/${visitId}/void`, {
+        method: "POST",
+        body: { reason: voidReason, note: voidNote.trim() },
+      });
+      setVoidOpen(false);
+      toast(L("أُبطلت الزيارة — السبب والفاعل والوقت في سجل التدقيق، وهي خارج المخارج والإحصائيات",
+              "Visit voided — reason, actor, and time are in the audit log; it is excluded from outputs and stats"));
+      router.push("/doctor/visits");
+    } catch (err) {
+      handleMutationError(err);
+    } finally {
+      setVoidBusy(false);
+    }
+  };
+
   const copyForEmr = async () => {
     try {
       const result = await api<{ content: string }>(`/visits/${visitId}/export/text`);
@@ -423,10 +487,28 @@ export default function ReviewPage() {
           <span className="badge success">{L("مقبول", "Accepted")} <span className="num">{counters.accepted}</span></span>
           <span className="badge danger">{L("مرفوض", "Rejected")} <span className="num">{counters.rejected}</span></span>
           <button className="btn-row" onClick={() => void openTranscript()}>{L("نص المحادثة الكامل", "Full transcript")}</button>
-          {locked ? (
+          {approvedLocked ? (
             <span className="badge success">{L("🔒 معتمدة — قراءة فقط (MDF-4226)", "🔒 Approved — read-only (MDF-4226)")}</span>
+          ) : voided ? (
+            <span className="badge" style={{ background: "#fbeaea", color: "#a13333" }}>{L("⊘ مُبطلة — قراءة فقط", "⊘ Voided — read-only")}</span>
+          ) : summary.state === "in_review" ? (
+            <button className="btn-danger-outline" style={{ height: 34 }} onClick={() => setVoidOpen(true)}
+              title={L("زيارة لا يصح اعتمادها (مريض خطأ / مكررة / تجريبية / سحب موافقة) — إبطال بسبب مدوَّن في التدقيق",
+                       "A visit that must not be approved (wrong patient / duplicate / test / consent withdrawn) — void with an audited reason")}>
+              {L("⊘ إبطال الزيارة", "⊘ Void visit")}
+            </button>
           ) : null}
         </div>
+
+        {voided ? (
+          <div style={{ border: "2px solid #a13333", background: "#fbeaea", borderRadius: 12, padding: "12px 16px", marginTop: 12, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+            <strong style={{ color: "#a13333" }}>⊘ {L("زيارة مُبطلة — لا اعتماد ولا رفع ولا تصدير", "Voided visit — no approval, no upload, no export")}</strong>
+            <span style={{ fontSize: 12.5, color: "#5c7096" }}>
+              {L("المحتوى محفوظ للقراءة فقط، والزيارة خارج المخارج والإحصائيات وملف المريض. سبب الإبطال وفاعله ووقته في سجل التدقيق (Void ≠ Delete)، والصوت يتبع سياسة الاحتفاظ ذاتها.",
+                 "Content is kept read-only; the visit is excluded from outputs, statistics, and the patient file. The void reason, actor, and time are in the audit log (Void ≠ Delete), and audio follows the same retention policy.")}
+            </span>
+          </div>
+        ) : null}
 
         {noAudio ? (
           <div style={{ border: "2px solid #d94b4b", background: "#fbeaea", borderRadius: 12, padding: "12px 16px", marginTop: 12, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
@@ -700,9 +782,17 @@ export default function ReviewPage() {
               </form>
             </>
           ) : noteApproved && !locked ? (
-            <p style={{ fontSize: 12.5, color: "#9c6f00", margin: "8px 0 0" }}>
-              {L("🔒 اعتُمد نص المذكرة (البوابة ①) — التحرير مغلق. حسم الأكواد لا يزال متاحاً أدناه.",
-                 "🔒 Note approved (gate ①) — editing is closed. Code resolution remains available below.")}
+            <p style={{ fontSize: 12.5, color: "#9c6f00", margin: "8px 0 0", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <span style={{ flex: 1 }}>
+                {L("🔒 اعتُمد نص المذكرة (البوابة ①) — التحرير مغلق. حسم الأكواد لا يزال متاحاً أدناه.",
+                   "🔒 Note approved (gate ①) — editing is closed. Code resolution remains available below.")}
+              </span>
+              {/* حلقة CDI: كود يحتاج سنداً ناقصاً في النص؟ فتح بسبب مسجّل بدل كود بلا سند */}
+              <button className="btn-secondary" style={{ height: 30, padding: "0 12px", fontSize: 12.5 }} onClick={() => setUnlockOpen(true)}
+                title={L("الكود المقترح يتطلب تفصيلاً لا يذكره النص المجمّد؟ افتح المذكرة بسبب مسجّل، عدّل، ثم أعد الاعتماد",
+                         "The suggested code needs a detail the frozen text lacks? Unlock with an audited reason, edit, then re-approve")}>
+                {L("🔓 فتح المذكرة", "🔓 Unlock note")}
+              </button>
             </p>
           ) : null}
           <p style={{ fontSize: 12.5, color: "#5c7096", margin: "10px 0 0" }}>
@@ -715,6 +805,17 @@ export default function ReviewPage() {
       <div style={{ position: "fixed", bottom: 0, insetInline: 0, zIndex: 45, background: "#fff", borderTop: "1px solid #c7d1e0", boxShadow: "0 -8px 24px rgba(12,26,54,.08)" }}>
         <div style={{ maxWidth: 960, margin: "0 auto", padding: "12px 20px", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
           <SpecBadge id={upload.phase === "idle" ? "W-218" : "W-219"} />
+          {/* زيارة مُبطلة — لا بوابات ولا رفع */}
+          {voided ? (
+            <span style={{ display: "flex", alignItems: "center", gap: 10, flex: 1, flexWrap: "wrap" }}>
+              <span className="badge" style={{ background: "#fbeaea", color: "#a13333" }}>{L("⊘ مُبطلة", "⊘ Voided")}</span>
+              <span style={{ fontSize: 12.5, color: "#5c7096" }}>
+                {L("البوابتان مغلقتان — القرار مسجّل في سجل التدقيق", "Both gates are closed — the decision is recorded in the audit log")}
+              </span>
+              <span style={{ flex: 1 }} />
+              <button className="btn-secondary" onClick={() => router.push("/doctor/visits")}>{L("سجل الزيارات", "Visit log")}</button>
+            </span>
+          ) : null}
           {/* مؤشر البوابتين */}
           {upload.phase === "idle" && !locked ? (
             <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 700 }}>
@@ -727,15 +828,20 @@ export default function ReviewPage() {
               </span>
             </span>
           ) : null}
-          {/* البوابة ① — اعتماد نص المذكرة */}
+          {/* البوابة ① — اعتماد نص المذكرة (أو إعادة اعتماده بعد فتح بمسار Unlock) */}
           {upload.phase === "idle" && !locked && !noteApproved ? (
             <>
-              <span style={{ fontSize: 12.5, color: "#5c7096", fontWeight: 700, flex: 1 }}>
-                {L("راجع نص المذكرة ثم اعتمده (البوابة ①). بعدها يتجمّد النص ويُفتح حسم الأكواد.",
-                   "Review the note text, then approve it (gate ①). The text then freezes and code resolution opens.")}
+              <span style={{ fontSize: 12.5, color: summary.note_unlock !== null ? "#9c6f00" : "#5c7096", fontWeight: 700, flex: 1 }}>
+                {summary.note_unlock !== null
+                  ? L(`فُتحت المذكرة بعد نقض الاعتماد — السبب: «${summary.note_unlock.reason}». عدّل النص ثم أعد اعتماده (①). قرارات الأكواد السابقة محفوظة.`,
+                      `Note unlocked after revoking approval — reason: "${summary.note_unlock.reason}". Edit the text, then re-approve it (①). Previous code decisions are preserved.`)
+                  : L("راجع نص المذكرة ثم اعتمده (البوابة ①). بعدها يتجمّد النص ويُفتح حسم الأكواد.",
+                      "Review the note text, then approve it (gate ①). The text then freezes and code resolution opens.")}
               </span>
               <button className="btn-success btn-approve" onClick={() => void approveNote()}>
-                {L("① اعتماد نص المذكرة", "① Approve note")}
+                {summary.note_unlock !== null
+                  ? L("① إعادة اعتماد النص", "① Re-approve note")
+                  : L("① اعتماد نص المذكرة", "① Approve note")}
               </button>
             </>
           ) : null}
@@ -752,6 +858,12 @@ export default function ReviewPage() {
                     : L("جاهزة لاعتماد الأكواد · بالاعتماد تُرفع الزيارة FHIR/NPHIES ويُتاح التصدير (FR-802)",
                         "Ready for code approval · Approval uploads the visit (FHIR/NPHIES) and unlocks export (FR-802)")}
               </span>
+              {/* مسار Unlock: متاح فقط في مرحلة ② قبل إتمامها — بعد الاعتماد النهائي المسار Addendum */}
+              <button className="btn-secondary" onClick={() => setUnlockOpen(true)}
+                title={L("كود يتطلب تفصيلاً لا يذكره النص المجمّد (جهة، مع/بدون مضاعفات…)؟ افتح المذكرة بسبب مسجّل",
+                         "A code needs a detail the frozen text lacks (laterality, with/without complications…)? Unlock with an audited reason")}>
+                {L("🔓 فتح المذكرة", "🔓 Unlock note")}
+              </button>
               <button className="btn-success btn-approve" disabled={counters.pending > 0 || awaitingInput > 0} onClick={() => void approve()}>
                 {L("② اعتماد الأكواد والرفع", "② Approve codes & upload")}
               </button>
@@ -830,6 +942,61 @@ export default function ReviewPage() {
             </div>
           </div>
         </>
+      ) : null}
+
+      {/* مودال الإبطال — سبب من قائمة + نص حر، كله إلى سجل التدقيق (قرار مالك 2026-08-03) */}
+      {voidOpen ? (
+        <Modal title={L("إبطال الزيارة", "Void visit")} onClose={() => setVoidOpen(false)}>
+          <p style={{ fontSize: 14, color: "#5c7096", marginTop: 0 }}>
+            {L("للزيارة التي لا يصح اعتمادها. الإبطال نهائي: لا اعتماد ولا رفع ولا تصدير، وتخرج من الإحصائيات وملف المريض. يبقى في سجل التدقيق: من أبطل، ولماذا، ومتى (Void ≠ Delete).",
+               "For a visit that must not be approved. Voiding is final: no approval, upload, or export, and it leaves the statistics and the patient file. The audit log keeps who voided it, why, and when (Void ≠ Delete).")}
+          </p>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {VOID_REASONS.map((reason) => (
+              <label key={reason.key} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 14 }}>
+                <input type="radio" name="void-reason" checked={voidReason === reason.key}
+                  onChange={() => setVoidReason(reason.key)} />
+                {L(reason.ar, reason.en)}
+              </label>
+            ))}
+          </div>
+          <label className="field-label" style={{ fontSize: 12.5, marginTop: 10 }}>
+            {voidReason === "other"
+              ? L("التوضيح — إلزامي مع «سبب آخر»", "Explanation — required with \"other\"")
+              : L("توضيح إضافي (اختياري) — يُدوَّن في سجل التدقيق", "Additional note (optional) — recorded in the audit log")}
+          </label>
+          <textarea className="field" rows={2} maxLength={500} value={voidNote}
+            onChange={(event) => setVoidNote(event.target.value)}
+            placeholder={L("بيان إداري لا محتوى سريرياً", "Administrative note, no clinical content")} />
+          <div className="modal-actions">
+            <button className="btn-danger" disabled={voidBusy} onClick={() => void voidVisit()}>
+              {voidBusy ? L("جارٍ الإبطال…", "Voiding…") : L("⊘ تأكيد الإبطال", "⊘ Confirm void")}
+            </button>
+            <button className="btn-neutral" onClick={() => setVoidOpen(false)}>{L("تراجع", "Back")}</button>
+          </div>
+        </Modal>
+      ) : null}
+
+      {/* مودال فتح المذكرة — نقض البوابة ① بسبب مسجّل (قرار مالك 2026-08-03، حلقة CDI) */}
+      {unlockOpen ? (
+        <Modal title={L("فتح المذكرة — نقض اعتماد النص ①", "Unlock note — revoke note approval ①")} onClose={() => setUnlockOpen(false)}>
+          <p style={{ fontSize: 14, color: "#5c7096", marginTop: 0 }}>
+            {L("مراجعة الأكواد كشفت نقص توثيق؟ (جهة الإصابة، مع/بدون مضاعفات…) — القاعدة الذهبية: الكود لازم يسنده التوثيق. الفتح يُلغي اعتماد البوابة ① ويعيد التحرير، ثم تعيد اعتماد النص وترجع للأكواد. قراراتك المحسومة على الأكواد تبقى محفوظة. متاح قبل إتمام البوابة ② فقط — بعد الاعتماد النهائي المسار ملحق (Addendum).",
+               "Code review revealed missing documentation? (laterality, with/without complications…) — the golden rule: the code must be supported by the documentation. Unlocking revokes gate ① and reopens editing; then you re-approve the note and return to the codes. Your resolved code decisions are preserved. Available only before gate ② is completed — after final approval the path is an addendum.")}
+          </p>
+          <label className="field-label" style={{ fontSize: 12.5 }}>
+            {L("سبب الفتح — إلزامي، يُدوَّن في سجل التدقيق", "Unlock reason — required, recorded in the audit trail")}
+          </label>
+          <textarea className="field" rows={3} maxLength={2000} value={unlockReason}
+            onChange={(event) => setUnlockReason(event.target.value)}
+            placeholder={L("مثال: كود الكسر يتطلب تحديد الجهة (يمين/يسار) والنص لا يذكرها", "e.g., the fracture code requires laterality (right/left) and the note does not mention it")} />
+          <div className="modal-actions">
+            <button className="btn" disabled={unlockBusy || unlockReason.trim().length === 0} onClick={() => void unlockNote()}>
+              {unlockBusy ? L("جارٍ الفتح…", "Unlocking…") : L("🔓 فتح المذكرة وإلغاء اعتماد ①", "🔓 Unlock note & revoke gate ①")}
+            </button>
+            <button className="btn-neutral" onClick={() => setUnlockOpen(false)}>{L("تراجع", "Back")}</button>
+          </div>
+        </Modal>
       ) : null}
 
       {/* تعارض ETag W-222 */}

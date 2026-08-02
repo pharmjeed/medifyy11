@@ -67,12 +67,16 @@ class ExportBundle:
             .where(SummarySection.summary_id == self.summary.id)
             .order_by(SummarySection.position)
         ).scalars().all()
-        self.note_approval = db.execute(
-            select(NoteApproval).where(NoteApproval.visit_id == visit.id)
-        ).scalar_one_or_none()
         self.approval = db.execute(
             select(Approval).where(Approval.visit_id == visit.id)
         ).scalar_one_or_none()
+        # بصمة ① المعروضة هي المرتبطة بالاعتماد النهائي — مسار Unlock قد خلّف تاريخاً منقوضاً
+        # في note_approvals (قرار مالك 2026-08-03)، والمخرجات لا تُتاح إلا بعد البوابة ② أصلاً
+        self.note_approval = None
+        if self.approval is not None:
+            self.note_approval = db.execute(
+                select(NoteApproval).where(NoteApproval.id == self.approval.note_approval_id)
+            ).scalar_one_or_none()
         self.codes: list[GuidanceItem] = []
         for section in self.sections:
             self.codes.extend(

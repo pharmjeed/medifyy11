@@ -216,16 +216,40 @@ class NoteApproval(Base, TimestampMixin):
 
     توجيه المالك 2026-07-22: بوابتان منفصلتان لا بوابة واحدة. الأكواد (②) لا تُعتمد إلا بعدها،
     ويُفرض ذلك بمفتاح أجنبي: approvals.note_approval_id → note_approvals.id (NOT NULL).
+    مسار Unlock (قرار مالك 2026-08-03): الصف لا يُعدَّل ولا يُحذف؛ نقضه صف note_unlocks يشير إليه،
+    وإعادة الاعتماد صف جديد — لذا visit_id فهرس لا UNIQUE، وtrigger القاعدة يضمن نشطاً واحداً قبل ②.
     """
 
     __tablename__ = "note_approvals"
 
     id: Mapped[uuid.UUID] = pk()
-    visit_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("visits.id"), unique=True, nullable=False)
+    visit_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("visits.id"), nullable=False, index=True)
     facility_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("facilities.id"), nullable=False, index=True)
     approved_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
     approved_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     summary_hash: Mapped[str] = mapped_column(Text, nullable=False)  # بصمة البوابة ①
+
+
+class NoteUnlock(Base, TimestampMixin):
+    """نقض اعتماد البوابة ① — مسار Unlock (قرار مالك 2026-08-03). إلحاقي فقط.
+
+    حلقة CDI: مراجعة الأكواد (②) تكشف نقص توثيق (جهة الإصابة، مع/بدون مضاعفات…) والنص مجمّد —
+    بدل اعتماد كود بلا سند أو كود أقل تحديداً: نقض بسبب مسجّل → تعديل → إعادة اعتماد ①.
+    ممكن فقط قبل إتمام البوابة ② (trigger القاعدة يرفض بعدها — بعد الاعتماد النهائي المسار Addendum).
+    السبب قد يحمل تفصيلاً سريرياً فيُخزَّن هنا مشفّراً — audit_logs يحمل المرجع لا النص.
+    """
+
+    __tablename__ = "note_unlocks"
+
+    id: Mapped[uuid.UUID] = pk()
+    visit_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("visits.id"), nullable=False, index=True)
+    facility_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("facilities.id"), nullable=False, index=True)
+    note_approval_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("note_approvals.id"), unique=True, nullable=False  # اعتماد واحد يُنقض مرة واحدة
+    )
+    reason: Mapped[str] = mapped_column(EncryptedText, nullable=False)
+    unlocked_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
+    unlocked_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class Approval(Base, TimestampMixin):

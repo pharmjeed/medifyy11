@@ -18,6 +18,7 @@ function actionFor(row: VisitRow): { label: { ar: string; en: string }; href: st
     case "upload_failed": return { label: { ar: "إعادة المحاولة", en: "Retry" }, href: `/doctor/visits/${row.id}/review` };
     case "draft": return { label: { ar: "استئناف", en: "Resume" }, href: `/doctor/visits/new?resume=${row.id}` };
     case "summarized": return { label: { ar: "بدء المراجعة", en: "Start review" }, href: `/doctor/visits/${row.id}/review` };
+    case "voided": return { label: { ar: "مُبطلة — عرض", en: "Voided — view" }, href: `/doctor/visits?open=${row.id}` };
     default: return null;
   }
 }

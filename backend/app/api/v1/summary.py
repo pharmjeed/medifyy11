@@ -18,6 +18,7 @@ from ...models import (
     EditEvent,
     GuidanceItem,
     NoteApproval,
+    NoteUnlock,
     Summary,
     SummarySection,
     Visit,
@@ -26,7 +27,7 @@ from ...pipelines.run import run_edit_chat
 from ...pipelines.stt import get_stt
 from ...services.code_registry import check_code, registry_systems
 from ...services.history import previous_visits
-from ...services.visits import get_visit_for_doctor, summary_etag
+from ...services.visits import active_note_approval, get_visit_for_doctor, summary_etag
 
 router = APIRouter()
 
@@ -39,19 +40,21 @@ def _get_summary(db, visit: Visit) -> Summary:
 
 
 def _guard_not_approved(db, visit: Visit) -> None:
-    """حسم الأكواد مفتوح حتى البوابة ② — يُغلق بعدها فقط."""
+    """حسم الأكواد مفتوح حتى البوابة ② — يُغلق بعدها. المبطلة voided مختومة كذلك:
+    محتواها يبقى للقراءة (سجل ما حدث) ولا يُعدَّل بعد الإبطال (قرار مالك 2026-08-03)."""
     approval = db.execute(select(Approval).where(Approval.visit_id == visit.id)).scalar_one_or_none()
-    if approval is not None or visit.state in ("approved", "uploaded", "upload_failed"):
+    if approval is not None or visit.state in ("approved", "uploaded", "upload_failed", "voided"):
         raise MedifyError("MDF-4226")
 
 
 def _guard_note_open(db, visit: Visit) -> None:
-    """تحرير نص المذكرة يُغلق عند البوابة ① — وإلا بطلت بصمة ما اعتُمد (trigger القاعدة يفرضها)."""
+    """تحرير نص المذكرة يُغلق عند البوابة ① — وإلا بطلت بصمة ما اعتُمد (trigger القاعدة يفرضها).
+
+    مسار Unlock (قرار مالك 2026-08-03): النقض يُسقط الاعتماد النشط فيعود التحرير متاحاً
+    حتى إعادة الاعتماد — لذا يُفحص الاعتماد النشط (غير المنقوض) لا مجرد وجود صف.
+    """
     _guard_not_approved(db, visit)
-    note_approval = db.execute(
-        select(NoteApproval).where(NoteApproval.visit_id == visit.id)
-    ).scalar_one_or_none()
-    if note_approval is not None:
+    if active_note_approval(db, visit.id) is not None:
         raise MedifyError("MDF-4226", details={"reason": "note_approved_gate_1"})
 
 
@@ -135,10 +138,28 @@ def get_summary(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB, response: Response
         row = db.execute(select(User).where(User.id == user_id)).scalar_one_or_none()
         return row.full_name if row else "—"
 
-    note_approval = db.execute(
-        select(NoteApproval).where(NoteApproval.visit_id == visit.id)
-    ).scalar_one_or_none()
     approval = db.execute(select(Approval).where(Approval.visit_id == visit.id)).scalar_one_or_none()
+    # بعد البوابة ② تُعرض بصمة ① المرتبطة بالاعتماد النهائي نفسه؛ قبلها الاعتماد النشط
+    # (غير المنقوض بمسار Unlock — قرار مالك 2026-08-03)
+    if approval is not None:
+        note_approval = db.execute(
+            select(NoteApproval).where(NoteApproval.id == approval.note_approval_id)
+        ).scalar_one_or_none()
+    else:
+        note_approval = active_note_approval(db, visit.id)
+    # مذكرة مفتوحة بعد نقض: آخر نقض يُعرض للدكتور (السبب + الوقت) حتى يعيد الاعتماد
+    note_unlock_out = None
+    if note_approval is None:
+        last_unlock = db.execute(
+            select(NoteUnlock).where(NoteUnlock.visit_id == visit.id)
+            .order_by(NoteUnlock.unlocked_at.desc())
+        ).scalars().first()
+        if last_unlock is not None:
+            note_unlock_out = {
+                "reason": last_unlock.reason,
+                "unlocked_at": last_unlock.unlocked_at.isoformat(),
+                "unlocked_by": _actor(last_unlock.unlocked_by),
+            }
     approval_out = None
     if approval is not None:
         approval_out = {
@@ -178,6 +199,7 @@ def get_summary(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB, response: Response
         "etag": etag,
         "gates": gates,
         "note_approved": note_approval is not None,
+        "note_unlock": note_unlock_out,
         "can_export": approval is not None,
         "approval": approval_out,
         "previous_visits": history,

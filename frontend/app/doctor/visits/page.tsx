@@ -15,7 +15,7 @@ const LIST_GRID = "1.2fr .9fr 1.7fr .8fr .8fr 1.1fr 1.1fr";
 
 const STATE_ORDER: VisitState[] = [
   "draft", "recording", "transcribed", "summarized",
-  "in_review", "approved", "uploaded", "upload_failed", "cancelled",
+  "in_review", "approved", "uploaded", "upload_failed", "cancelled", "voided",
 ];
 
 /** عناوين الأقسام المعروفة (الأقسام ديناميكية من القالب — fallback بحرف المفتاح). */
@@ -35,6 +35,8 @@ function actionFor(row: VisitRow): { label: { ar: string; en: string }; href: st
     case "upload_failed": return { label: { ar: "إعادة المحاولة", en: "Retry" }, href: `/doctor/visits/${row.id}/review` };
     case "draft": return { label: { ar: "استئناف", en: "Resume" }, href: `/doctor/visits/new?resume=${row.id}` };
     case "summarized": return { label: { ar: "بدء المراجعة", en: "Start review" }, href: `/doctor/visits/${row.id}/review` };
+    // المبطلة تبقى مقروءة (Void ≠ Delete) — محتواها مختوم خارج المخارج والإحصائيات
+    case "voided": return { label: { ar: "مُبطلة — عرض", en: "Voided — view" }, href: `/doctor/visits?open=${row.id}` };
     default: return null;
   }
 }
@@ -281,7 +283,7 @@ function VisitsInner() {
       </div>
 
       <p style={{ fontSize: 12.5, color: "#5c7096", marginTop: 12 }}>
-        {L("آلة الحالات أحادية الاتجاه:", "One-way state machine:")} <bdi>draft → recording → transcribed → summarized → in_review → approved → uploaded | upload_failed</bdi> · {L("الإلغاء حالة نهائية", "Cancellation is a terminal state")} <bdi>cancelled</bdi> {L("متاحة قبل الاعتماد فقط", "available only before approval")}
+        {L("آلة الحالات أحادية الاتجاه:", "One-way state machine:")} <bdi>draft → recording → transcribed → summarized → in_review → approved → uploaded | upload_failed</bdi> · {L("الإلغاء حالة نهائية", "Cancellation is a terminal state")} <bdi>cancelled</bdi> {L("متاحة قبل الاعتماد فقط", "available only before approval")} · {L("الإبطال حالة نهائية", "Voiding is a terminal state")} <bdi>voided</bdi> {L("من قيد المراجعة بسبب مدوَّن في التدقيق", "from in-review with an audited reason")}
       </p>
     </>
   );

@@ -9,7 +9,7 @@ from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.orm import Session
 
 from ..errors import MedifyError
-from ..models import GuidanceItem, Summary, SummarySection, Visit
+from ..models import GuidanceItem, NoteApproval, NoteUnlock, Summary, SummarySection, Visit
 
 
 def transition(db: Session, visit: Visit, new_state: str) -> None:
@@ -27,6 +27,20 @@ def transition(db: Session, visit: Visit, new_state: str) -> None:
         if "MDF-4223" in message:
             raise MedifyError("MDF-4223", details={"visit_id": visit_id, "to": new_state}) from exc
         raise
+
+
+def active_note_approval(db: Session, visit_id: uuid.UUID) -> NoteApproval | None:
+    """اعتماد البوابة ① النشط — ما لم يُنقض بمسار Unlock (قرار مالك 2026-08-03).
+
+    بعد كل نقض يتراكم التاريخ في note_approvals؛ النشط هو ما لا صف نقض له في note_unlocks
+    (trigger القاعدة يضمن ألا يوجد أكثر من نشط واحد قبل البوابة ②).
+    """
+    unlocked = select(NoteUnlock.note_approval_id)
+    return db.execute(
+        select(NoteApproval)
+        .where(NoteApproval.visit_id == visit_id, NoteApproval.id.not_in(unlocked))
+        .order_by(NoteApproval.approved_at.desc())
+    ).scalars().first()
 
 
 def get_visit_for_doctor(db: Session, visit_id: uuid.UUID) -> Visit:

@@ -13,12 +13,15 @@
                     ↓
   الدكتور يرى فقط doctor_templates.template_id
 
+idempotent (نمط 0004/0006): قاعدة جديدة تكون 0001 (create_all) أنشأت الأعمدة والجدولين
+من النماذج — الأوامر كلها آمنة عند الوجود.
+
 Revision ID: 0007
 Requires: alembic >= 1.8
 """
 from alembic import op
-import sqlalchemy as sa
-from sqlalchemy.dialects import postgresql
+
+from app.models import Base
 
 revision = "0007"
 down_revision = "0006"
@@ -27,59 +30,30 @@ depends_on = None
 
 
 def upgrade() -> None:
+    bind = op.get_bind()
+
     # ════════ 1. إضافة حقول جديدة إلى templates ════════
-    op.add_column("templates", sa.Column(
-        "prompt_content", sa.Text, nullable=True, comment="محتوى البرومبت الفعلي"
-    ))
-    op.add_column("templates", sa.Column(
-        "prompt_source", sa.String(20), nullable=False,
-        server_default="default", comment="default أو custom"
-    ))
-    op.add_column("templates", sa.Column(
-        "prompt_template_type", sa.String(50), nullable=True,
-        comment="ربط بـ platform_default_prompts (first_visit, follow_up, ...)"
-    ))
+    op.execute("""
+        ALTER TABLE templates ADD COLUMN IF NOT EXISTS prompt_content text;
+        ALTER TABLE templates ADD COLUMN IF NOT EXISTS prompt_source varchar(20) NOT NULL DEFAULT 'default';
+        ALTER TABLE templates ADD COLUMN IF NOT EXISTS prompt_template_type varchar(50);
+    """)
 
-    # ════════ 2. جدول platform_default_prompts (SuperAdmin فقط) ════════
-    op.create_table(
-        "platform_default_prompts",
-        sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False, primary_key=True),
-        sa.Column("template_type", sa.String(50), nullable=False, unique=False),
-        sa.Column("prompt_content", sa.Text, nullable=False),
-        sa.Column("version", sa.String(20), nullable=False, server_default="1.0"),
-        sa.Column("is_active", sa.Boolean, nullable=False, server_default="false"),
-        sa.Column("created_by", postgresql.UUID(as_uuid=True), nullable=False),
-        sa.Column("updated_by", postgresql.UUID(as_uuid=True), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), onupdate=sa.func.now()),
-        sa.ForeignKeyConstraint(["created_by"], ["platform_admins.id"]),
-        sa.ForeignKeyConstraint(["updated_by"], ["platform_admins.id"]),
-        sa.UniqueConstraint("template_type", "version", name="uq_platform_prompts_type_version"),
-        sa.Index("ix_platform_default_prompts_template_type", "template_type"),
-        sa.Index("ix_platform_default_prompts_is_active", "is_active"),
-    )
-
-    # ════════ 3. جدول doctor_templates (مستأجري) ════════
-    op.create_table(
-        "doctor_templates",
-        sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False, primary_key=True),
-        sa.Column("doctor_id", postgresql.UUID(as_uuid=True), nullable=False),
-        sa.Column("template_id", postgresql.UUID(as_uuid=True), nullable=False),
-        sa.Column("facility_id", postgresql.UUID(as_uuid=True), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.ForeignKeyConstraint(["doctor_id"], ["users.id"]),
-        sa.ForeignKeyConstraint(["template_id"], ["templates.id"]),
-        sa.ForeignKeyConstraint(["facility_id"], ["facilities.id"]),
-        sa.UniqueConstraint("doctor_id", "template_id", name="uq_doctor_templates"),
-        sa.Index("ix_doctor_templates_doctor_id", "doctor_id"),
-        sa.Index("ix_doctor_templates_template_id", "template_id"),
-        sa.Index("ix_doctor_templates_facility_id", "facility_id"),
+    # ════════ 2+3. جدولا platform_default_prompts (SuperAdmin فقط) و doctor_templates (مستأجري) ════════
+    Base.metadata.create_all(
+        bind=bind,
+        tables=[
+            Base.metadata.tables["platform_default_prompts"],
+            Base.metadata.tables["doctor_templates"],
+        ],
+        checkfirst=True,
     )
 
     # ════════ 4. إضافة سياسة RLS على doctor_templates ════════
     op.execute("""
         ALTER TABLE doctor_templates ENABLE ROW LEVEL SECURITY;
 
+        DROP POLICY IF EXISTS doctor_templates_all ON doctor_templates;
         CREATE POLICY doctor_templates_all ON doctor_templates
             USING (facility_id = NULLIF(current_setting('app.facility_id', true), '')::uuid)
             WITH CHECK (facility_id = NULLIF(current_setting('app.facility_id', true), '')::uuid);

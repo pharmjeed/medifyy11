@@ -22,6 +22,7 @@ from ...models import (
     GuidanceItem,
     IntegrationConfig,
     Summary,
+    SummarySection,
     UploadJob,
     User,
     Visit,
@@ -148,22 +149,26 @@ def test_integration(ctx: AdminAuth, db: DB):
 @router.get("/dashboards/usage")
 def usage_dashboard(ctx: AdminAuth, db: DB):
     facility = ctx.facility_id
+    # المبطلة تُستثنى من عدادات الإنتاجية (قرار مالك 2026-08-03) — وتبقى ظاهرة في
+    # توزيع الحالات by_state كي لا تختفي واقعة الإبطال عن الأدمن (Void ≠ Delete)
     by_doctor = db.execute(
         select(User.full_name, func.count(Visit.id))
         .join(Visit, Visit.doctor_id == User.id)
-        .where(Visit.facility_id == facility)
+        .where(Visit.facility_id == facility, Visit.state != "voided")
         .group_by(User.full_name)
     ).all()
     by_clinic = db.execute(
         select(Clinic.name, func.count(Visit.id))
         .join(Visit, Visit.clinic_id == Clinic.id)
-        .where(Visit.facility_id == facility)
+        .where(Visit.facility_id == facility, Visit.state != "voided")
         .group_by(Clinic.name)
     ).all()
     by_state = db.execute(
         select(Visit.state, func.count(Visit.id)).where(Visit.facility_id == facility).group_by(Visit.state)
     ).all()
-    total = db.execute(select(func.count(Visit.id)).where(Visit.facility_id == facility)).scalar_one()
+    total = db.execute(
+        select(func.count(Visit.id)).where(Visit.facility_id == facility, Visit.state != "voided")
+    ).scalar_one()
     return ok({
         "total_visits": total,
         "by_doctor": [{"doctor": name, "visits": count} for name, count in by_doctor],
@@ -175,21 +180,30 @@ def usage_dashboard(ctx: AdminAuth, db: DB):
 @router.get("/dashboards/quality")
 def quality_dashboard(ctx: AdminAuth, db: DB):
     facility = ctx.facility_id
+    # مؤشرات الجودة تقيس عمل الدكاترة الفعلي — زيارة مبطلة (مريض خطأ/مكررة/تجريبية)
+    # تلوّثها، فتُستثنى بكاملها: ملخصاتها وإرشاداتها وتعديلاتها (قرار مالك 2026-08-03)
+    voided_visits = select(Visit.id).where(Visit.facility_id == facility, Visit.state == "voided")
     guidance_stats = db.execute(
         select(GuidanceItem.status, func.count(GuidanceItem.id))
-        .where(GuidanceItem.facility_id == facility)
+        .join(SummarySection, SummarySection.id == GuidanceItem.section_id)
+        .join(Summary, Summary.id == SummarySection.summary_id)
+        .where(GuidanceItem.facility_id == facility, Summary.visit_id.not_in(voided_visits))
         .group_by(GuidanceItem.status)
     ).all()
     edits_by_channel = db.execute(
         select(EditEvent.channel, func.count(EditEvent.id))
-        .where(EditEvent.facility_id == facility)
+        .where(EditEvent.facility_id == facility, EditEvent.visit_id.not_in(voided_visits))
         .group_by(EditEvent.channel)
     ).all()
     summaries_total = db.execute(
-        select(func.count(Summary.id)).where(Summary.facility_id == facility)
+        select(func.count(Summary.id)).where(
+            Summary.facility_id == facility, Summary.visit_id.not_in(voided_visits)
+        )
     ).scalar_one()
     edited_visits = db.execute(
-        select(func.count(func.distinct(EditEvent.visit_id))).where(EditEvent.facility_id == facility)
+        select(func.count(func.distinct(EditEvent.visit_id))).where(
+            EditEvent.facility_id == facility, EditEvent.visit_id.not_in(voided_visits)
+        )
     ).scalar_one()
     guidance = {status: count for status, count in guidance_stats}
     resolved = sum(count for status, count in guidance.items() if status != "pending")

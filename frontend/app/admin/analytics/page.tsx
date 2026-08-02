@@ -16,7 +16,7 @@ function apiErrorText(err: unknown, lang: Lang, L: (ar: string, en: string) => s
 
 const STATES: VisitState[] = [
   "draft", "recording", "transcribed", "summarized",
-  "in_review", "approved", "uploaded", "upload_failed", "cancelled",
+  "in_review", "approved", "uploaded", "upload_failed", "cancelled", "voided",
 ];
 
 const COUNT_COLS = "2fr 1fr";

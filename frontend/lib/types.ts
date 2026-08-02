@@ -120,7 +120,7 @@ export interface Template {
 
 export type VisitState =
   | "draft" | "recording" | "transcribed" | "summarized"
-  | "in_review" | "approved" | "uploaded" | "upload_failed" | "cancelled";
+  | "in_review" | "approved" | "uploaded" | "upload_failed" | "cancelled" | "voided";
 
 export interface VisitRow {
   id: string;
@@ -255,8 +255,16 @@ export interface VisitSummary {
   etag: string;
   gates: ApprovalGates;
   note_approved: boolean;
+  /** آخر نقض للبوابة ① (مسار Unlock — قرار مالك 2026-08-03) — غير null فقط والمذكرة مفتوحة بانتظار إعادة الاعتماد */
+  note_unlock: NoteUnlockInfo | null;
   can_export: boolean;
   approval: ApprovalRecord | null;
+}
+
+export interface NoteUnlockInfo {
+  reason: string;
+  unlocked_at: string;
+  unlocked_by: string;
 }
 
 export interface ConsentDocument {

@@ -5,6 +5,7 @@ import datetime as dt
 import uuid
 
 from fastapi import APIRouter
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
 from ...analytics import track
@@ -16,6 +17,7 @@ from ...models import (
     Approval,
     GuidanceItem,
     NoteApproval,
+    NoteUnlock,
     Summary,
     SummarySection,
     UploadAttempt,
@@ -24,7 +26,7 @@ from ...models import (
 from ...services.code_registry import check_code, registry_systems
 from ...services.fhir import build_bundle, store_bundle
 from ...services.uploader import process_upload_job
-from ...services.visits import get_visit_for_doctor, summary_hashes, transition
+from ...services.visits import active_note_approval, get_visit_for_doctor, summary_hashes, transition
 
 router = APIRouter()
 
@@ -34,6 +36,7 @@ def note_approve_visit(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB):
     """البوابة ① — اعتماد نص المذكرة (توجيه المالك 2026-07-22).
 
     بعدها يتجمّد نص المذكرة (trigger القاعدة) ويبقى حسم الأكواد مفتوحاً للبوابة ②.
+    بعد Unlock (قرار مالك 2026-08-03) تُنشئ إعادة الاعتماد صفاً جديداً ببصمة النص المعدَّل.
     """
     visit = get_visit_for_doctor(db, visit_id)
     if visit.state != "in_review":
@@ -42,7 +45,7 @@ def note_approve_visit(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB):
     if summary is None:
         raise MedifyError("MDF-4041")
 
-    existing = db.execute(select(NoteApproval).where(NoteApproval.visit_id == visit.id)).scalar_one_or_none()
+    existing = active_note_approval(db, visit.id)
     if existing is not None:
         return ok({
             "note_approved": True,
@@ -62,8 +65,12 @@ def note_approve_visit(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB):
     )
     db.add(note_approval)
     db.flush()
+    prior_unlocks = db.execute(
+        select(func.count(NoteUnlock.id)).where(NoteUnlock.visit_id == visit.id)
+    ).scalar_one()
     audit(db, ctx.facility_id, "visit.note_approved", "visit", visit.id, ctx.user_id,
-          {"gate": 1, "summary_hash": content_hash[:12]})
+          {"gate": 1, "summary_hash": content_hash[:12],
+           "reapproval_after_unlock": prior_unlocks > 0})
     review_ms = int((note_approval.approved_at - summary.generated_at).total_seconds() * 1000)
     track("visit.note_approved", ctx.facility_id, "doctor", visit.id, review_ms=review_ms)
     return ok({
@@ -72,6 +79,55 @@ def note_approve_visit(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB):
         "approved_at": note_approval.approved_at.isoformat(),
         "summary_hash": content_hash,
         "already_approved": False,
+    })
+
+
+class NoteUnlockIn(BaseModel):
+    reason: str = Field(min_length=1, max_length=2000)
+
+
+@router.post("/visits/{visit_id}/note-unlock")
+def note_unlock_visit(visit_id: uuid.UUID, body: NoteUnlockIn, ctx: DoctorAuth, db: DB):
+    """فتح المذكرة — نقض البوابة ① قبل إتمام ② (قرار مالك 2026-08-03، حلقة CDI).
+
+    مراجعة الأكواد تكشف نقص توثيق (جهة الإصابة، مع/بدون مضاعفات…) والنص مجمّد — بدل اعتماد
+    كود بلا سند أو كود أقل تحديداً: نقض إلحاقي بسبب مسجّل، ثم تعديل، ثم إعادة اعتماد ①.
+    قرارات الأكواد المحسومة تبقى كما هي. بعد البوابة ② المسار Addendum حصراً (trigger القاعدة
+    يرفض النقض بعدها حتى لو تجاوز التطبيق).
+    """
+    visit = get_visit_for_doctor(db, visit_id)
+    reason = body.reason.strip()
+    if not reason:
+        raise MedifyError("MDF-4225", details={"missing": "reason"})
+    if visit.state != "in_review":
+        raise MedifyError("MDF-4223", details={"state": visit.state, "after_final_approval": "addendum"})
+    approval = db.execute(select(Approval).where(Approval.visit_id == visit.id)).scalar_one_or_none()
+    if approval is not None:
+        raise MedifyError("MDF-4223", details={"reason": "gate2_completed", "path": "addendum"})
+    note_approval = active_note_approval(db, visit.id)
+    if note_approval is None:
+        raise MedifyError("MDF-4231", details={"reason": "nothing_to_unlock"})
+
+    unlock = NoteUnlock(
+        visit_id=visit.id,
+        facility_id=ctx.facility_id,
+        note_approval_id=note_approval.id,
+        reason=reason,
+        unlocked_by=ctx.user_id,
+        unlocked_at=dt.datetime.now(dt.timezone.utc),
+    )
+    db.add(unlock)
+    db.flush()
+    # السبب النصي (محتوى سريري محتمل) يبقى في note_unlocks المشفّر — سجل التدقيق يحمل المرجع لا النص
+    audit(db, ctx.facility_id, "visit.note_unlocked", "visit", visit.id, ctx.user_id,
+          {"gate": 1, "note_approval_id": str(note_approval.id), "note_unlock_id": str(unlock.id),
+           "revoked_summary_hash": note_approval.summary_hash[:12]})
+    return ok({
+        "note_unlocked": True,
+        "note_unlock_id": str(unlock.id),
+        "note_approval_id": str(note_approval.id),
+        "unlocked_at": unlock.unlocked_at.isoformat(),
+        "state": visit.state,
     })
 
 
@@ -91,9 +147,8 @@ def approve_visit(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB):
     if summary is None:
         raise MedifyError("MDF-4041")
 
-    note_approval = db.execute(
-        select(NoteApproval).where(NoteApproval.visit_id == visit.id)
-    ).scalar_one_or_none()
+    # النشط فقط — اعتماد ① منقوض بمسار Unlock لا يمرّر البوابة ② (قرار مالك 2026-08-03)
+    note_approval = active_note_approval(db, visit.id)
     if note_approval is None:
         raise MedifyError("MDF-4231", details={"visit_id": str(visit.id)})
 

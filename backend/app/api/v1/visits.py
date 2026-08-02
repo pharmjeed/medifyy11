@@ -349,6 +349,40 @@ def cancel_visit(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB):
     return ok({"state": "cancelled"})
 
 
+# ===== الإبطال Void (قرار مالك 2026-08-03) =====
+
+VOID_REASONS = ("wrong_patient", "duplicate", "test", "consent_withdrawn", "other")
+
+
+class VoidIn(BaseModel):
+    reason: str
+    note: str = Field(default="", max_length=500)
+
+
+@router.post("/visits/{visit_id}/void")
+def void_visit(visit_id: uuid.UUID, body: VoidIn, ctx: DoctorAuth, db: DB):
+    """إبطال زيارة اكتملت معالجتها ولا يصح اعتمادها — من in_review حصراً → voided نهائية.
+
+    Void ≠ Delete: المحتوى السريري يُختم ويخرج من المخارج والإحصائيات، بينما واقعة
+    الإبطال (الفاعل/السبب/الوقت) تُدوَّن في سجل التدقيق الإلحاقي وتبقى. الصوت لا
+    يُمس هنا — يتبع سياسة الاحتفاظ ذاتها (retention_until → purge الدوري).
+    """
+    visit = get_visit_for_doctor(db, visit_id)
+    if body.reason not in VOID_REASONS:
+        raise MedifyError("MDF-4041", details={"reason": body.reason, "allowed": list(VOID_REASONS)})
+    note = body.note.strip()
+    if body.reason == "other" and not note:
+        raise MedifyError("MDF-4041", details={"reason": "other", "note": "required"})
+    if visit.state != "in_review":
+        # قبل المعالجة مساره «إلغاء» (FR-606)؛ بعد الاعتماد لا رجوع — الحكم النهائي للـtrigger
+        raise MedifyError("MDF-4223", details={"state": visit.state, "to": "voided"})
+    transition(db, visit, "voided")
+    # سبب الإبطال بيان إداري لا محتوى سريرياً (DOC-16) — يُدوَّن كاملاً مع هوية الفاعل والوقت
+    audit(db, ctx.facility_id, "visit.voided", "visit", visit.id, ctx.user_id,
+          {"reason": body.reason, "note": note})
+    return ok({"state": "voided", "reason": body.reason})
+
+
 @router.get("/visits/{visit_id}/transcript")
 def get_transcript(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB):
     """نص المحادثة الكامل (FR-604)."""

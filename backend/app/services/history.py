@@ -16,7 +16,8 @@ from sqlalchemy.orm import Session
 
 from ..models import GuidanceItem, Summary, SummarySection, Template, Visit
 
-# حالات تعني أن الزيارة أنتجت مذكرة يمكن الاستناد إليها (المسودة والملغاة لا تُحسب مراجعة)
+# حالات تعني أن الزيارة أنتجت مذكرة يمكن الاستناد إليها — المسودة والملغاة cancelled
+# والمبطلة voided (مريض خطأ/مكررة/تجريبية — قرار مالك 2026-08-03) لا تُحسب مراجعة
 HISTORY_STATES = ("summarized", "in_review", "approved", "uploaded", "upload_failed")
 HISTORY_LIMIT = 5              # آخر خمس مراجعات — يكفي للاستمرارية ويُبقي المطالبة رشيقة
 DIGEST_CHARS = 600             # سقف خلاصة المذكرة الواحدة داخل اللقطة
