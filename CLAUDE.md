@@ -32,7 +32,8 @@ Monorepo: `frontend/` (Next.js 14 App Router + TS strict) · `backend/` (FastAPI
 ## قرارات مقفولة (مالك 2026-07-14)
 
 - ~~المرضى **بالمزامنة حصراً** — لا API ولا واجهة إنشاء/تعديل مريض.~~ **مُعدَّل (مالك 2026-07-26)**: المزامنة تبقى المصدر الأساسي، ويُضاف `POST /patients` (دكتور فقط) + زر «إضافة مريض» في شاشة الزيارة للمريض الذي لم تصله المزامنة بعد. لا تعديل ولا حذف مريض. MRN مكرر داخل المنشأة يعيد الملف القائم (`already_exists`) بلا ازدواج، والملف اليدوي يُميَّز بـ`source=manual` من `audit_logs` (لا عمود جديد — DOC-04 حصري).
-- آلة حالات الزيارة: `draft → recording → transcribed → summarized → in_review → approved → uploaded | upload_failed` + `cancelled` نهائية من `draft/recording` فقط (trigger).
+- آلة حالات الزيارة: `draft → recording → transcribed → summarized → in_review → approved → uploaded | upload_failed` + `cancelled` نهائية من `draft/recording` فقط + `voided` نهائية من `in_review` فقط (trigger — هجرة 0008).
+- **الإبطال Void (قرار مالك 2026-08-03)**: `POST /visits/{id}/void` من `in_review` حصراً بسبب من قائمة (مريض خطأ/مكررة/تجريبية/سحب موافقة/أخرى+نص إلزامي) — الفاعل والسبب والوقت في `audit_logs` (`visit.voided`). Void ≠ Delete: المحتوى يبقى للقراءة، والزيارة تخرج من لوحات الأدمن وملف المريض والمخارج، والصوت يتبع سياسة الاحتفاظ ذاتها. لا رمز MDF جديد (4041/4223/4226 القائمة).
 - أقسام المراجعة تُبنى **ديناميكياً من بنية القالب** — لا S/O/A/P مثبتة.
 - الدكتور يعدّل نص الإرشاد **ورمزه معاً** عند الحسم بالتعديل.
 - أنظمة الترميز: ICD10AM (لا يُعطَّل — CHECK) + ACHI + SBS + SFDA.
@@ -77,6 +78,21 @@ Monorepo: `frontend/` (Next.js 14 App Router + TS strict) · `backend/` (FastAPI
 - **بذر dev/الاختبارات**: عيّنة 9 أكواد حقيقية في `scripts/seed.py` (منها كود ملغى ببديله لمسار
   «كود ملغى»)؛ الإنتاج يستورد الملف الكامل.
 
+## مسار Unlock للبوابة ① (قرار مالك 2026-08-03 — تعديل معتمد على DOC-04/05)
+
+- **حلقة CDI**: مراجعة الأكواد (②) تكشف نقص توثيق (جهة الإصابة، مع/بدون مضاعفات…) والنص مجمّد
+  بعد ① — «فتح المذكرة» يَنقض اعتماد ① بسبب مسجّل، الدكتور يعدّل، يعيد الاعتماد، ويرجع للأكواد
+  **وقراراته المحسومة عليها محفوظة**. متاح **قبل إتمام البوابة ② فقط** — بعدها المسار Addendum
+  حصراً (trigger القاعدة يرفض النقض بعد approvals).
+- **الإلحاقية لا تُخرق**: لا حذف ولا تعديل على `note_approvals` — النقض صف في جدول `note_unlocks`
+  الإلحاقي (سبب مشفّر EncryptedText + الفاعل + الوقت)، وإعادة الاعتماد صف جديد ببصمة النص المعدَّل.
+  `visit_id` صار فهرساً لا UNIQUE، وtrigger يضمن نشطاً واحداً قبل ② (هجرة 0010). «النشط» =
+  اعتماد بلا صف نقض (`services/visits.active_note_approval`) — وهو ما تفحصه البوابة ② والتجميد
+  (MDF-4226 يسقط بالنقض ويعود بإعادة الاعتماد).
+- **API**: `POST /visits/{id}/note-unlock` بجسم `{reason}` إلزامي — `visit.note_unlocked` في
+  `audit_logs` يحمل المرجع لا نص السبب (السبب محتوى سريري محتمل، مكانه `note_unlocks`).
+  الحالة تبقى `in_review` طوال الحلقة. لا رموز خطأ جديدة: 4231/4223/4225 تغطي الحواف.
+
 ## المحركات القابلة للتبديل (متغيرات بيئة)
 
 - `STT_ENGINE=gemini|whisper|mock` · `LLM_ENGINE=gemini|claude|mock` (`GEMINI_API_KEY` + `GEMINI_MODEL`؛ غياب المفتاح = mock تلقائياً بلا توقف)
@@ -115,3 +131,41 @@ bash scripts/smoke.sh http://localhost:8000
 ## بيانات seed (مطابقة للنموذج التفاعلي)
 
 منشأتان (الثانية لاختبار العزل) · أدمن: أ. سلطان الحربي · 3 دكاترة منهم د. نورة العتيبي · عيادتان · 20 مريضاً «متزامناً» · 5 قوالب جاهزة · زيارات بحالات متنوعة.
+
+## مهمة التحصين الشامل (19 مرحلة — 2026-08-03، فرع feature/full-hardening)
+
+سياق المهمة الملزم (القسم 1 من توجيه المالك) — التقدم في `PROGRESS.md`:
+
+### المنتج
+منصة توثيق طبي محيطي للسوق السعودي: تسجيل صوتي للزيارة → تفريغ (P1) → مذكرة SOAP إنجليزية +
+اقتراحات ترميز (P2/P3) → مراجعة الطبيب → بوابتا اعتماد → FHIR Bundle → نقل لملف المريض في نظام
+المستشفى (HIS) بضغطة زر.
+
+### المكدس
+Next.js 14 (RTL-first) | FastAPI + PostgreSQL + SQLAlchemy/Alembic | JWT/RBAC | WebSocket |
+Claude API + Whisper/Gemini | FHIR R4 داخلياً + محوّل HL7 v2 (MLLP) للأنظمة القديمة.
+
+### آلة الحالات المرجعية (أسماء التوجيه) وخريطتها على المطبَّق
+مرجع التوجيه: `draft → recording → processing → summarized → in_review → note_approved →
+codes_approved → bundled → uploading → uploaded` + جانبية `voided | reopened | upload_failed`.
+
+الخريطة على المخطَّط المطبَّق (enum `visit_state` + البوابتين كجداول إلحاقية):
+
+| اسم التوجيه | التمثيل المطبَّق |
+|---|---|
+| processing | `transcribed` (أثناء P1→P3) |
+| note_approved | `in_review` + صف `note_approvals` نشط (بلا نقض في `note_unlocks`) |
+| codes_approved / bundled | `approved` + صف `approvals` + `upload_jobs.status=queued` |
+| uploading | `approved` + `upload_jobs.status=sent` |
+| uploaded / upload_failed / voided | حالات enum مباشرة |
+| reopened | حالة enum تُضاف في المرحلة 1 (دورة النسخ — المرحلة 6) |
+
+### مبادئ غير قابلة للتفاوض — أي كود يخالفها مرفوض
+1. بوابتا الاعتماد (note-approve ثم code-approve) تُفرضان في service layer لا الواجهة. لا مسار يصل HIS بدونهما.
+2. التحرير حصراً داخل Medify. أي تعديل بعد النقل = reopen → نسخة جديدة → إعادة البوابتين → نقل بدلالة replace.
+3. النسخ المنقولة لقطات immutable — لا UPDATE عليها أبداً.
+4. كل فعل حسّاس (اعتماد/فتح/إبطال/نقل/حذف) يكتب سطر Audit بلا معرّفات مرضى مباشرة.
+5. العنبري `#D97706` محجوز حصراً لعناصر البوابات في الواجهة (توكن `--m-gate` يُستحدث؛ `--m-warn` يبقى للتحذيرات العامة).
+6. أكواد الأخطاء MDF-xxxx — راجع السجل القائم في `backend/app/errors.py` قبل إضافة أي كود، وحدّث الكتالوج والتوثيق معاً.
+7. لا PHI إطلاقاً في logs أو telemetry أو رسائل الأخطاء.
+8. واجهة المستخدم عربية RTL؛ أسماء الكود والـ API إنجليزية.
