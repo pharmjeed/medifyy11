@@ -166,6 +166,7 @@ class MockLLMEngine(LLMEngine):
         model_ref = f"{prompt_id}@{version}/mock"
         handler = {
             "P2-summary": self._summary,
+            "P2-verify": self._verify,
             "P3-guidance": self._guidance,
             "P4-reverse-template": self._reverse,
             "P5-edit-chat": self._chat,
@@ -200,6 +201,14 @@ class MockLLMEngine(LLMEngine):
             key = section.get("section_key", "S")
             out.append({"section_key": key, "content": samples.get(key, "[Not discussed]")})
         return {"sections": out}
+
+    def _verify(self, variables: dict[str, Any]) -> dict[str, Any]:
+        """تمريرة السند تجريبياً: أقسام العيّنة مبنية لتطابق حوار العرض — تمر كما هي."""
+        sections = variables.get("sections") or []
+        return {"sections": [
+            {"section_key": section.get("section_key"), "content": section.get("content", "")}
+            for section in sections if isinstance(section, dict)
+        ]}
 
     def _guidance(self, variables: dict[str, Any]) -> dict[str, Any]:
         """عيّنة P3 v1.1 — بنود خطة مهيكلة بكودها ومبررها ودرجة ثقتها.

@@ -1,49 +1,45 @@
-"""محرك STT قابل للتبديل — STT_ENGINE=gemini|whisper|mock (P1 — DOC-08 §١).
+"""محرك STT قابل للتبديل — STT_ENGINE=gemini|whisper|mock (P1 — DOC-08 §١ المعدّل بقرار مالك 2026-08-02).
 
-mock: مولّد نص عربي سريري تجريبي متدفق — لا يوقف أي شيء عند غياب الموارد (D-04).
-gemini: تفريغ حي بنوافذ صوتية عبر Gemini متعدد الوسائط (تعديل مالك 2026-07-26).
-whisper: faster-whisper (small, CPU int8) داخل الحاوية.
+لا تفريغ أثناء التسجيل: الصوت يُجمع ملف WAV أولاً بأول عبر قناة الزيارة، وبعد إنهاء
+المحادثة يُفرَّغ الملف الكامل تمريرة واحدة — فيقرأ المحرك السياق كله (لا أخطاء حدود
+نوافذ) ويُسنَد المتحدث من كامل المحادثة لا من مقاطع معزولة.
+
+mock: حوار عربي سريري تجريبي — لا يوقف أي شيء عند غياب الموارد (D-04).
+gemini: تفريغ الملف الكامل + تحديد المتحدث (diarization) بمخرج JSON متعدد الوسائط.
+whisper: faster-whisper (small, CPU int8) — بلا متحدث؛ يُسند لغوياً من كامل المحادثة.
 """
 from __future__ import annotations
 
-import array
-import base64
 import io
+import json
 import logging
+import re
 import wave
 from abc import ABC, abstractmethod
-from collections.abc import Iterator
-from dataclasses import dataclass, field
+from pathlib import Path
 
 from ..config import get_settings
 
 logger = logging.getLogger("medify.pipelines")
 
 
-@dataclass
-class STTSegment:
-    text: str
-    t0: float
-    t1: float
-    is_final: bool
-
-
 class STTEngine(ABC):
     @abstractmethod
-    def stream_chunk(self, session_id: str, seq: int, payload_b64: str) -> Iterator[STTSegment]:
-        """يعالج جزء صوت 250ms ويُنتج partial/final."""
+    def transcribe_visit(self, path: str) -> list[dict]:
+        """تفريغ ملف الزيارة الكامل بعد إنهاء المحادثة — مقاطع {text, t0, t1[, speaker]}.
+
+        المحرك الذي يميّز المتحدث صوتياً يعيد speaker ∈ {doctor, patient}؛ غيره يتركه
+        فيُسند لغوياً من كامل المحادثة (pipelines.speaker). ملف غائب/صامت = قائمة فارغة —
+        لا يُختلق كلام لم يُقَل.
+        """
 
     @abstractmethod
     def transcribe_file(self, path: str) -> str:
         """مسار قصير غير متدفق — إملاء التحرير الصوتي (FR-706)."""
 
-    def finish(self, session_id: str) -> Iterator[STTSegment]:
-        """ما تبقّى في مخزن الجلسة عند إنهاء التسجيل — افتراضياً لا شيء."""
-        return iter(())
-
 
 def pcm_to_wav(pcm: bytes, sample_rate: int) -> bytes:
-    """يغلّف PCM16 أحادي بترويسة WAV — الصيغة التي تقبلها نماذج الصوت وتُخزَّن بها التسجيلات."""
+    """يغلّف PCM16 أحادي بترويسة WAV — الصيغة التي تُخزَّن بها التسجيلات وتقبلها نماذج الصوت."""
     buffer = io.BytesIO()
     with wave.open(buffer, "wb") as handle:
         handle.setnchannels(1)
@@ -51,17 +47,6 @@ def pcm_to_wav(pcm: bytes, sample_rate: int) -> bytes:
         handle.setframerate(sample_rate)
         handle.writeframes(pcm)
     return buffer.getvalue()
-
-
-def pcm_rms(pcm: bytes) -> float:
-    """جذر متوسط المربعات لعينات PCM16 — بوابة الصمت قبل أي استدعاء مدفوع."""
-    if len(pcm) < 2:
-        return 0.0
-    samples = array.array("h")
-    samples.frombytes(pcm[: len(pcm) - (len(pcm) % 2)])
-    if not samples:
-        return 0.0
-    return (sum(sample * sample for sample in samples) / len(samples)) ** 0.5
 
 
 # نص عربي سريري تجريبي (يحاكي محادثة عيادة — عربي بلهجاته + مقاطع إنجليزية مختلطة)
@@ -82,24 +67,20 @@ MOCK_DIALOGUE: list[str] = [
 
 
 class MockSTTEngine(STTEngine):
-    """كل 4 أجزاء (~ثانية صوت) يُبث سطر جديد من الحوار — partial ثم final بطوابع زمنية."""
+    """يعيد حوار العرض الكامل بطوابع زمنية — المتحدث يُسند لغوياً في P1 كبقية المحركات غير المميِّزة."""
 
-    CHUNKS_PER_SENTENCE = 4
-    CHUNK_SECONDS = 0.25
+    SENTENCE_SECONDS = 4.0
 
-    def stream_chunk(self, session_id: str, seq: int, payload_b64: str) -> Iterator[STTSegment]:
-        sentence_index = seq // self.CHUNKS_PER_SENTENCE
-        position = seq % self.CHUNKS_PER_SENTENCE
-        if sentence_index >= len(MOCK_DIALOGUE):
-            return
-        sentence = MOCK_DIALOGUE[sentence_index]
-        t0 = sentence_index * self.CHUNKS_PER_SENTENCE * self.CHUNK_SECONDS
-        if position < self.CHUNKS_PER_SENTENCE - 1:
-            words = sentence.split()
-            cut = max(1, int(len(words) * (position + 1) / self.CHUNKS_PER_SENTENCE))
-            yield STTSegment(text=" ".join(words[:cut]), t0=t0, t1=t0 + (position + 1) * self.CHUNK_SECONDS, is_final=False)
-        else:
-            yield STTSegment(text=sentence, t0=t0, t1=t0 + self.CHUNKS_PER_SENTENCE * self.CHUNK_SECONDS, is_final=True)
+    def transcribe_visit(self, path: str) -> list[dict]:
+        return [
+            {
+                "id": f"s-{index}",
+                "text": text,
+                "t0": round(index * self.SENTENCE_SECONDS, 2),
+                "t1": round(index * self.SENTENCE_SECONDS + 3.5, 2),
+            }
+            for index, text in enumerate(MOCK_DIALOGUE)
+        ]
 
     def transcribe_file(self, path: str) -> str:
         return "Patient advised to continue current plan and return if symptoms worsen."
@@ -113,27 +94,39 @@ GEMINI_TRANSCRIBE_PROMPT = (
     "أعد نص التفريغ فقط بلا أي مقدمة."
 )
 
+# تفريغ المحادثة الكاملة + تمييز المتحدث من كامل السياق (قرار مالك 2026-08-02)
+GEMINI_DIARIZE_PROMPT = (
+    "أنت محرك تفريغ صوتي طبي لمحادثة كاملة بين طبيب ومريض داخل عيادة سعودية.\n"
+    "فرّغ الكلام حرفياً كما نُطق، وقسّمه مقاطع عند تبادل الأدوار:\n"
+    "- العربية بلهجاتها تُكتب عربية، والمصطلحات والأدوية الإنجليزية تُكتب لاتينية كما نُطقت.\n"
+    "- لا تترجم، ولا تلخّص، ولا تصحّح، ولا تضف كلاماً لم يُقَل.\n"
+    "- حدد متحدث كل مقطع (doctor أو patient) بالاستناد إلى الصوت وسياق المحادثة كاملة،\n"
+    "  ومعه confidence بين 0 و1 لثقتك في الإسناد.\n"
+    "- t0 وt1 زمن بداية المقطع ونهايته بالثواني من بداية التسجيل.\n"
+    'أعد JSON فقط بالشكل: {"segments": [{"speaker": "doctor", "text": "...", "t0": 0.0, "t1": 3.5, "confidence": 0.95}]}\n'
+    'إن لم يكن في التسجيل كلام مسموع أعد {"segments": []}.'
+)
+
 _AUDIO_MIME_BY_SUFFIX = {
     ".wav": "audio/wav", ".mp3": "audio/mp3", ".m4a": "audio/mp4", ".aac": "audio/aac",
     ".ogg": "audio/ogg", ".opus": "audio/ogg", ".flac": "audio/flac", ".aiff": "audio/aiff",
 }
 
 
-@dataclass
-class _GeminiSession:
-    """مخزن جلسة زيارة واحدة: صوت لم يُفرَّغ بعد + ساعة التسجيل + ذيل النص كسياق للنافذة التالية."""
-
-    buffer: bytearray = field(default_factory=bytearray)
-    elapsed: float = 0.0
-    tail: str = ""
+def _extract_segments_json(raw: str) -> list[dict]:
+    """يقرأ {"segments": [...]} من رد النموذج — ValueError إن غاب الشكل المتعاقد عليه."""
+    match = re.search(r"\{.*\}", raw, re.DOTALL)
+    if not match:
+        raise ValueError("no JSON object in diarization output")
+    data = json.loads(match.group(0))
+    segments = data.get("segments")
+    if not isinstance(segments, list):
+        raise ValueError("diarization output missing segments list")
+    return segments
 
 
 class GeminiSTTEngine(STTEngine):
-    """تفريغ حي بنوافذ صوتية — كل ~4 ثوانٍ صوت تُرسل كـWAV إلى Gemini ويعود مقطع final.
-
-    لا partial: النموذج غير متدفق، والنافذة القصيرة تبقي زمن الظهور قريباً من NFR-01.
-    نوافذ الصمت تُتخطى قبل الاستدعاء (بوابة RMS) فلا كلفة ولا نص مُختلَق من سكوت.
-    """
+    """تفريغ الملف الكامل بعد الإنهاء — تمريرة واحدة متعددة الوسائط بمخرج JSON مقسّم بالمتحدثين."""
 
     def __init__(self) -> None:
         from google import genai  # استيراد كسول — الحزمة اختيارية على بيئات الـmock
@@ -143,46 +136,6 @@ class GeminiSTTEngine(STTEngine):
         settings = get_settings()
         self._client = genai.Client(api_key=settings.gemini_api_key)
         self._model = settings.gemini_stt_model or resolve_gemini_model()
-        self._sample_rate = settings.audio_sample_rate
-        self._silence_threshold = settings.stt_silence_threshold
-        self._window_bytes = max(1, int(settings.stt_window_seconds * self._sample_rate * 2))
-        self._sessions: dict[str, _GeminiSession] = {}
-
-    # ----- البث الحي -----
-
-    def stream_chunk(self, session_id: str, seq: int, payload_b64: str) -> Iterator[STTSegment]:
-        session = self._sessions.setdefault(session_id, _GeminiSession())
-        try:
-            session.buffer.extend(base64.b64decode(payload_b64))
-        except Exception:
-            logger.warning("جزء صوت غير صالح (seq=%s) — تُخطّي", seq)
-            return
-        if len(session.buffer) < self._window_bytes:
-            return
-        yield from self._drain(session)
-
-    def finish(self, session_id: str) -> Iterator[STTSegment]:
-        session = self._sessions.pop(session_id, None)
-        if session is None:
-            return
-        yield from self._drain(session, minimum_seconds=0.8)
-
-    def _drain(self, session: _GeminiSession, minimum_seconds: float = 0.0) -> Iterator[STTSegment]:
-        pcm = bytes(session.buffer)
-        session.buffer.clear()
-        duration = len(pcm) / 2 / self._sample_rate
-        if duration <= minimum_seconds:
-            session.elapsed += duration
-            return
-        t0 = session.elapsed
-        session.elapsed += duration
-        if pcm_rms(pcm) < self._silence_threshold:
-            return  # صمت — لا استدعاء
-        text = self._transcribe_pcm(pcm, session.tail)
-        if not text:
-            return
-        session.tail = text[-400:]
-        yield STTSegment(text=text, t0=round(t0, 2), t1=round(session.elapsed, 2), is_final=True)
 
     # ----- الاستدعاء -----
 
@@ -191,7 +144,7 @@ class GeminiSTTEngine(STTEngine):
 
         content = types.Content(role="user", parts=[*parts, types.Part.from_text(text=prompt)])
         last_error: Exception | None = None
-        for attempt in range(2):  # فشل عابر → إعادة واحدة قبل رفع MDF-5031 من طبقة الـWS
+        for attempt in range(2):  # فشل عابر → إعادة واحدة قبل رفع MDF-5031 من طبقة الإيقاف
             try:
                 response = self._client.models.generate_content(
                     model=self._model,
@@ -204,48 +157,80 @@ class GeminiSTTEngine(STTEngine):
                 logger.warning("Gemini STT — فشل المحاولة %s: %s", attempt + 1, exc)
         raise RuntimeError(f"Gemini STT failed: {last_error}")
 
-    def _transcribe_pcm(self, pcm: bytes, context: str) -> str:
+    def _audio_part(self, file_path: Path):
         from google.genai import types
 
-        prompt = GEMINI_TRANSCRIBE_PROMPT
-        if context:
-            prompt += f"\n\nآخر ما فُرِّغ قبل هذا المقطع (سياق فقط — لا تُعده في مخرجاتك): {context}"
-        part = types.Part.from_bytes(data=pcm_to_wav(pcm, self._sample_rate), mime_type="audio/wav")
-        return self._generate([part], prompt)
+        mime = _AUDIO_MIME_BY_SUFFIX.get(file_path.suffix.lower(), "audio/wav")
+        return types.Part.from_bytes(data=file_path.read_bytes(), mime_type=mime)
+
+    def transcribe_visit(self, path: str) -> list[dict]:
+        file_path = Path(path)
+        if not file_path.exists():
+            return []
+        part = self._audio_part(file_path)
+        last_error: Exception | None = None
+        for attempt in range(2):  # مخرج غير مطابق للعقد → إعادة استدعاء واحدة (نمط DOC-08 §٦)
+            raw = self._generate([part], GEMINI_DIARIZE_PROMPT)
+            try:
+                return self._normalize(_extract_segments_json(raw))
+            except ValueError as exc:
+                last_error = exc
+                logger.warning("Gemini diarization — مخرج غير مطابق (محاولة %s): %s", attempt + 1, exc)
+        raise RuntimeError(f"Gemini diarization failed: {last_error}")
+
+    @staticmethod
+    def _normalize(raw_segments: list[dict]) -> list[dict]:
+        """يقصّ المخرج على العقد: نص غير فارغ، متحدث قانوني إن وُجد، أزمنة عددية متصاعدة."""
+        segments: list[dict] = []
+        clock = 0.0
+        for item in raw_segments:
+            if not isinstance(item, dict):
+                continue
+            text = str(item.get("text", "")).strip()
+            if not text:
+                continue
+            try:
+                t0 = float(item["t0"])
+                t1 = float(item["t1"])
+            except (KeyError, TypeError, ValueError):
+                t0 = clock
+                t1 = clock
+            clock = max(clock, t1)
+            segment: dict = {"id": f"s-{len(segments)}", "text": text, "t0": round(t0, 2), "t1": round(t1, 2)}
+            if item.get("speaker") in ("doctor", "patient"):
+                segment["speaker"] = item["speaker"]
+                try:
+                    confidence = float(item["confidence"])
+                    segment["speaker_confidence"] = round(min(0.99, max(0.0, confidence)), 2)
+                except (KeyError, TypeError, ValueError):
+                    pass
+            segments.append(segment)
+        return segments
 
     def transcribe_file(self, path: str) -> str:
-        from pathlib import Path
-
-        from google.genai import types
-
         file_path = Path(path)
         if not file_path.exists():
             return ""
-        mime = _AUDIO_MIME_BY_SUFFIX.get(file_path.suffix.lower(), "audio/wav")
-        part = types.Part.from_bytes(data=file_path.read_bytes(), mime_type=mime)
-        return self._generate([part], GEMINI_TRANSCRIBE_PROMPT)
+        return self._generate([self._audio_part(file_path)], GEMINI_TRANSCRIBE_PROMPT)
 
 
 class WhisperSTTEngine(STTEngine):
-    """faster-whisper small CPU int8 — يتطلب حزمة اختيارية [whisper]."""
+    """faster-whisper small CPU int8 — يتطلب حزمة اختيارية [whisper]. بلا تمييز متحدث."""
 
     def __init__(self) -> None:
         from faster_whisper import WhisperModel  # استيراد كسول — الحزمة اختيارية
 
         self._model = WhisperModel("small", device="cpu", compute_type="int8")
-        self._buffers: dict[str, bytearray] = {}
 
-    def stream_chunk(self, session_id: str, seq: int, payload_b64: str) -> Iterator[STTSegment]:
-        import base64
-
-        buffer = self._buffers.setdefault(session_id, bytearray())
-        buffer.extend(base64.b64decode(payload_b64))
-        # تفريغ تدريجي كل ~2 ثانية صوت (NFR-01) — تبسيط: تفريغ الملف المتراكم
-        if seq % 8 == 7:
-            import io
-            segments, _info = self._model.transcribe(io.BytesIO(bytes(buffer)), language="ar")
-            for segment in segments:
-                yield STTSegment(text=segment.text.strip(), t0=segment.start, t1=segment.end, is_final=True)
+    def transcribe_visit(self, path: str) -> list[dict]:
+        if not Path(path).exists():
+            return []
+        segments, _info = self._model.transcribe(path, language="ar")
+        spoken = [segment for segment in segments if segment.text.strip()]
+        return [
+            {"id": f"s-{index}", "text": segment.text.strip(), "t0": round(segment.start, 2), "t1": round(segment.end, 2)}
+            for index, segment in enumerate(spoken)
+        ]
 
     def transcribe_file(self, path: str) -> str:
         segments, _info = self._model.transcribe(path, language="ar")

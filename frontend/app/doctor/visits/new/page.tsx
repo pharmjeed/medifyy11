@@ -1,8 +1,9 @@
 "use client";
 
 /** الصفحة 14 — بدء زيارة + التسجيل:
- *  W-210 اختيار المريض (بحث + موجز الملف) · W-211 اختيار القالب · W-212 التسجيل الحي بتفريغ متدفق ·
- *  W-223 انقطاع الشبكة (حفظ محلي + resume_from) · W-213 حالة التوليد (P2→P3) · W-207 منشأة موقوفة.
+ *  W-210 اختيار المريض (بحث + موجز الملف) · W-211 اختيار القالب · W-212 التسجيل (صوت فقط —
+ *  لا تفريغ أثناء المحادثة، قرار مالك 2026-08-02) · W-223 انقطاع الشبكة (حفظ محلي + resume_from) ·
+ *  W-213 حالة التوليد (P1 تفريغ كامل → P2 → P3) · W-207 منشأة موقوفة.
  *  شريط التقدم السباعي الدائم (DOC-11 §٣). */
 
 import Link from "next/link";
@@ -12,14 +13,12 @@ import { ApiError, api, getSessionUser, wsUrl } from "@/lib/api";
 import { startMicCapture } from "@/lib/audio";
 import type { MicCapture } from "@/lib/audio";
 import { useLang } from "@/lib/i18n";
-import type { ConsentState, CreatedPatient, CreatedVisit, Patient, PatientContext, Speaker, Template } from "@/lib/types";
+import type { ConsentState, CreatedPatient, CreatedVisit, Patient, PatientContext, Template } from "@/lib/types";
 import { ProgressBar7 } from "@/components/ProgressBar7";
 import { Shell } from "@/components/Shell";
-import { Field, Modal, SpeakerBadge, SpecBadge, SpecBar, useErrorScreen, useToast } from "@/components/ui";
+import { Field, Modal, SpecBadge, SpecBar, useErrorScreen, useToast } from "@/components/ui";
 
 type Phase = "patient" | "template" | "consent" | "recording" | "generating" | "blocked";
-
-interface Segment { id: string; text: string; partial: boolean; speaker?: Speaker; speaker_confidence?: number }
 
 /** سقف الحفظ المحلي عند الانقطاع (~10 دقائق صوت) — بعده تُتخطى الأجزاء بلا كسر تسلسل الترقيم */
 const MAX_PENDING_CHUNKS = 2400;
@@ -69,14 +68,13 @@ export default function NewVisitPage() {
   const [consentAck, setConsentAck] = useState(false);
   const [consentBusy, setConsentBusy] = useState(false);
 
-  // التسجيل الحي
+  // التسجيل — صوت فقط (قرار مالك 2026-08-02): لا تفريغ قبل إنهاء المحادثة
   const [seconds, setSeconds] = useState(0);
   const [paused, setPaused] = useState(false);
-  const [segments, setSegments] = useState<Segment[]>([]);
   const [online, setOnline] = useState(true);
   const [offlineChunks, setOfflineChunks] = useState(0);
   const [cancelOpen, setCancelOpen] = useState(false);
-  const [genStep, setGenStep] = useState<0 | 1 | 2>(0); // 0 = P2 يجري · 1 = P3 يجري · 2 = اكتمل
+  const [genStep, setGenStep] = useState<0 | 1 | 2 | 3>(0); // 0 = P1 تفريغ كامل · 1 = P2 · 2 = P3 · 3 = اكتمل
   // مؤشر صوت صادق: الأعمدة من ذروات العينات الفعلية لا من أنيميشن — صمت رقمي متواصل = تحذير
   const [levels, setLevels] = useState<number[]>(Array.from({ length: 16 }, () => 0));
   const [micSilent, setMicSilent] = useState(false);
@@ -135,25 +133,9 @@ export default function NewVisitPage() {
     };
     socket.onmessage = (event) => {
       const message = JSON.parse(String(event.data)) as {
-        type: string; text?: string; segment_id?: string; seq?: number; code?: string; state?: string;
-        speaker?: Speaker; speaker_confidence?: number;
+        type: string; seq?: number; code?: string; state?: string;
       };
-      if (message.type === "partial" && message.text !== undefined) {
-        const text = message.text;
-        setSegments((current) => {
-          const rest = current.filter((segment) => !segment.partial);
-          return [...rest, { id: "partial", text, partial: true }];
-        });
-      } else if (message.type === "final" && message.text !== undefined) {
-        const text = message.text;
-        const id = message.segment_id ?? `s-${Date.now()}`;
-        const speaker = message.speaker;
-        const speakerConfidence = message.speaker_confidence;
-        setSegments((current) => [
-          ...current.filter((segment) => !segment.partial),
-          { id, text, partial: false, speaker, speaker_confidence: speakerConfidence },
-        ]);
-      } else if (message.type === "resume_from" && message.seq !== undefined) {
+      if (message.type === "resume_from" && message.seq !== undefined) {
         // يُرقَّم المخزَّن محلياً من النقطة التي طلبها الخادم ثم يُرسل بالترتيب — لا فجوة ولا فقد
         const buffered = pending.current;
         pending.current = [];
@@ -164,12 +146,8 @@ export default function NewVisitPage() {
         }
         seq.current = next;
         setOfflineChunks(0);
-      } else if (message.type === "error") {
-        const code = message.code ?? "MDF-5031";
-        toast(L(`انقطاع خط التفريغ (${code}) — وضع الحفظ المحلي`,
-                `Transcription stream interrupted (${code}) — local save mode`));
-        setOnline(false);
       }
+      // ack/status: قناة الصوت حيّة — لا تفريغ يُبث أثناء التسجيل (قرار مالك 2026-08-02)
     };
     socket.onclose = () => {
       if (stopped.current) return;
@@ -179,7 +157,7 @@ export default function NewVisitPage() {
       }, 2500);
     };
     socket.onerror = () => { /* onclose يتكفل */ };
-  }, [toast, L]);
+  }, []);
 
   const phaseRef = useRef<Phase>("patient");
   useEffect(() => { phaseRef.current = phase; }, [phase]);
@@ -340,19 +318,23 @@ export default function NewVisitPage() {
     }
     setPhase("generating");
     setGenStep(0);
-    const flip = setTimeout(() => setGenStep(1), 2400); // مؤشر P2 → P3 (W-213)
-    // الخادم يحفظ التفريغ ثم يغلق القناة — الانتظار يضمن أن التلخيص يقرأ التفريغ الحقيقي
+    // مؤشرا تقدم تقريبيان (W-213): المعالجة كلها استدعاء واحد متزامن — تفريغ كامل ثم P2 ثم P3
+    const flipToSummary = setTimeout(() => setGenStep(1), 5000);
+    const flipToGuidance = setTimeout(() => setGenStep(2), 10_000);
+    // الخادم يُغلق القناة بعد اكتمال ملف الصوت — الانتظار يضمن أن التفريغ يقرأ المحادثة كاملة
     await waitForSocketClose(socket);
     try {
       await api(`/visits/${visit.id}/recording/stop`, {
         method: "POST",
         body: { duration_sec: seconds, pauses_count: 0, offline_chunks: offlineChunks },
       });
-      clearTimeout(flip);
-      setGenStep(2);
+      clearTimeout(flipToSummary);
+      clearTimeout(flipToGuidance);
+      setGenStep(3);
       setTimeout(() => router.push(`/doctor/visits/${visit.id}/review`), 700);
     } catch (err) {
-      clearTimeout(flip);
+      clearTimeout(flipToSummary);
+      clearTimeout(flipToGuidance);
       showError(err);
       setPhase("recording");
     }
@@ -375,7 +357,8 @@ export default function NewVisitPage() {
     }
   };
 
-  const stage = phase === "recording" ? (segments.length > 0 ? 3 : 2) : phase === "generating" ? (genStep === 0 ? 4 : 5) : 1;
+  // المرحلة 3 (تفريغ) تعيش الآن داخل شاشة التوليد — لا تفريغ أثناء التسجيل
+  const stage = phase === "recording" ? 2 : phase === "generating" ? (genStep === 0 ? 3 : genStep === 1 ? 4 : 5) : 1;
   const mm = String(Math.floor(seconds / 60)).padStart(2, "0");
   const ss = String(seconds % 60).padStart(2, "0");
 
@@ -554,8 +537,8 @@ export default function NewVisitPage() {
                 </span>
               </label>
               <p style={{ fontSize: 12, color: "#5c7096", margin: "12px 0 0" }}>
-                {L("عند التأكيد يطلب المتصفح إذن الميكروفون — الصوت يُبثّ للتفريغ عبر قناة الزيارة المشفّرة ولا يبدأ التسجيل قبل السماح.",
-                   "On confirmation the browser will ask for microphone access — audio streams for transcription over the encrypted visit channel, and recording will not start before you allow it.")}
+                {L("عند التأكيد يطلب المتصفح إذن الميكروفون — الصوت يُبثّ عبر قناة الزيارة المشفّرة ويُفرَّغ كاملاً بعد إنهاء المحادثة، ولا يبدأ التسجيل قبل السماح.",
+                   "On confirmation the browser will ask for microphone access — audio streams over the encrypted visit channel and is transcribed in full after the conversation ends; recording will not start before you allow it.")}
               </p>
               <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
                 <button className="btn hero" style={{ flex: 1 }} disabled={!consentAck || consentBusy}
@@ -607,8 +590,8 @@ export default function NewVisitPage() {
                   {" — "}
                   {L("الجهاز المستخدم:", "Device in use:")} <bdi>{mic.current?.deviceLabel !== "" ? mic.current?.deviceLabel : L("غير معروف", "unknown")}</bdi>
                   <br />
-                  {L("لن يظهر تفريغ ولن يُبنى ملخص ما دام الصوت لا يصل. تحقق من: زر كتم المايك في الجهاز/السماعة · اختيار الميكروفون الصحيح في إعدادات الموقع بالمتصفح · مستوى الإدخال في إعدادات صوت ويندوز.",
-                     "No transcript or summary can be produced while no audio arrives. Check: the hardware mute button on your device/headset · the microphone selected in the browser's site settings · the input level in Windows sound settings.")}
+                  {L("لن يُبنى تفريغ ولا ملخص بعد الإنهاء ما دام الصوت لا يصل. تحقق من: زر كتم المايك في الجهاز/السماعة · اختيار الميكروفون الصحيح في إعدادات الموقع بالمتصفح · مستوى الإدخال في إعدادات صوت ويندوز.",
+                     "No transcript or summary can be produced after finishing while no audio arrives. Check: the hardware mute button on your device/headset · the microphone selected in the browser's site settings · the input level in Windows sound settings.")}
                 </div>
               ) : null}
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
@@ -618,20 +601,16 @@ export default function NewVisitPage() {
               </div>
             </div>
 
-            <div className="card" style={{ marginTop: 14 }}>
-              <strong style={{ fontSize: 16 }}>{L("التفريغ الفوري", "Live transcript")}</strong>
-              <span style={{ fontSize: 12.5, color: "#5c7096", marginInlineStart: 8 }}>{L("partial ≤ 2s (NFR-01) · final بطوابع زمنية", "partial ≤ 2s (NFR-01) · final with timestamps")}</span>
-              <div style={{ display: "flex", flexDirection: "column-reverse", gap: 8, marginTop: 10, maxHeight: 320, overflowY: "auto" }}>
-                {segments.length === 0 ? (
-                  <p style={{ color: "#5c7096", fontSize: 14, textAlign: "center", margin: 12 }}>{L("تحدّث الآن — يظهر التفريغ هنا فورياً…", "Speak now — the transcript appears here instantly…")}</p>
-                ) : segments.map((segment) => (
-                  <div key={segment.id} style={{ opacity: segment.partial ? 0.55 : 1, fontSize: 14, lineHeight: 1.9 }}>
-                    <span style={{ marginInlineEnd: 8 }}><SpeakerBadge speaker={segment.speaker} confidence={segment.speaker_confidence} /></span>
-                    {segment.text}
-                    {segment.partial ? <span style={{ display: "inline-block", width: 2, height: 14, background: "#00736d", marginInlineStart: 4, animation: "mBlink .9s ease infinite" }} /> : null}
-                  </div>
-                ))}
-              </div>
+            <div className="card" style={{ marginTop: 14, background: "#f4f8fb" }}>
+              <strong style={{ fontSize: 16 }}>{L("التفريغ بعد إنهاء المحادثة", "Transcription after the conversation ends")}</strong>
+              <p style={{ fontSize: 13, color: "#33465f", lineHeight: 1.9, margin: "8px 0 0" }}>
+                {L("أثناء التسجيل يُجمع الصوت فقط — لا نص يظهر هنا عمداً. عند الإنهاء تُفرَّغ المحادثة كاملة تمريرة واحدة ويُحدَّد المتحدث (الطبيب/المريض) من كامل سياقها، فتكون دقة النص والإسناد أعلى من أي تفريغ لحظي مقطّع.",
+                   "While recording, only audio is collected — no text appears here by design. On finish, the whole conversation is transcribed in a single pass and each speaker (doctor/patient) is identified from its full context, which is more accurate than chunked live transcription.")}
+              </p>
+              <p style={{ fontSize: 12, color: "#5c7096", margin: "8px 0 0" }}>
+                {L("ركّز على مريضك — النص الكامل يظهر في شاشة المراجعة بعد الإنهاء (قرار مالك 2026-08-02).",
+                   "Focus on your patient — the full transcript appears on the review screen after finishing (owner decision 2026-08-02).")}
+              </p>
             </div>
           </section>
         ) : null}
@@ -640,10 +619,11 @@ export default function NewVisitPage() {
           <section style={{ maxWidth: 620, margin: "40px auto" }}>
             <div className="card pad24" style={{ textAlign: "center" }}>
               <SpecBadge id="W-213" />
-              <h1 style={{ fontSize: 22, fontWeight: 800, margin: "10px 0 20px" }}>{L("جارٍ توليد الملخص والإرشاد", "Generating summary and guidance")}</h1>
+              <h1 style={{ fontSize: 22, fontWeight: 800, margin: "10px 0 20px" }}>{L("جارٍ تفريغ المحادثة وتوليد الملخص", "Transcribing the conversation and generating the summary")}</h1>
               {[
-                { label: L("تلخيص SOAP وفق القالب", "SOAP summary per template"), sub: L("خط المعالجة P2", "Pipeline P2"), state: genStep >= 1 ? "done" : "run" },
-                { label: L("التحليل الذكي المدمج — سريري + ترميزي", "Integrated AI analysis — clinical + coding"), sub: L("خط المعالجة P3 على ملف المريض + كلام الزيارة", "Pipeline P3 over the patient file + visit speech"), state: genStep === 2 ? "done" : genStep === 1 ? "run" : "wait" },
+                { label: L("تفريغ المحادثة كاملة وتحديد المتحدثين", "Full-conversation transcription & speaker identification"), sub: L("خط المعالجة P1 — تمريرة واحدة على التسجيل كله", "Pipeline P1 — a single pass over the whole recording"), state: genStep >= 1 ? "done" : "run" },
+                { label: L("تلخيص وفق القالب + حذف ما لا سند له", "Template summary + removal of unsupported content"), sub: L("خط المعالجة P2 مع تمريرة السند", "Pipeline P2 with the evidence pass"), state: genStep >= 2 ? "done" : genStep === 1 ? "run" : "wait" },
+                { label: L("التحليل الذكي المدمج — سريري + ترميزي", "Integrated AI analysis — clinical + coding"), sub: L("خط المعالجة P3 على ملف المريض + كلام الزيارة", "Pipeline P3 over the patient file + visit speech"), state: genStep === 3 ? "done" : genStep === 2 ? "run" : "wait" },
               ].map((step) => (
                 <div key={step.label} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 8px", borderTop: "1px solid #d6f5f2", textAlign: "start" }}>
                   {step.state === "done" ? (
@@ -656,12 +636,12 @@ export default function NewVisitPage() {
                   <span style={{ flex: 1 }}>
                     <strong>{step.label}</strong>
                     <span style={{ display: "block", fontSize: 12.5, color: "#5c7096" }}>
-                      {step.sub} — {step.state === "done" ? L("اكتمل", "Completed") : step.state === "run" ? L("يجري الآن…", "Running now…") : L("بانتظار الملخص", "Awaiting summary")}
+                      {step.sub} — {step.state === "done" ? L("اكتمل", "Completed") : step.state === "run" ? L("يجري الآن…", "Running now…") : L("في الانتظار", "Waiting")}
                     </span>
                   </span>
                 </div>
               ))}
-              <p style={{ fontSize: 12.5, color: "#5c7096", marginTop: 14 }}>{L("≤ 30 ثانية لاستشارة 15 دقيقة (NFR-02) — فشل التحليل لا يحجب الملخص (W-224).", "≤ 30 seconds for a 15-minute consultation (NFR-02) — analysis failure does not block the summary (W-224).")}</p>
+              <p style={{ fontSize: 12.5, color: "#5c7096", marginTop: 14 }}>{L("المحادثة تُفرَّغ كاملة أولاً ثم يُبنى الملخص — فشل التحليل لا يحجب الملخص (W-224).", "The whole conversation is transcribed first, then the summary is built — analysis failure does not block the summary (W-224).")}</p>
             </div>
           </section>
         ) : null}

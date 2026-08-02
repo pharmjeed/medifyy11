@@ -29,7 +29,7 @@ from ...models import (
     Visit,
     VisitConsent,
 )
-from ...pipelines.run import run_guidance, run_summary
+from ...pipelines.run import run_guidance, run_summary, run_transcription
 from ...services.consent import consent_document
 from ...services.history import build_context
 from ...services.visits import get_visit_for_doctor, transition
@@ -318,7 +318,9 @@ class RecordingStopIn(BaseModel):
 
 @router.post("/visits/{visit_id}/recording/stop")
 def recording_stop(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB, body: RecordingStopIn | None = None):
-    """stop يطلق توليد الملخص (FR-605): transcribed → P2 → summarized → P3 → in_review."""
+    """stop يطلق المعالجة كاملة فوراً (FR-605 + قرار مالك 2026-08-02):
+    transcribed → P1 (تفريغ الملف الكامل + إسناد المتحدث من كامل المحادثة)
+    → P2 (+P2-verify) → summarized → P3 → in_review — متزامنة بلا طوابير مؤجلة."""
     body = body or RecordingStopIn()
     visit = get_visit_for_doctor(db, visit_id)
     transition(db, visit, "transcribed")
@@ -329,25 +331,8 @@ def recording_stop(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB, body: Recording
     track("recording.completed", ctx.facility_id, "doctor", visit.id,
           duration_sec=body.duration_sec, pauses_count=body.pauses_count, offline_chunks=body.offline_chunks)
 
-    # إن لم يصل تفريغ عبر WS (تعطل P1) — على المحرك التجريبي يُبنى حوار العرض،
-    # وعلى محرك حقيقي يبقى التفريغ فارغاً: لا يُلخَّص كلام لم يُقَل (سلامة سريرية).
-    transcript = db.execute(select(Transcript).where(Transcript.visit_id == visit.id)).scalar_one_or_none()
-    if transcript is None:
-        from ...pipelines.speaker import attribute_segments
-        from ...pipelines.stt import MOCK_DIALOGUE, MockSTTEngine, get_stt
-        demo = isinstance(get_stt(), MockSTTEngine)
-        db.add(Transcript(
-            visit_id=visit.id,
-            facility_id=ctx.facility_id,
-            content_json={"segments": attribute_segments([
-                {"id": f"s-{i}", "text": text, "t0": i * 4.0, "t1": i * 4.0 + 3.5}
-                for i, text in enumerate(MOCK_DIALOGUE)
-            ]) if demo else []},
-            language_stats={"ar": 0.9, "en": 0.1} if demo else {"segments": 0, "interrupted": True},
-        ))
-        db.flush()
-
-    summary = run_summary(db, visit)          # فشل → MDF-5032 (يرفع خطأ)
+    run_transcription(db, visit)              # P1 — فشل المحرك → MDF-5031 (يرفع خطأ)
+    summary = run_summary(db, visit)          # P2 + تمريرة السند — فشل → MDF-5032 (يرفع خطأ)
     transition(db, visit, "summarized")
     guidance_ok = run_guidance(db, visit, summary)  # فشل → W-224 دون حجب
     transition(db, visit, "in_review")

@@ -1,4 +1,4 @@
-"""تشغيل خطوط المعالجة P2..P5 على الزيارة — كلها عبر طبقة الخدمة (DOC-08 مقفول)."""
+"""تشغيل خطوط المعالجة P1..P5 على الزيارة — كلها عبر طبقة الخدمة (DOC-08 المعدّل بقرار مالك 2026-08-02)."""
 from __future__ import annotations
 
 import datetime as dt
@@ -18,6 +18,7 @@ from ..models import (
     GuidanceItem,
     Patient,
     PatientContextSnapshot,
+    Recording,
     Summary,
     SummarySection,
     Template,
@@ -29,11 +30,15 @@ from ..services.code_registry import check_code, registry_systems
 from ..services.history import previous_visits
 from .deidentify import build_map
 from .llm import get_llm
+from .speaker import attribute_segments
+from .stt import get_stt
 
 logger = logging.getLogger("medify.pipelines")
 
 PROMPT_VERSIONS = {
     "P2-summary": "1.0",
+    # تمريرة السند (قرار مالك 2026-08-02): كل جملة بلا سند في المحادثة تُحذف قبل أن يراها الدكتور
+    "P2-verify": "1.0",
     # 1.2: المراجعات السابقة مدخل صريح + إرشاد تشخيصي/علاجي عملي (تعديل مالك 2026-07-26)
     "P3-guidance": "1.2",
     "P4-reverse-template": "1.0",
@@ -65,6 +70,73 @@ def _active_coding_systems(db: Session, facility_id: uuid.UUID) -> list[str]:
     return [row.system for row in rows] or ["ICD10AM"]
 
 
+def run_transcription(db: Session, visit: Visit) -> Transcript:
+    """P1 — التفريغ الكامل بعد إنهاء المحادثة (قرار مالك 2026-08-02): الملف كله تمريرة واحدة.
+
+    إسناد المتحدث من كامل المحادثة: المحرك المميِّز صوتياً (gemini) يعيده مع كل مقطع،
+    وإلا يُسند لغوياً على كامل قائمة المقاطع. فشل المحرك → MDF-5031 يوقف التدفق —
+    لا يُلخَّص كلام لم يُفرَّغ، ولا يُختلق نص لملف صامت/غائب.
+    """
+    recording = db.execute(select(Recording).where(Recording.visit_id == visit.id)).scalar_one_or_none()
+    audio_path = recording.storage_uri if recording is not None else ""
+    try:
+        segments = get_stt().transcribe_visit(audio_path)
+    except Exception as exc:
+        logger.error("P1 فشل للزيارة %s: %s", visit.id, exc)
+        raise MedifyError("MDF-5031", details={"visit_id": str(visit.id)}) from exc
+
+    # المحرك الذي لا يميّز المتحدث صوتياً → إسناد لغوي على المحادثة كاملة (سياق تبادل الأدوار كله)
+    if segments and not all(segment.get("speaker") in ("doctor", "patient") for segment in segments):
+        attribute_segments(segments)
+
+    content = {"segments": segments}
+    stats = {"segments": len(segments)}
+    transcript = db.execute(select(Transcript).where(Transcript.visit_id == visit.id)).scalar_one_or_none()
+    if transcript is None:
+        transcript = Transcript(
+            visit_id=visit.id,
+            facility_id=visit.facility_id,
+            content_json=content,
+            language_stats=stats,
+        )
+        db.add(transcript)
+    else:
+        transcript.content_json = content
+        transcript.language_stats = stats
+    db.flush()
+    return transcript
+
+
+def _verify_sections(transcript_scrubbed: str, sections_out: list[dict]) -> list[dict]:
+    """P2-verify — يحذف من كل قسم أي جملة بلا سند في المحادثة (قرار مالك 2026-08-02).
+
+    الفشل لا يوقف التدفق: تمضي الأقسام غير المنقّحة — البوابة البشرية (①) تبقى فوق الجميع.
+    """
+    version = PROMPT_VERSIONS["P2-verify"]
+    try:
+        output, _model_ref = get_llm().complete_json(
+            "P2-verify",
+            version,
+            {
+                "transcript": transcript_scrubbed,
+                "sections": [
+                    {"section_key": section.get("section_key"), "content": section.get("content")}
+                    for section in sections_out
+                ],
+            },
+        )
+        verified = output["sections"]
+        assert isinstance(verified, list) and verified
+        by_key = {str(section.get("section_key")): str(section.get("content", "")) for section in verified}
+        return [
+            {**section, "content": by_key.get(str(section.get("section_key")), str(section.get("content", "")))}
+            for section in sections_out
+        ]
+    except Exception as exc:
+        logger.warning("P2-verify تعذّرت (%s) — تمضي الأقسام غير المنقّحة لمراجعة الدكتور", exc)
+        return sections_out
+
+
 def run_summary(db: Session, visit: Visit) -> Summary:
     """P2 — التلخيص بالقالب. فشل بعد إعادة المحاولة → MDF-5032 (إعادة المحاولة داخل المحرك)."""
     transcript = db.execute(select(Transcript).where(Transcript.visit_id == visit.id)).scalar_one()
@@ -72,13 +144,14 @@ def run_summary(db: Session, visit: Visit) -> Summary:
     patient = db.execute(select(Patient).where(Patient.id == visit.patient_id)).scalar_one()
 
     deid = build_map(patient.display_name, patient.hospital_mrn)
+    transcript_scrubbed = deid.scrub(_transcript_text(transcript))
     version = PROMPT_VERSIONS["P2-summary"]
     try:
         output, model_ref = get_llm().complete_json(
             "P2-summary",
             version,
             {
-                "transcript": deid.scrub(_transcript_text(transcript)),
+                "transcript": transcript_scrubbed,
                 "template_structure": template.structure_json,
                 "specialty": template.specialty or "",
                 "visit_type": template.visit_type or "",
@@ -89,6 +162,9 @@ def run_summary(db: Session, visit: Visit) -> Summary:
     except Exception as exc:
         logger.error("P2 فشل للزيارة %s: %s", visit.id, exc)
         raise MedifyError("MDF-5032", details={"visit_id": str(visit.id)}) from exc
+
+    # تمريرة السند قبل أن يرى الدكتور أي شيء — ما لا سند له في المحادثة يُحذف لا يُعلَّم
+    sections_out = _verify_sections(transcript_scrubbed, sections_out)
 
     summary = Summary(
         visit_id=visit.id,

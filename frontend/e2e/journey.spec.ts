@@ -1,8 +1,9 @@
 import { expect, test } from "@playwright/test";
 
 /** الرحلة الكاملة E2E بالـ mocks (معيار القبول الثالث):
- *  دخول دكتور → اختيار مريض (من المزامنة) → قالب → تسجيل + تفريغ متدفق →
- *  ملخص → إرشادات مضمّنة → حسم → اعتماد → رفع (وهمي) → السجل. */
+ *  دخول دكتور → اختيار مريض (من المزامنة) → قالب → موافقة → تسجيل (صوت فقط —
+ *  لا تفريغ أثناء المحادثة، قرار مالك 2026-08-02) → إنهاء: تفريغ كامل + ملخص →
+ *  إرشادات مضمّنة → حسم → اعتماد → رفع (وهمي) → السجل. */
 
 test("الرحلة الكاملة: من الدخول إلى الرفع", async ({ page }) => {
   await page.addInitScript(() => window.localStorage.setItem("medify_lang", "ar")); // النصوص المؤكدة عربية
@@ -25,17 +26,19 @@ test("الرحلة الكاملة: من الدخول إلى الرفع", async (
   await expect(page.getByText("موجز ملف المريض")).toBeVisible();
   await page.getByRole("button", { name: "التالي: اختيار القالب" }).click();
 
-  // 4) اختيار القالب (W-211) — الافتراضي محدد مسبقاً
+  // 4) اختيار القالب (W-211) — الافتراضي محدد مسبقاً → بوابة الموافقة (A1)
   await expect(page.getByText("اختيار قالب التلخيص")).toBeVisible();
-  await page.getByRole("button", { name: /بدء التسجيل/ }).click();
+  await page.getByRole("button", { name: "التالي — موافقة المريض" }).click();
 
-  // 5) التسجيل الحي + التفريغ المتدفق (W-212)
+  // 5) توثيق موافقة المريض ثم التسجيل (W-212) — صوت فقط: لا نص يظهر أثناء المحادثة
+  await expect(page.getByText("موافقة المريض على التسجيل")).toBeVisible();
+  await page.locator('input[type="checkbox"]').check();
+  await page.getByRole("button", { name: "وثّق الموافقة وابدأ التسجيل" }).click();
   await expect(page.getByText("متصل")).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByText("يشتكي المريض من").or(page.getByText("السلام عليكم دكتور"))).toBeVisible({ timeout: 20_000 });
-  // كل مقطع يحمل هوية متكلمه المُستنتَجة — أول أدوار الحوار للمريض
-  await expect(page.getByText("المريض", { exact: true }).first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText("التفريغ بعد إنهاء المحادثة")).toBeVisible();
 
-  // 6) إنهاء → حالة التوليد (W-213) → المراجعة
+  // 6) إنهاء → التوليد (W-213: تفريغ المحادثة كاملة → ملخص → تحليل) → المراجعة
+  await page.waitForTimeout(1500); // يتجمّع صوت الجهاز الوهمي قبل الإنهاء
   await page.getByRole("button", { name: "إنهاء التسجيل وتوليد الملخص" }).click();
   await page.waitForURL("**/review", { timeout: 60_000 });
 
@@ -44,21 +47,33 @@ test("الرحلة الكاملة: من الدخول إلى الرفع", async (
   await expect(page.getByText("Patient education")).toBeVisible(); // القسم E — 5 أقسام لا SOAP مثبتة
   await expect(page.getByText("المصدر:").first()).toBeVisible();
 
-  // 8) زر الاعتماد معطّل مع إرشادات معلقة (W-218 / MDF-4222)
-  const approveButton = page.getByRole("button", { name: "اعتمد وارفع" });
-  await expect(approveButton).toBeDisabled();
+  // 8) البوابة ① — اعتماد نص المذكرة (يجمّد النص ويفتح حسم الأكواد)
+  await page.getByRole("button", { name: "① اعتماد نص المذكرة" }).click();
+  const approveCodesButton = page.getByRole("button", { name: "② اعتماد الأكواد والرفع" });
+  await expect(approveCodesButton).toBeVisible({ timeout: 10_000 });
+  await expect(approveCodesButton).toBeDisabled(); // إرشادات معلقة (MDF-4222)
 
-  // 9) حسم كل الإرشادات المعلقة (قبول)
+  // 9أ) البند المحجوب دون العتبة («لا تخمين») — يُحسم بإدخال الكود يدوياً عبر «تعديل»
+  const withheldCard = page.locator("div")
+    .filter({ has: page.getByText("«لا تخمين»") })
+    .filter({ has: page.getByRole("button", { name: "تعديل" }) })
+    .last();
+  await withheldCard.getByRole("button", { name: "تعديل" }).click();
+  await withheldCard.locator("input.mono").fill("G44");
+  await withheldCard.getByRole("button", { name: /G44\.2/ }).first().click(); // إكمال من السجل المرجعي
+  await withheldCard.getByRole("button", { name: "حفظ وقبول معدلاً" }).click();
+
+  // 9ب) حسم بقية الإرشادات المعلقة (قبول)
   const acceptButtons = page.getByRole("button", { name: "قبول", exact: true });
   while ((await acceptButtons.count()) > 0) {
     await acceptButtons.first().click();
     await page.waitForTimeout(400);
   }
-  await expect(page.getByText("صفر إرشادات معلقة — جاهزة للاعتماد", { exact: false })).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText("جاهزة لاعتماد الأكواد", { exact: false })).toBeVisible({ timeout: 10_000 });
 
-  // 10) اعتماد → رفع وهمي ناجح (W-219)
-  await expect(approveButton).toBeEnabled();
-  await approveButton.click();
+  // 10) البوابة ② — اعتماد الأكواد → رفع وهمي ناجح (W-219)
+  await expect(approveCodesButton).toBeEnabled();
+  await approveCodesButton.click();
   await expect(page.getByText("رفع ناجح ✓", { exact: false })).toBeVisible({ timeout: 30_000 });
 
   // 11) الزيارة في السجل بحالة «مرفوعة ✓» (W-202)

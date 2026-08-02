@@ -96,7 +96,8 @@ def test_doctor_cannot_edit_shared_template(client, doctor_token):
 
 
 def test_websocket_transcribe_protocol(client, doctor_token):
-    """partial أثناء البث → final بطوابع زمنية → resume_from عند فجوة → status عند الإنهاء."""
+    """قناة صوت فقط (قرار مالك 2026-08-02): ack لكل جزء → resume_from عند فجوة →
+    status عند الإنهاء — ولا نص يُبث أثناء التسجيل؛ التفريغ الكامل بعد stop."""
     headers = auth(doctor_token)
     patients = client.get("/api/v1/patients", headers=headers).json()["data"]
     templates = client.get("/api/v1/templates", headers=headers).json()["data"]
@@ -108,19 +109,10 @@ def test_websocket_transcribe_protocol(client, doctor_token):
     client.post(f"/api/v1/visits/{visit_id}/recording/start", headers=headers)
 
     with client.websocket_connect(f"/ws/visits/{visit_id}/transcribe?token={doctor_token}") as ws:
-        got_partial = got_final = False
-        for seq in range(8):  # جملتان من المولد التجريبي
+        for seq in range(8):
             ws.send_json({"type": "audio_chunk", "seq": seq, "payload": "AAAA"})
             message = ws.receive_json()
-            if message["type"] == "partial":
-                got_partial = True
-            elif message["type"] == "final":
-                got_final = True
-                assert "t0" in message and "t1" in message and message["segment_id"]
-                # إسناد المتحدث يُبثّ مع كل مقطع نهائي
-                assert message["speaker"] in ("doctor", "patient")
-                assert 0.0 <= message["speaker_confidence"] <= 1.0
-        assert got_partial and got_final
+            assert message == {"type": "ack", "seq": seq}, "لا partial ولا final أثناء التسجيل"
 
         # فجوة تسلسل → الخادم يطلب الإعادة من آخر مؤكد (NFR-09)
         ws.send_json({"type": "audio_chunk", "seq": 99, "payload": "AAAA"})
@@ -136,12 +128,19 @@ def test_websocket_transcribe_protocol(client, doctor_token):
         ws.send_json({"type": "end"})
         assert ws.receive_json() == {"type": "status", "state": "summarizing"}
 
-    # المقاطع حُفظت مرتبطة بالزيارة
+    # لا تفريغ أثناء التسجيل — يُبنى كاملاً عند stop (P1) بإسناد متحدث من كامل المحادثة
+    missing = client.get(f"/api/v1/visits/{visit_id}/transcript", headers=headers)
+    assert missing.status_code == 404
+
     stopped = client.post(f"/api/v1/visits/{visit_id}/recording/stop", headers=headers,
                           json={"duration_sec": 10})
     assert stopped.status_code == 200
     transcript = client.get(f"/api/v1/visits/{visit_id}/transcript", headers=headers).json()["data"]
-    assert transcript["content"]["segments"]
+    segments = transcript["content"]["segments"]
+    assert segments
+    for segment in segments:
+        assert segment["speaker"] in ("doctor", "patient")
+        assert "t0" in segment and "t1" in segment and segment["id"]
 
 
 def test_websocket_rejects_wrong_state(client, doctor_token):
@@ -154,8 +153,8 @@ def test_websocket_rejects_wrong_state(client, doctor_token):
             ws.receive_json()
 
 
-def test_reconnect_mid_recording_keeps_earlier_transcript_and_audio(client, doctor_token):
-    """انقطاع وسط الاستشارة: الاتصال الثاني يُكمل فوق الأول — لا يمحو نصفها الأول (NFR-09)."""
+def test_reconnect_mid_recording_keeps_earlier_audio(client, doctor_token):
+    """انقطاع وسط الاستشارة: الاتصال الثاني يُلحق صوته فوق الأول — لا يمحوه (NFR-09)."""
     import base64
     import os
     import wave
@@ -176,10 +175,10 @@ def test_reconnect_mid_recording_keeps_earlier_transcript_and_audio(client, doct
     with client.websocket_connect(f"/ws/visits/{visit_id}/transcribe?token={doctor_token}") as ws:
         for seq in range(8):
             ws.send_json({"type": "audio_chunk", "seq": seq, "payload": chunk})
-            ws.receive_json()
+            assert ws.receive_json() == {"type": "ack", "seq": seq}
 
-    first = client.get(f"/api/v1/visits/{visit_id}/transcript", headers=headers).json()["data"]
-    assert len(first["content"]["segments"]) == 2, "جملتان من الاتصال الأول"
+    # لا تفريغ أثناء التسجيل إطلاقاً (قرار مالك 2026-08-02) — حتى بعد اتصال حمل صوتاً
+    assert client.get(f"/api/v1/visits/{visit_id}/transcript", headers=headers).status_code == 404
 
     # الاتصال الثاني: العميل يسأل أين توقف الخادم ثم يُكمل بالترقيم الذي طلبه
     with client.websocket_connect(f"/ws/visits/{visit_id}/transcribe?token={doctor_token}") as ws:
@@ -192,14 +191,10 @@ def test_reconnect_mid_recording_keeps_earlier_transcript_and_audio(client, doct
         ws.send_json({"type": "end"})
         assert ws.receive_json() == {"type": "status", "state": "summarizing"}
 
-    merged = client.get(f"/api/v1/visits/{visit_id}/transcript", headers=headers).json()["data"]
-    segments = merged["content"]["segments"]
-    assert len(segments) == 4, "مقاطع الاتصالين معاً — لا استبدال"
-    assert [segment["id"] for segment in segments] == ["s-0", "s-1", "s-2", "s-3"], "معرفات متصلة بلا تصادم"
-
-    # الصوت أُلحق أيضاً: ملف WAV صالح يضم أجزاء الاتصالين (16 جزءاً × 4000 بايت)
+    # الصوت أُلحق: ملف WAV صالح يضم أجزاء الاتصالين معاً (16 جزءاً × 4000 بايت)
     path = Path(os.environ["RECORDINGS_DIR"]) / f"{visit_id}.wav"
     assert path.exists()
     with wave.open(str(path), "rb") as handle:
         assert handle.getframerate() == 16000 and handle.getnchannels() == 1
+        assert handle.getnframes() == 16 * 2000, "أجزاء الاتصالين بلا محو"
         assert handle.getnframes() == 16 * 2000, "إطارات الاتصالين معاً بترويسة مصحّحة"

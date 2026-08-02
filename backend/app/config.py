@@ -28,14 +28,12 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-sonnet-4-5"
 
-    # جيميناي (تعديل مالك 2026-07-26) — تفريغ حي متعدد الوسائط + تلخيص/إرشاد بمفتاح واحد
+    # جيميناي — تفريغ الملف الكامل بعد الإنهاء (قرار مالك 2026-08-02) + تلخيص/إرشاد بمفتاح واحد
     gemini_api_key: str = ""
     # الافتراضي (توجيه مالك 2026-08-01) — والسوبر أدمن يبدّله من /sa/settings دون نشر (platform_settings)
     gemini_model: str = "gemini-3.5-flash-lite"
     gemini_stt_model: str = ""               # فارغ = gemini_model
-    stt_window_seconds: float = 4.0          # طول نافذة التفريغ الحي المرسلة للنموذج
     audio_sample_rate: int = 16000           # PCM16 أحادي من المتصفح (lib/audio.ts)
-    stt_silence_threshold: int = 200         # RMS دون هذه القيمة = صمت فلا استدعاء ولا كلفة
     integration_engine: str = "mock"  # mock | http
     email_engine: str = "mock"        # mock | smtp
     payment_engine: str = "mock"      # mock (D-10)
