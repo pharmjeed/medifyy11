@@ -7,6 +7,10 @@
 mock: حوار عربي سريري تجريبي — لا يوقف أي شيء عند غياب الموارد (D-04).
 gemini: تفريغ الملف الكامل + تحديد المتحدث (diarization) بمخرج JSON متعدد الوسائط.
 whisper: faster-whisper (small, CPU int8) — بلا متحدث؛ يُسند لغوياً من كامل المحادثة.
+
+إعادة محاولة عابرة (قرار مالك 2026-08-03): أخطاء timeout/5xx تُعاد تلقائياً بـ exponential backoff
+(30 ثانية → دقيقتين → 5 دقائق) دون تدخل بشري. أخطاء غير قابلة للإعادة (ملف تالف، صيغة غير مدعومة)
+ترفع MDF-5031 فوراً.
 """
 from __future__ import annotations
 
@@ -14,6 +18,7 @@ import io
 import json
 import logging
 import re
+import time
 import wave
 from abc import ABC, abstractmethod
 from pathlib import Path
@@ -21,6 +26,70 @@ from pathlib import Path
 from ..config import get_settings
 
 logger = logging.getLogger("medify.pipelines")
+
+
+def _is_retryable_error(exc: Exception) -> bool:
+    """تحديد إن كان الخطأ عابراً (قابل للإعادة) أم نهائياً.
+
+    قابل للإعادة: timeout، مشاكل شبكة، أخطاء 5xx من الخادم.
+    غير قابل: ملف تالف، صيغة غير مدعومة، مفاتيح API غير صحيحة.
+    """
+    exc_str = str(exc).lower()
+    exc_name = exc.__class__.__name__
+
+    # Timeout وشبكة
+    if any(x in exc_str for x in ["timeout", "timed out", "connection", "refused", "reset"]):
+        return True
+    if any(x in exc_name for x in ["Timeout", "Connection", "Network", "IOError", "OSError"]):
+        return True
+
+    # أخطاء 5xx و 429 من خوادم الخدمات
+    if any(x in exc_str for x in ["500", "502", "503", "504", "429", "too many requests"]):
+        return True
+
+    # أخطاء Google/Gemini العابرة
+    if "Service Unavailable" in str(exc) or "RESOURCE_EXHAUSTED" in str(exc):
+        return True
+
+    # أخطاء Whisper العابرة
+    if "CUDA out of memory" in str(exc):
+        return True
+
+    return False
+
+
+def retry_with_backoff(func, max_retries: int = 3, backoff_seconds: list[float] | None = None):
+    """تكرار دالة مع exponential backoff.
+
+    Args:
+        func: دالة بدون معاملات (lambda أو partial)
+        max_retries: عدد إعادة المحاولات (3 افتراضياً)
+        backoff_seconds: قائمة التأخيرات بالثواني [30, 120, 300]
+    """
+    if backoff_seconds is None:
+        backoff_seconds = [30.0, 120.0, 300.0]  # 30 ثانية، دقيقتين، 5 دقائق
+
+    last_error = None
+    for attempt in range(max_retries):
+        try:
+            return func()
+        except Exception as exc:
+            last_error = exc
+            if not _is_retryable_error(exc):
+                logger.debug("خطأ غير قابل للإعادة: %s", exc)
+                raise  # رفع الخطأ فوراً إن لم يكن قابل للإعادة
+
+            if attempt < max_retries - 1:
+                delay = backoff_seconds[min(attempt, len(backoff_seconds) - 1)]
+                logger.warning(
+                    "STT — محاولة %d فشلت (%s) — إعادة بعد %.0f ثانية",
+                    attempt + 1, exc, delay
+                )
+                time.sleep(delay)
+            else:
+                logger.error("STT — كل المحاولات فشلت بعد %d محاولة", max_retries)
+
+    raise last_error
 
 
 class STTEngine(ABC):

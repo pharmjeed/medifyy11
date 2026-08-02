@@ -32,7 +32,7 @@ from ..services.history import previous_visits
 from .deidentify import build_map
 from .llm import get_llm
 from .speaker import attribute_segments
-from .stt import get_stt
+from .stt import get_stt, retry_with_backoff
 
 logger = logging.getLogger("medify.pipelines")
 
@@ -113,15 +113,15 @@ def run_transcription(db: Session, visit: Visit) -> Transcript:
     """P1 — التفريغ الكامل بعد إنهاء المحادثة (قرار مالك 2026-08-02): الملف كله تمريرة واحدة.
 
     إسناد المتحدث من كامل المحادثة: المحرك المميِّز صوتياً (gemini) يعيده مع كل مقطع،
-    وإلا يُسند لغوياً على كامل قائمة المقاطع. فشل المحرك → MDF-5031 يوقف التدفق —
-    لا يُلخَّص كلام لم يُفرَّغ، ولا يُختلق نص لملف صامت/غائب.
+    وإلا يُسند لغوياً على كامل قائمة المقاطع. أخطاء عابرة → إعادة محاولة تلقائية بـ backoff
+    (30 ثانية → دقيقتين → 5 دقائق). فشل نهائي → MDF-5031 يوقف التدفق — لا يُلخَّص كلام لم يُفرَّغ.
     """
     recording = db.execute(select(Recording).where(Recording.visit_id == visit.id)).scalar_one_or_none()
     audio_path = recording.storage_uri if recording is not None else ""
     try:
-        segments = get_stt().transcribe_visit(audio_path)
+        segments = retry_with_backoff(lambda: get_stt().transcribe_visit(audio_path))
     except Exception as exc:
-        logger.error("P1 فشل للزيارة %s: %s", visit.id, exc)
+        logger.error("P1 فشل للزيارة %s بعد جميع المحاولات: %s", visit.id, exc)
         raise MedifyError("MDF-5031", details={"visit_id": str(visit.id)}) from exc
 
     # المحرك الذي لا يميّز المتحدث صوتياً → إسناد لغوي على المحادثة كاملة (سياق تبادل الأدوار كله)
