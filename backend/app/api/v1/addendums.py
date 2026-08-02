@@ -15,25 +15,15 @@ import hashlib
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
+from fastapi import APIRouter
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
-from sqlalchemy.orm import Session
 
-from ...analytics import track
 from ...audit import audit
 from ...deps import DoctorAuth, DB
 from ...envelope import ok
 from ...errors import MedifyError
-from ...models import (
-    Addendum,
-    Facility,
-    NoteApproval,
-    Summary,
-    SummarySection,
-    User,
-    Visit,
-)
+from ...models import Addendum, NoteApproval
 from ...services.visits import get_visit_for_doctor
 from ...notify import notify
 
@@ -54,6 +44,8 @@ class AddendumCreate(BaseModel):
 class AddendumResponse(BaseModel):
     """استجابة الملحق المُنشأ."""
 
+    model_config = ConfigDict(from_attributes=True)
+
     id: uuid.UUID
     visit_id: uuid.UUID
     created_at: dt.datetime
@@ -67,8 +59,8 @@ class AddendumResponse(BaseModel):
 async def create_addendum(
     visit_id: uuid.UUID,
     payload: AddendumCreate,
-    auth: DoctorAuth = DoctorAuth(),
-    db: Session = DB(),
+    auth: DoctorAuth,
+    db: DB,
 ) -> dict[str, Any]:
     """إضافة ملحق على مذكرة معتمدة نهائياً.
 
@@ -81,32 +73,20 @@ async def create_addendum(
     - Addendum جديد بحالة pending
     - إشعار للدكتور بضرورة موافقته
     """
-    visit = get_visit_for_doctor(db, visit_id, auth.user_id)
+    visit = get_visit_for_doctor(db, visit_id)
     if visit.state not in ("approved", "uploaded"):
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "error": {
-                    "code": "MDF-4227",
-                    "message_ar": "لا يمكن إضافة ملحق على مذكرة لم تُعتمد بعد.",
-                    "message_en": "Addendum cannot be created for unapproved visits.",
-                }
-            },
-        )
+        # الملحق لمذكرة معتمدة نهائياً فقط — قبلها التحرير المباشر/Unlock هو المسار
+        raise MedifyError("MDF-4223", details={"state": visit.state, "reason": "addendum_requires_approved"})
 
     # تحقق من وجود اعتماد أصلي (note_approval)
     original_approval = db.execute(
         select(NoteApproval).where(NoteApproval.visit_id == visit_id)
     ).scalar_one_or_none()
     if original_approval is None:
-        raise HTTPException(
-            status_code=400,
-            detail="Original note approval not found (visit not properly approved)",
-        )
+        raise MedifyError("MDF-4231", details={"reason": "original_note_approval_missing"})
 
-    # إنشاء ملحق جديد
+    # إنشاء ملحق جديد (id يولَّد تلقائياً — UUID v7 من النموذج)
     addendum = Addendum(
-        id=uuid.uuid7(),
         visit_id=visit_id,
         facility_id=auth.facility_id,
         created_by=auth.user_id,
@@ -118,10 +98,10 @@ async def create_addendum(
     db.add(addendum)
     db.flush()
 
-    # تسجيل في سجل التدقيق
+    # سبب الإضافة قد يحمل تفصيلاً سريرياً — لا يدخل audit_logs (كما في note_unlocks)
     audit(
-        db, auth.facility_id, "addendum.created",
-        addendum.id, {"visit_id": str(visit_id), "reason": payload.reason or ""}
+        db, auth.facility_id, "addendum.created", "addendum", addendum.id, auth.user_id,
+        {"visit_id": str(visit_id), "has_reason": bool(payload.reason)},
     )
 
     # إشعار الدكتور (dr.summary_ready: ملخص جاهز للمراجعة، وهنا ملحق جاهز)
@@ -130,25 +110,20 @@ async def create_addendum(
         {"visit_id": str(visit_id), "addendum_id": str(addendum.id), "type": "addendum"}
     )
 
-    track(
-        "addendum.created", auth.facility_id, "doctor", visit_id,
-        addendum_id=str(addendum.id)
-    )
-
-    return ok({"addendum": AddendumResponse.model_validate(addendum).model_dump()})
+    return ok({"addendum": AddendumResponse.model_validate(addendum).model_dump(mode="json")})
 
 
 @router.get("/visits/{visit_id}/addendums")
 async def list_addendums(
     visit_id: uuid.UUID,
-    auth: DoctorAuth = DoctorAuth(),
-    db: Session = DB(),
+    auth: DoctorAuth,
+    db: DB,
 ) -> dict[str, Any]:
     """قائمة الملاحق على زيارة معتمدة.
 
     تُرجع جميع الملاحق بالترتيب الزمني (الأحدث أولاً).
     """
-    visit = get_visit_for_doctor(db, visit_id, auth.user_id)
+    get_visit_for_doctor(db, visit_id)  # RLS + وجود الزيارة (MDF-4041)
 
     addendums = db.execute(
         select(Addendum)
@@ -158,7 +133,7 @@ async def list_addendums(
 
     return ok({
         "addendums": [
-            AddendumResponse.model_validate(a).model_dump()
+            AddendumResponse.model_validate(a).model_dump(mode="json")
             for a in addendums
         ]
     })
@@ -173,8 +148,8 @@ class AddendumApprove(BaseModel):
 @router.patch("/addendums/{addendum_id}/approve")
 async def approve_addendum(
     addendum_id: uuid.UUID,
-    auth: DoctorAuth = DoctorAuth(),
-    db: Session = DB(),
+    auth: DoctorAuth,
+    db: DB,
 ) -> dict[str, Any]:
     """موافقة الدكتور على ملحق (بوابة ① مصغّرة).
 
@@ -191,23 +166,19 @@ async def approve_addendum(
     ).scalar_one_or_none()
 
     if addendum is None:
-        raise HTTPException(status_code=404, detail="Addendum not found")
+        raise MedifyError("MDF-4041")
 
-    visit = get_visit_for_doctor(db, addendum.visit_id, auth.user_id)
+    get_visit_for_doctor(db, addendum.visit_id)  # RLS + وجود الزيارة
 
     if addendum.is_approved:
-        raise HTTPException(
-            status_code=422,
-            detail="Addendum is already approved"
-        )
+        raise MedifyError("MDF-4223", details={"reason": "addendum_already_approved"})
 
-    # إنشاء bossapproval note مصغّرة (بوابة ① مصغّرة)
+    # بوابة ① مصغّرة — بصمة محتوى الملحق
     summary_hash = hashlib.sha256(
         str(addendum.content_json).encode()
     ).hexdigest()
 
     note_approval = NoteApproval(
-        id=uuid.uuid7(),
         visit_id=addendum.visit_id,
         facility_id=auth.facility_id,
         approved_by=auth.user_id,
@@ -222,15 +193,10 @@ async def approve_addendum(
     addendum.note_approval_id = note_approval.id
     db.flush()
 
-    # تسجيل في سجل التدقيق
     audit(
-        db, auth.facility_id, "addendum.approved",
-        addendum.id, {"visit_id": str(addendum.visit_id)}
+        db, auth.facility_id, "addendum.approved", "addendum", addendum.id, auth.user_id,
+        {"visit_id": str(addendum.visit_id), "note_approval_id": str(note_approval.id),
+         "summary_hash": summary_hash[:12]},
     )
 
-    track(
-        "addendum.approved", auth.facility_id, "doctor", addendum.visit_id,
-        addendum_id=str(addendum_id)
-    )
-
-    return ok({"addendum": AddendumResponse.model_validate(addendum).model_dump()})
+    return ok({"addendum": AddendumResponse.model_validate(addendum).model_dump(mode="json")})

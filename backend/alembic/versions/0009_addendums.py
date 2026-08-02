@@ -20,6 +20,14 @@ depends_on = None
 
 
 def upgrade() -> None:
+    bind = op.get_bind()
+
+    # idempotent (نمط 0004/0006/0007): قاعدة جديدة تكون 0001 (create_all) أنشأت الجدول
+    # من النموذج — الإنشاء هنا لمسار الترقية من قاعدة قائمة فقط
+    if sa.inspect(bind).has_table("addendums"):
+        _apply_rls()
+        return
+
     # إنشاء جدول addendums
     op.create_table(
         "addendums",
@@ -46,13 +54,18 @@ def upgrade() -> None:
     op.create_index("ix_addendums_facility_id", "addendums", ["facility_id"])
     op.create_index("ix_addendums_created_by", "addendums", ["created_by"])
 
+    _apply_rls()
+
+
+def _apply_rls() -> None:
     # RLS: أسطر الملاحق محمية مثل أي محتوى سريري
     op.execute("""
         ALTER TABLE addendums ENABLE ROW LEVEL SECURITY;
 
-        CREATE POLICY addendums_facility_isolation ON addendums
-            USING (facility_id = current_setting('app.facility_id')::uuid OR current_setting('app.scope') = 'platform')
-            WITH CHECK (facility_id = current_setting('app.facility_id')::uuid OR current_setting('app.scope') = 'platform');
+        DROP POLICY IF EXISTS addendums_facility_isolation ON addendums;
+        CREATE POLICY addendums_facility_isolation ON addendums FOR ALL TO medify_app
+            USING (facility_id = NULLIF(current_setting('app.facility_id', true), '')::uuid)
+            WITH CHECK (facility_id = NULLIF(current_setting('app.facility_id', true), '')::uuid);
     """)
 
 

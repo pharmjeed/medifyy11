@@ -1268,7 +1268,8 @@ def sa_create_prompt(template_type: str, body: SaPromptIn, ctx: SuperAuth, db: S
     ).scalar_one_or_none()
 
     if existing is not None:
-        raise MedifyError("MDF-4040", details={"template_type": template_type, "version": body.version})
+        raise MedifyError("MDF-4225", details={"template_type": template_type, "version": body.version,
+                                               "reason": "version_already_exists"})
 
     prompt = PlatformDefaultPrompt(
         template_type=template_type,
