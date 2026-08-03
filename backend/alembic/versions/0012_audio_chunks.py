@@ -47,6 +47,9 @@ def upgrade() -> None:
 
 def _apply_rls() -> None:
     op.execute("""
+        -- GRANT صريح: منح 0001 كان ON ALL TABLES لحظتها — الجداول اللاحقة لا يشملها
+        GRANT SELECT, INSERT, UPDATE, DELETE ON audio_chunks TO medify_app;
+
         ALTER TABLE audio_chunks ENABLE ROW LEVEL SECURITY;
 
         DROP POLICY IF EXISTS tenant_isolation ON audio_chunks;

@@ -45,6 +45,9 @@ def upgrade() -> None:
 
 def _apply_rls() -> None:
     op.execute("""
+        -- GRANT صريح (انظر 0012): منح 0001 لا يشمل الجداول المُنشأة لاحقاً
+        GRANT SELECT, INSERT, UPDATE, DELETE ON processing_attempts TO medify_app;
+
         ALTER TABLE processing_attempts ENABLE ROW LEVEL SECURITY;
 
         DROP POLICY IF EXISTS tenant_isolation ON processing_attempts;

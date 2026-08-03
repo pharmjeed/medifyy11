@@ -10,6 +10,31 @@ def _visit_by_state(conn, state: str):
     return conn.execute(text("SELECT id, facility_id FROM visits WHERE state = :s LIMIT 1"), {"s": state}).fetchone()
 
 
+# جداول محجوبة عمداً عن دور التطبيق (المنصة) — لا تدخل فحص المنح
+_PLATFORM_ONLY = {"platform_admins", "plans", "platform_settings", "platform_audit_logs",
+                  "alembic_version"}
+
+
+def test_app_role_can_read_every_tenant_table(owner_engine):
+    """كل جدول مستأجري يجب أن يملك دور التطبيق SELECT عليه على الأقل.
+
+    منح 0001 كان `ON ALL TABLES` لحظتها — أي جدول تُنشئه هجرة لاحقة بلا GRANT
+    صريح يسقط في الإنتاج بـ«permission denied» بينما تمر قاعدة الاختبار الجديدة.
+    وقع هذا فعلاً على audio_chunks (م2) — وهذا الاختبار يمنع تكراره.
+    """
+    with owner_engine.connect() as conn:
+        tables = [row[0] for row in conn.execute(text(
+            "SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename"
+        ))]
+        missing = [
+            table for table in tables
+            if table not in _PLATFORM_ONLY
+            and not conn.execute(text("SELECT has_table_privilege('medify_app', :t, 'SELECT')"),
+                                 {"t": table}).scalar_one()
+        ]
+    assert missing == [], f"جداول بلا صلاحية قراءة لدور التطبيق: {missing}"
+
+
 def test_visit_state_machine_blocks_illegal_transitions(owner_engine):
     """أي انتقال غير معرف يُرفض بـ trigger → MDF-4223 (حتى لمالك القاعدة)."""
     illegal = [
