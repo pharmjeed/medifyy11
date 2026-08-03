@@ -8,6 +8,11 @@ services:
   postgres:
     image: postgres:16
     restart: unless-stopped
+    logging: *logging
+    deploy:
+      resources:
+        limits:
+          memory: 3g
     environment:
       POSTGRES_USER: medify_owner
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in /opt/medify/.env}
@@ -25,6 +30,11 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    logging: *logging
+    deploy:
+      resources:
+        limits:
+          memory: 512m
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -37,6 +47,11 @@ services:
       args:
         INSTALL_WHISPER: "${INSTALL_WHISPER:-false}"
     restart: unless-stopped
+    logging: *logging
+    deploy:
+      resources:
+        limits:
+          memory: 3g
     environment: &backend-env
       DATABASE_URL: postgresql+psycopg://medify_app:${MEDIFY_APP_PASSWORD:?}@postgres:5432/medify
       MIGRATIONS_DATABASE_URL: postgresql+psycopg://medify_owner:${POSTGRES_PASSWORD}@postgres:5432/medify
@@ -75,6 +90,11 @@ services:
       args:
         INSTALL_WHISPER: "${INSTALL_WHISPER:-false}"
     restart: unless-stopped
+    logging: *logging
+    deploy:
+      resources:
+        limits:
+          memory: 4g
     environment: *backend-env
     volumes:
       - appdata:/data
@@ -108,12 +128,22 @@ services:
         NEXT_PUBLIC_WS_BASE: ""
         API_INTERNAL_URL: http://backend:8000
     restart: unless-stopped
+    logging: *logging
+    deploy:
+      resources:
+        limits:
+          memory: 1g
     depends_on:
       - backend
 
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
+    logging: *logging
+    deploy:
+      resources:
+        limits:
+          memory: 256m
     environment:
       # DOMAIN موجود → TLS تلقائي؛ وإلا HTTP على المنفذ المحدد
       SITE_ADDRESS: ${SITE_ADDRESS:-:80}

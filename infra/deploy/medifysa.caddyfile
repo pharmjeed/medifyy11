@@ -1,0 +1,17 @@
+# ══ Medify — مملوك لمشروع Medify، لا لـpickly ══════════════════════════════
+# مصدر الحقيقة: مستودع medifyy11 → infra/deploy/medifysa.caddyfile
+# يُزامَن عبر infra/deploy/sync-caddy.sh. لا تحرّره يدوياً هنا.
+# الجذر → صفحة الهبوط الثابتة (8081) · بقية المسارات → تطبيق Medify (prod 8080)
+medifysa.co {
+	@home path /
+	handle @home {
+		reverse_proxy 172.18.0.1:8081
+	}
+	handle {
+		reverse_proxy 172.18.0.1:8080
+	}
+}
+
+www.medifysa.co {
+	redir https://medifysa.co{uri} permanent
+}
