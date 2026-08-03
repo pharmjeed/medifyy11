@@ -1,0 +1,61 @@
+# مراقبة الإنتاج من خارج البنية التحتية — بلا اشتراك وبلا طرف ثالث.
+#
+# لماذا من هنا تحديداً: فحصٌ يعمل على الخادم نفسه أعمى عن أهم حالة — سقوط الخادم.
+# ولماذا هذا الفحص أصلاً: 2026-08-03 بقي medifysa.co ساقطاً ساعات بمصافحة TLS فاشلة
+# (نشرة pickly مسحت كتلة الدومين) واكتُشف صدفة. الفحوص الثلاثة أدناه تلتقط ذلك خلال
+# نصف ساعة على الأكثر.
+#
+# التنبيه: GitHub يرسل بريداً تلقائياً لصاحب المستودع عند فشل مهمة مجدولة —
+# لا إعداد إضافي ولا حساب طرف ثالث.
+#
+# الكلفة: ~1440 تشغيلة شهرياً، وGitHub يقرّب كل تشغيلة لدقيقة كاملة ⇒ ~1440 دقيقة
+# من أصل 2000 مجانية للمستودعات الخاصة. لا تُقصّر الفترة عن 30 دقيقة بلا مراجعة.
+#
+# تنبيه GitHub: المهام المجدولة تُعطَّل تلقائياً بعد 60 يوماً بلا أي نشاط في المستودع.
+name: uptime
+
+on:
+  schedule:
+    - cron: "0,30 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      BASE: https://medifysa.co
+    steps:
+      - name: الجذر وصفحة الدخول وصحة الـAPI
+        run: |
+          # ثلاث محاولات قبل إعلان الفشل — عثرة شبكة عابرة ليست عطلاً.
+          probe() {
+            local url="$1" want="$2" code
+            for i in 1 2 3; do
+              code=$(curl -s -o /dev/null -m 20 -w '%{http_code}' "$url" || echo 000)
+              [ "$code" = "$want" ] && { echo "  ✓ $code  $url"; return 0; }
+              [ "$i" -lt 3 ] && sleep 10
+            done
+            echo "  ✗ $code (المتوقع $want)  $url"
+            return 1
+          }
+          rc=0
+          probe "$BASE/"                 200 || rc=1
+          probe "$BASE/login"            200 || rc=1
+          probe "$BASE/api/v1/health"    200 || rc=1
+          probe "https://www.medifysa.co/" 301 || rc=1
+          exit $rc
+
+      - name: صلاحية شهادة TLS ≥ 10 أيام
+        run: |
+          # مصافحة TLS كاملة بـSNI — هي بالضبط ما فشل في عطل 2026-08-03.
+          cert=$(echo | openssl s_client -connect medifysa.co:443 -servername medifysa.co 2>/dev/null \
+                 | openssl x509 2>/dev/null)
+          [ -n "$cert" ] || { echo "✗ فشلت مصافحة TLS — لا شهادة"; exit 1; }
+          echo "$cert" | openssl x509 -noout -subject -enddate
+          echo "$cert" | openssl x509 -checkend $((10 * 86400)) -noout \
+            || { echo "✗ الشهادة تنتهي خلال أقل من 10 أيام"; exit 1; }
+          echo "  ✓ الشهادة سليمة"
