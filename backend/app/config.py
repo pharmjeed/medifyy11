@@ -51,6 +51,9 @@ class Settings(BaseSettings):
     processing_mode: str = ""
     processing_retry_delays: str = "30,120,300"  # تباعد إعادات العابر بالثواني
 
+    # المرحلة 9 — أرشفة FLAC بعد P1: auto = مفعّلة عند توفر ffmpeg | off
+    flac_archive: str = "auto"
+
     # حصر المعدل (DOC-05 §١) — طلب/دقيقة
     rate_limit_default: int = 240
     rate_limit_ai: int = 20

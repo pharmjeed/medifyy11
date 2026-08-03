@@ -134,6 +134,15 @@ def process_visit_pipeline(db: Session, visit: Visit, actor_user_id: uuid.UUID |
             _notify_final_failure(visit, "MDF-5031")
             raise MedifyError("MDF-5031", details={"visit_id": str(visit.id)}) from exc
 
+    # م9: أرشفة FLAC بعد نجاح P1 — غير معطِّلة (فشلها يبقي WAV كما هو حرفياً)
+    if get_settings().flac_archive != "off":
+        try:
+            from .audio_archive import archive_recording_to_flac
+
+            archive_recording_to_flac(db, visit)
+        except Exception:
+            logger.exception("أرشفة FLAC تعذّرت للزيارة %s — الأصل باقٍ", visit.id)
+
     summary = db.execute(select(Summary).where(Summary.visit_id == visit.id)).scalar_one_or_none()
     if summary is None:
         try:

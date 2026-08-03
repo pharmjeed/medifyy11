@@ -37,6 +37,9 @@ os.environ.update({
     # المرحلة 3: inline بلا انتظار — منطق المحاولات يُختبر بذاته، لا أزمنة الجدار
     "PROCESSING_MODE": "inline",
     "PROCESSING_RETRY_DELAYS": "0,0,0",
+    # المرحلة 9: الأرشفة تُختبر مباشرة في test_flac_archive — لا تحويل ضمني يغيّر
+    # ملفات WAV التي تفحصها اختبارات التدفق bit-exact
+    "FLAC_ARCHIVE": "off",
     "RECORDINGS_DIR": str(BACKEND / "var" / "test-recordings"),
     "OUTBOX_DIR": str(BACKEND / "var" / "test-outbox"),
 })
