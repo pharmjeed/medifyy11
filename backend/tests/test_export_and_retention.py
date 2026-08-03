@@ -86,43 +86,65 @@ def test_export_pdf_after_gate_two(client, doctor_token):
 
 
 def test_scheduled_purge_deletes_expired_audio(client, doctor_token, app_engine, owner_engine):
-    """A4/F-071: منفّذ سياسة الاحتفاظ يحذف الصوت المنتهي ويختم deleted_at ويدوّن حدث تدقيق."""
-    from app.services.retention import purge_expired_recordings
+    """A4/F-071 بمنطق م8: soft (وسم deleted_at) ثم hard (حذف الملف) بعد سماح 7 أيام —
+    وكل مرحلة تدوّن حدث تدقيق. idempotent في المرحلتين."""
+    from pathlib import Path
+
+    from app.services.retention import sweep_retention
 
     visit_id = _approved_visit(client, doctor_token)
 
-    # اجعل تسجيل هذه الزيارة منتهي الاحتفاظ (بدور المالك — يتجاوز RLS)
+    # اجعل تسجيل هذه الزيارة منتهي الاحتفاظ + أنشئ الملف فعلياً (بدور المالك)
     past = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=1)
     with owner_engine.begin() as conn:
         conn.execute(
             text("UPDATE recordings SET retention_until = :past WHERE visit_id = :vid"),
             {"past": past, "vid": visit_id},
         )
-        before = conn.execute(
-            text("SELECT deleted_at FROM recordings WHERE visit_id = :vid"), {"vid": visit_id}
-        ).scalar_one()
-        assert before is None
+        row = conn.execute(
+            text("SELECT storage_uri, deleted_at FROM recordings WHERE visit_id = :vid"),
+            {"vid": visit_id},
+        ).fetchone()
+        assert row.deleted_at is None
+    audio_path = Path(row.storage_uri)
+    audio_path.parent.mkdir(parents=True, exist_ok=True)
+    audio_path.write_bytes(b"RIFF-fake-audio")
 
+    now = dt.datetime.now(dt.timezone.utc)
     from sqlalchemy.orm import Session
     with Session(owner_engine) as db:
-        result = purge_expired_recordings(db)
+        sweep_retention(db, now=now)
         db.commit()
-    assert result["purged"] >= 1
 
     with owner_engine.begin() as conn:
-        after = conn.execute(
+        soft = conn.execute(
             text("SELECT deleted_at FROM recordings WHERE visit_id = :vid"), {"vid": visit_id}
         ).scalar_one()
-        assert after is not None, "deleted_at خُتم"
+        assert soft is not None, "المرحلة الناعمة: deleted_at خُتم"
+    assert audio_path.exists(), "الملف باقٍ خلال سماح الأيام السبعة"
+
+    # بعد السماح: الحذف الصلب للملف + حدث تدقيق
+    with Session(owner_engine) as db:
+        sweep_retention(db, now=now + dt.timedelta(days=8))
+        db.commit()
+    assert not audio_path.exists(), "الملف أُتلف بعد السماح"
+
+    with owner_engine.begin() as conn:
         audit_count = conn.execute(
             text("SELECT count(*) FROM audit_logs WHERE action = 'recording.purged' "
                  "AND entity_id IN (SELECT id::text FROM recordings WHERE visit_id = :vid)"),
             {"vid": visit_id},
         ).scalar_one()
-        assert audit_count >= 1, "حدث تدقيق لكل عملية حذف"
+        assert audit_count == 1, "حدث تدقيق للحذف الصلب"
 
-    # idempotent: تشغيل ثانٍ لا يحذف شيئاً
+    # idempotent: تشغيل ثالث لا يعيد التدوين ولا يخطئ على ملف غائب
     with Session(owner_engine) as db:
-        again = purge_expired_recordings(db)
+        sweep_retention(db, now=now + dt.timedelta(days=9))
         db.commit()
-    assert again["purged"] == 0
+    with owner_engine.begin() as conn:
+        again = conn.execute(
+            text("SELECT count(*) FROM audit_logs WHERE action = 'recording.purged' "
+                 "AND entity_id IN (SELECT id::text FROM recordings WHERE visit_id = :vid)"),
+            {"vid": visit_id},
+        ).scalar_one()
+        assert again == 1

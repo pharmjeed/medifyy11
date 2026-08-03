@@ -47,6 +47,20 @@ class Settings(BaseSettings):
 
     redis_url: str = ""  # فارغ = حدود المعدل والقفل في الذاكرة
 
+    # المرحلة 3 — المعالجة بمحاولات: "" = آلي (queue مع Redis وإلا inline) | inline | queue
+    processing_mode: str = ""
+    processing_retry_delays: str = "30,120,300"  # تباعد إعادات العابر بالثواني
+
+    # المرحلة 9 — أرشفة FLAC بعد P1: auto = مفعّلة عند توفر ffmpeg | off
+    flac_archive: str = "auto"
+
+    # المرحلة 16 — ساعة التذكير اليومي بطابور «بانتظارك» (UTC، قابلة للضبط)
+    pending_reminder_hour: int = 5
+
+    # المرحلة 17 — سحب سياق المريض من HIS: مطفأ افتراضياً (feature flag)
+    his_context_enabled: bool = False
+    his_context_timeout_seconds: float = 5.0
+
     # حصر المعدل (DOC-05 §١) — طلب/دقيقة
     rate_limit_default: int = 240
     rate_limit_ai: int = 20

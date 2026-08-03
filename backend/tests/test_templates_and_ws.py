@@ -185,7 +185,8 @@ def test_reconnect_mid_recording_keeps_earlier_audio(client, doctor_token):
         ws.send_json({"type": "resume_query"})
         resumed = ws.receive_json()
         # الرسالة قد تحمل حقولاً إعلامية إضافية (buffered_at) — يُثبَّت النوع والعدّاد فقط
-        assert resumed["type"] == "resume_from" and resumed["seq"] == 0, "اتصال جديد = عدّاد جديد"
+        # المرحلة 2: الموضع من سجل audio_chunks المعمَّر — لا عدّاد جديد لكل اتصال
+        assert resumed["type"] == "resume_from" and resumed["seq"] == 8, "الاستئناف من السجل المعمَّر"
         for offset in range(8):
             ws.send_json({"type": "audio_chunk", "seq": resumed["seq"] + offset, "payload": chunk})
             ws.receive_json()

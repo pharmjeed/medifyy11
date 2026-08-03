@@ -34,6 +34,12 @@ os.environ.update({
     "EMAIL_ENGINE": "mock",
     "RATE_LIMIT_DEFAULT": "100000",
     "RATE_LIMIT_AI": "100000",
+    # المرحلة 3: inline بلا انتظار — منطق المحاولات يُختبر بذاته، لا أزمنة الجدار
+    "PROCESSING_MODE": "inline",
+    "PROCESSING_RETRY_DELAYS": "0,0,0",
+    # المرحلة 9: الأرشفة تُختبر مباشرة في test_flac_archive — لا تحويل ضمني يغيّر
+    # ملفات WAV التي تفحصها اختبارات التدفق bit-exact
+    "FLAC_ARCHIVE": "off",
     "RECORDINGS_DIR": str(BACKEND / "var" / "test-recordings"),
     "OUTBOX_DIR": str(BACKEND / "var" / "test-outbox"),
 })

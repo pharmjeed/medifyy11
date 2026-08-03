@@ -120,7 +120,8 @@ export interface Template {
 
 export type VisitState =
   | "draft" | "recording" | "transcribed" | "summarized"
-  | "in_review" | "approved" | "uploaded" | "upload_failed" | "cancelled" | "voided";
+  | "in_review" | "approved" | "uploaded" | "upload_failed" | "cancelled" | "voided"
+  | "reopened";
 
 export interface VisitRow {
   id: string;
@@ -223,6 +224,71 @@ export interface SummarySection {
   content_original: string;
   is_edited: boolean;
   guidance: GuidanceItem[];
+  /** م10: السند جملةً بجملة — null لملخصات ما قبل الميزة أو عند تعذّر التحقق */
+  evidence: EvidenceSentence[] | null;
+}
+
+/** م10: جملة مذكرة بسندها الصوتي/التفريغي · م11: ثقة التفريغ (أدنى مقاطعها) */
+export interface EvidenceSentence {
+  text: string;
+  segment_ids: string[];
+  audio_start_ms: number | null;
+  audio_end_ms: number | null;
+  origin: "ai" | "doctor";
+  confidence: number | null;
+}
+
+/** م11: جودة تفريغ الزيارة + العتبات الحية من كونسول المالك */
+export interface SttConfidence {
+  mean: number | null;
+  min: number | null;
+  thresholds: { low: number; medium: number };
+}
+
+/** م17: لوحة سياق المريض في المراجعة (للقراءة) — من لقطة الزيارة */
+export interface ReviewPatientContext {
+  problems: string[];
+  medications: string[];
+  allergies: string[];
+  context_unavailable: boolean;
+  his_available: boolean;
+}
+
+/** م14: ملخص المريض بالعربي — يُولَّد بعد البوابة ① ويُخزَّن مع النسخة */
+export interface PatientSummaryText {
+  diagnosis: string;
+  medications: string;
+  instructions: string;
+  follow_up: string;
+  red_flags: string;
+}
+
+export interface PatientSummaryState {
+  summary: PatientSummaryText;
+  included: boolean;
+  stale: boolean;
+  version_number: number;
+}
+
+/** م12: جاهزية المطالبة — القواعد بيانات YAML على الخادم */
+export interface ClaimFinding {
+  rule_id: string;
+  severity: "pass" | "warn" | "block";
+  message_ar: string;
+  related_codes: string[];
+}
+
+export interface ClaimReadiness {
+  findings: ClaimFinding[];
+  blocking_count: number;
+  warning_count: number;
+  ready: boolean;
+  version: number;
+  diagnosis_options: { item_id: string; code_system: string | null; code_value: string | null; suggestion_text: string }[];
+  unlinked_items: {
+    item_id: string; kind: string; code_system: string | null; code_value: string | null;
+    suggestion_text: string; linked_dx_code: string | null;
+  }[];
 }
 
 export interface ApprovalRecord {
@@ -259,12 +325,29 @@ export interface VisitSummary {
   note_unlock: NoteUnlockInfo | null;
   can_export: boolean;
   approval: ApprovalRecord | null;
+  /** م6: دورة النسخ — version = الدورة الحالية، وversions تاريخ اللقطات */
+  version: number;
+  versions: NoteVersionInfo[];
+  /** م11: جودة التفريغ والعتبات */
+  stt_confidence: SttConfidence;
+  /** م17: سياق المريض (null لزيارات بلا لقطة) */
+  patient_context: ReviewPatientContext | null;
+}
+
+export interface NoteVersionInfo {
+  version_number: number;
+  upload_status: "draft" | "pending" | "uploaded" | "upload_failed";
+  uploaded_at: string | null;
+  reopen_reason: string | null;
+  diff_counts: { sections_changed: number; codes_added: number; codes_removed: number } | null;
 }
 
 export interface NoteUnlockInfo {
   reason: string;
   unlocked_at: string;
   unlocked_by: string;
+  /** م5: النص الحالي ببصمة الاعتماد المنقوض نفسها → إعادة اعتماد بنقرة بلا مراجعة diff */
+  text_unchanged: boolean;
 }
 
 export interface ConsentDocument {

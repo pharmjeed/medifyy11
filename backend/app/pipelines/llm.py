@@ -170,6 +170,7 @@ class MockLLMEngine(LLMEngine):
             "P3-guidance": self._guidance,
             "P4-reverse-template": self._reverse,
             "P5-edit-chat": self._chat,
+            "P6-patient-summary": self._patient_summary,
         }[prompt_id]
         return handler(variables), model_ref
 
@@ -203,12 +204,33 @@ class MockLLMEngine(LLMEngine):
         return {"sections": out}
 
     def _verify(self, variables: dict[str, Any]) -> dict[str, Any]:
-        """تمريرة السند تجريبياً: أقسام العيّنة مبنية لتطابق حوار العرض — تمر كما هي."""
+        """تمريرة السند تجريبياً (عقد 1.1): الأقسام تمر كما هي + ربط حتمي جملة→مقطع.
+
+        كل جملة تأخذ المقطع التالي بعدّاد متصاعد؛ ما جاوز عدد المقاطع → بلا مصدر
+        صوتي ([]) — يُظهر وسم «بلا مصدر صوتي» في الواجهة حتمياً (م10).
+        """
+        from ..services.evidence import split_sentences
+
         sections = variables.get("sections") or []
-        return {"sections": [
-            {"section_key": section.get("section_key"), "content": section.get("content", "")}
-            for section in sections if isinstance(section, dict)
-        ]}
+        segments = variables.get("segments") or []
+        counter = 0
+        out: list[dict[str, Any]] = []
+        for section in sections:
+            if not isinstance(section, dict):
+                continue
+            content = str(section.get("content", ""))
+            sentences: list[dict[str, Any]] = []
+            for sentence in split_sentences(content):
+                ids: list[str] = []
+                if counter < len(segments):
+                    sid = segments[counter].get("id") if isinstance(segments[counter], dict) else None
+                    if sid:
+                        ids = [str(sid)]
+                counter += 1
+                sentences.append({"text": sentence, "segment_ids": ids})
+            out.append({"section_key": section.get("section_key"), "content": content,
+                        "sentences": sentences})
+        return {"sections": out}
 
     def _guidance(self, variables: dict[str, Any]) -> dict[str, Any]:
         """عيّنة P3 v1.1 — بنود خطة مهيكلة بكودها ومبررها ودرجة ثقتها.
@@ -284,6 +306,37 @@ class MockLLMEngine(LLMEngine):
             },
         ]
         return {"items": items}
+
+    def _patient_summary(self, variables: dict[str, Any]) -> dict[str, Any]:
+        """عيّنة ملخص المريض (م14) — عربية بسيطة مشتقة من أقسام المذكرة المعطاة.
+
+        تعكس المصدر: قسم غائب في المذكرة → نص فارغ (لا اختراع)، وأسماء الأدوية
+        التجارية تبقى لاتينية داخل النص العربي.
+        """
+        sections = {
+            str(section.get("section_key")): str(section.get("content", ""))
+            for section in (variables.get("note_sections") or [])
+            if isinstance(section, dict)
+        }
+        codes = variables.get("approved_codes") or []
+        medications = [c for c in codes if isinstance(c, dict) and c.get("kind") == "clinical_rx"]
+
+        assessment = sections.get("A", "")
+        plan = sections.get("P", "")
+        education = sections.get("E", "")
+        return {
+            "diagnosis": ("ضغط الدم لديك مرتفع ولم يكن منضبطاً، والصداع على الأغلب بسببه."
+                          if assessment else ""),
+            "medications": ("\n".join(
+                f"{med.get('text', '')} — كما شرح لك الطبيب." for med in medications
+            ) or ("خذ دواء الضغط amlodipine حبة واحدة كل يوم في نفس الوقت." if plan else "")),
+            "instructions": ("قِس الضغط في البيت مرتين يومياً وسجّل القراءات."
+                             if plan else ""),
+            "follow_up": ("راجع العيادة بعد أسبوعين ومعك سجل قراءات الضغط."
+                          if plan else ""),
+            "red_flags": ("إذا صار عندك صداع شديد جداً أو تغيّر في النظر — روح الطوارئ فوراً."
+                          if (plan or education) else ""),
+        }
 
     def _reverse(self, variables: dict[str, Any]) -> dict[str, Any]:
         return {

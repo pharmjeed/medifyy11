@@ -1107,6 +1107,34 @@ def sa_update_ai_settings(body: SaAiSettingsIn, ctx: SuperAuth, request: Request
     return ok(_ai_settings_out(db))
 
 
+# ════════════════ عتبات ثقة التفريغ (التحصين م11) ════════════════
+
+class SaSttThresholdsIn(BaseModel):
+    low: float = Field(gt=0.0, le=1.0)
+    medium: float = Field(gt=0.0, le=1.0)
+
+
+@router.get("/settings/stt-confidence")
+def sa_stt_thresholds(ctx: SuperAuth, db: SystemDB):
+    """عتبات إبراز الثقة المنخفضة — تسري فوراً على كل شاشات المراجعة بلا نشر."""
+    from ...services.stt_confidence import DEFAULT_THRESHOLDS, resolve_thresholds
+
+    return ok({"thresholds": resolve_thresholds(), "defaults": DEFAULT_THRESHOLDS})
+
+
+@router.patch("/settings/stt-confidence")
+def sa_update_stt_thresholds(body: SaSttThresholdsIn, ctx: SuperAuth, request: Request, db: SystemDB):
+    from ...services.stt_confidence import set_thresholds
+
+    require_cap(ctx, "settings.write")  # owner حصراً
+    if body.low > body.medium:
+        raise MedifyError("MDF-4225", details={"reason": "low_must_not_exceed_medium"})
+    value = set_thresholds(db, body.low, body.medium, ctx.admin_id)
+    sa_audit(db, ctx, "sa.stt_thresholds_updated", "platform_setting", "stt.confidence_thresholds",
+             meta=value)
+    return ok({"thresholds": value})
+
+
 # ════════════════ السجل المرجعي للأكواد — ملفات الأكواد المعتمدة (قرار مالك 2026-08-02) ════════════════
 
 REGISTRY_FILE_MAX_BYTES = 25 * 1024 * 1024  # ملف CHI الرسمي ~2MB — سقف مريح

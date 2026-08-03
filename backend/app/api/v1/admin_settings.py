@@ -21,15 +21,104 @@ from ...models import (
     EditEvent,
     GuidanceItem,
     IntegrationConfig,
+    RetentionPolicy,
     Summary,
     SummarySection,
     UploadJob,
     User,
     Visit,
 )
+from ...services.metrics import metrics_summary
+from ...services.pending_queue import pending_report
+from ...services.retention import DEFAULTS as RETENTION_DEFAULTS
+from ...services.retention import effective_policies, retention_status
 from ...services.uploader import process_upload_job
 
 router = APIRouter()
+
+
+# ===== تقرير المذكرات المعلّقة للمدير الطبي (م16) =====
+
+@router.get("/admin/pending-report")
+def admin_pending_report(ctx: AdminAuth, db: DB):
+    """لكل طبيب: العدد ومتوسط العمر والأقدم — أعداد فقط بلا أي محتوى سريري."""
+    return ok(pending_report(db, ctx.facility_id))
+
+
+# ===== لوحة المقاييس المجمّعة (م15) =====
+
+@router.get("/admin/metrics/summary")
+def admin_metrics_summary(ctx: AdminAuth, db: DB, date_from: str | None = None,
+                          date_to: str | None = None, group_by: str = "facility"):
+    """المقاييس من التجميع الليلي حصراً — أرقام فقط بلا أي محتوى سريري (RBAC أدمن)."""
+    today = dt.date.today()
+    try:
+        start = dt.date.fromisoformat(date_from) if date_from else today - dt.timedelta(days=30)
+        end = dt.date.fromisoformat(date_to) if date_to else today
+    except ValueError:
+        raise MedifyError("MDF-4041", details={"from": date_from, "to": date_to})
+    return ok(metrics_summary(db, ctx.facility_id, start, end, group_by))
+
+
+# ===== سياسة الاحتفاظ الموحّدة (م8) =====
+
+@router.get("/settings/retention")
+def get_retention_policies(ctx: AdminAuth, db: DB):
+    """السياسات الفعلية (الافتراضات + تجاوزات المنشأة) — docs/retention-policy.md المرجع."""
+    return ok({"policies": effective_policies(db, ctx.facility_id),
+               "defaults": RETENTION_DEFAULTS, "grace_days": 7})
+
+
+class RetentionPatchIn(BaseModel):
+    artifact_type: str
+    retention_days: int | None = None  # NULL = بلا حذف
+
+
+@router.patch("/settings/retention")
+def patch_retention_policy(body: RetentionPatchIn, ctx: AdminAuth, db: DB):
+    if body.artifact_type not in RETENTION_DEFAULTS:
+        raise MedifyError("MDF-4041", details={"artifact_type": body.artifact_type,
+                                               "allowed": sorted(RETENTION_DEFAULTS)})
+    if body.retention_days is not None and body.retention_days < 1:
+        raise MedifyError("MDF-4225", details={"retention_days": body.retention_days})
+    row = db.execute(
+        select(RetentionPolicy).where(
+            RetentionPolicy.facility_id == ctx.facility_id,
+            RetentionPolicy.artifact_type == body.artifact_type,
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        row = RetentionPolicy(facility_id=ctx.facility_id, artifact_type=body.artifact_type)
+        db.add(row)
+    row.retention_days = body.retention_days
+    row.updated_by = ctx.user_id
+    db.flush()
+    audit(db, ctx.facility_id, "retention.policy_updated", "retention_policy", row.id, ctx.user_id,
+          {"artifact_type": body.artifact_type, "retention_days": body.retention_days})
+    return ok({"policies": effective_policies(db, ctx.facility_id)})
+
+
+@router.get("/admin/retention-status")
+def admin_retention_status(ctx: AdminAuth, db: DB):
+    """ما سيُحذف خلال 7 أيام + الموسوم بانتظار الحذف الصلب — أعداد فقط، بلا محتوى."""
+    return ok(retention_status(db, ctx.facility_id))
+
+
+class LegalHoldIn(BaseModel):
+    enabled: bool
+
+
+@router.post("/visits/{visit_id}/legal-hold")
+def set_legal_hold(visit_id: uuid.UUID, body: LegalHoldIn, ctx: AdminAuth, db: DB):
+    """تجميد/فك تجميد الحذف الاحتفاظي لأثار زيارة (تحقيق/نزاع) — أدمن حصراً + Audit."""
+    visit = db.execute(select(Visit).where(Visit.id == visit_id)).scalar_one_or_none()
+    if visit is None:
+        raise MedifyError("MDF-4041")
+    visit.legal_hold = body.enabled
+    db.flush()
+    audit(db, ctx.facility_id, "visit.legal_hold_set", "visit", visit.id, ctx.user_id,
+          {"enabled": body.enabled})
+    return ok({"visit_id": str(visit.id), "legal_hold": visit.legal_hold})
 
 
 # ===== أنظمة الترميز (FR-301) =====
@@ -226,7 +315,11 @@ def audit_logs(ctx: AdminAuth, db: DB, page: int = 1, per_page: int = 25, action
     if action:
         base = base.where(AuditLog.action.like(f"{action}%"))
     total = db.execute(select(func.count()).select_from(base.subquery())).scalar_one()
-    rows = db.execute(base.order_by(AuditLog.at.desc()).offset((page - 1) * per_page).limit(per_page)).scalars().all()
+    # id (UUID v7) كاسر تعادل — أسطر المعاملة الواحدة تتشارك at نفسه (server now())
+    rows = db.execute(
+        base.order_by(AuditLog.at.desc(), AuditLog.id.desc())
+        .offset((page - 1) * per_page).limit(per_page)
+    ).scalars().all()
     actor_ids = {r.actor_user_id for r in rows if r.actor_user_id}
     actors = {
         u.id: u.full_name

@@ -14,6 +14,7 @@ from ..analytics import track
 from ..config import get_settings
 from ..errors import MedifyError
 from ..models import (
+    AudioChunk,
     CodingSystemConfig,
     GuidanceItem,
     Patient,
@@ -28,18 +29,20 @@ from ..models import (
 )
 from ..notify import notify
 from ..services.code_registry import check_code, registry_systems
+from ..services.evidence import build_section_evidence, refresh_section_evidence
 from ..services.history import previous_visits
 from .deidentify import build_map
 from .llm import get_llm
 from .speaker import attribute_segments
-from .stt import get_stt, retry_with_backoff
+from .streaming import IncrementalTranscript, stream_from_ledger
 
 logger = logging.getLogger("medify.pipelines")
 
 PROMPT_VERSIONS = {
     "P2-summary": "1.0",
-    # تمريرة السند (قرار مالك 2026-08-02): كل جملة بلا سند في المحادثة تُحذف قبل أن يراها الدكتور
-    "P2-verify": "1.0",
+    # تمريرة السند (قرار مالك 2026-08-02): كل جملة بلا سند تُحذف قبل أن يراها الدكتور.
+    # 1.1 (م10): الربط جملةً بمقاطعها يُعاد ويُحفظ (evidence_json) بدل أن يُرمى.
+    "P2-verify": "1.1",
     # 1.2: المراجعات السابقة مدخل صريح + إرشاد تشخيصي/علاجي عملي (تعديل مالك 2026-07-26)
     "P3-guidance": "1.2",
     "P4-reverse-template": "1.0",
@@ -118,18 +121,31 @@ def run_transcription(db: Session, visit: Visit) -> Transcript:
     """
     recording = db.execute(select(Recording).where(Recording.visit_id == visit.id)).scalar_one_or_none()
     audio_path = recording.storage_uri if recording is not None else ""
-    try:
-        segments = retry_with_backoff(lambda: get_stt().transcribe_visit(audio_path))
-    except Exception as exc:
-        logger.error("P1 فشل للزيارة %s بعد جميع المحاولات: %s", visit.id, exc)
-        raise MedifyError("MDF-5031", details={"visit_id": str(visit.id)}) from exc
+    # م18: التفريغ عبر واجهة التدفق — الوضع الحالي (batch) حالة خاصة منها: تغذية
+    # مقاطع السجل (وحدة م2 نفسها) ثم finalize بنتيجة مطابقة حرفياً للمسار القديم.
+    # الاستثناءات تُرفع خاماً — التصنيف والإعادة وتغليف MDF-5031 في services/processing (م3).
+    chunks = db.execute(
+        select(AudioChunk).where(AudioChunk.visit_id == visit.id).order_by(AudioChunk.chunk_index)
+    ).scalars().all()
+    segments = stream_from_ledger(
+        audio_path,
+        [{"chunk_index": chunk.chunk_index, "byte_length": chunk.byte_length} for chunk in chunks],
+    )
 
     # المحرك الذي لا يميّز المتحدث صوتياً → إسناد لغوي على المحادثة كاملة (سياق تبادل الأدوار كله)
     if segments and not all(segment.get("speaker") in ("doctor", "patient") for segment in segments):
         attribute_segments(segments)
 
-    content = {"segments": segments}
-    stats = {"segments": len(segments)}
+    # م18: التفريغ المتزايد بنقطة finalize — P2 يقرأ من هنا (يُستدعى مباشرةً اليوم)
+    incremental = IncrementalTranscript()
+    incremental.extend(segments)
+    content = incremental.finalize()
+    stats: dict[str, Any] = {"segments": len(segments)}
+    # م11: إحصاء ثقة التفريغ (whisper يوفرها؛ gemini بلا ثقة ASR فتغيب الإحصاءات)
+    confidences = [s["confidence"] for s in segments if isinstance(s.get("confidence"), (int, float))]
+    if confidences:
+        stats["confidence_mean"] = round(sum(confidences) / len(confidences), 3)
+        stats["confidence_min"] = round(min(confidences), 3)
     transcript = db.execute(select(Transcript).where(Transcript.visit_id == visit.id)).scalar_one_or_none()
     if transcript is None:
         transcript = Transcript(
@@ -146,10 +162,12 @@ def run_transcription(db: Session, visit: Visit) -> Transcript:
     return transcript
 
 
-def _verify_sections(transcript_scrubbed: str, sections_out: list[dict]) -> list[dict]:
-    """P2-verify — يحذف من كل قسم أي جملة بلا سند في المحادثة (قرار مالك 2026-08-02).
+def _verify_sections(transcript_scrubbed: str, sections_out: list[dict],
+                     segments: list[dict]) -> tuple[list[dict], dict[str, list[dict]]]:
+    """P2-verify@1.1 — حذف ما لا سند له + ربط كل جملة باقية بمقاطعها (م10).
 
-    الفشل لا يوقف التدفق: تمضي الأقسام غير المنقّحة — البوابة البشرية (①) تبقى فوق الجميع.
+    يعيد (الأقسام المنقّحة، خريطة section_key → sentences بالربط).
+    الفشل لا يوقف التدفق: تمضي الأقسام غير المنقّحة بلا سند — البوابة ① فوق الجميع.
     """
     version = PROMPT_VERSIONS["P2-verify"]
     try:
@@ -158,6 +176,10 @@ def _verify_sections(transcript_scrubbed: str, sections_out: list[dict]) -> list
             version,
             {
                 "transcript": transcript_scrubbed,
+                "segments": [
+                    {"id": s.get("id"), "t0": s.get("t0"), "t1": s.get("t1"), "text": s.get("text")}
+                    for s in segments
+                ],
                 "sections": [
                     {"section_key": section.get("section_key"), "content": section.get("content")}
                     for section in sections_out
@@ -166,14 +188,21 @@ def _verify_sections(transcript_scrubbed: str, sections_out: list[dict]) -> list
         )
         verified = output["sections"]
         assert isinstance(verified, list) and verified
-        by_key = {str(section.get("section_key")): str(section.get("content", "")) for section in verified}
-        return [
-            {**section, "content": by_key.get(str(section.get("section_key")), str(section.get("content", "")))}
+        by_key = {str(section.get("section_key")): section for section in verified}
+        merged = [
+            {**section,
+             "content": str(by_key.get(str(section.get("section_key")), section).get("content",
+                                                                                     section.get("content", "")))}
             for section in sections_out
         ]
+        sentences_by_key = {
+            key: (entry.get("sentences") or [])
+            for key, entry in by_key.items()
+        }
+        return merged, sentences_by_key
     except Exception as exc:
         logger.warning("P2-verify تعذّرت (%s) — تمضي الأقسام غير المنقّحة لمراجعة الدكتور", exc)
-        return sections_out
+        return sections_out, {}
 
 
 def run_summary(db: Session, visit: Visit) -> Summary:
@@ -189,26 +218,34 @@ def run_summary(db: Session, visit: Visit) -> Summary:
     # تحميل البرومبت من قاعدة البيانات (مخصص أو افتراضي أو من الملفات)
     custom_prompt = _load_prompt_content(db, template)
 
-    try:
-        output, model_ref = get_llm().complete_json(
-            "P2-summary",
-            version,
-            {
-                "transcript": transcript_scrubbed,
-                "template_structure": template.structure_json,
-                "specialty": template.specialty or "",
-                "visit_type": template.visit_type or "",
-                "custom_prompt": custom_prompt,
-            },
-        )
-        sections_out = output["sections"]
-        assert isinstance(sections_out, list) and sections_out
-    except Exception as exc:
-        logger.error("P2 فشل للزيارة %s: %s", visit.id, exc)
-        raise MedifyError("MDF-5032", details={"visit_id": str(visit.id)}) from exc
+    # م17: سياق المريض (بما فيه HIS إن توفّر) يُحقن مع تعليمة «لا تخترع منه وقائع»
+    context_snapshot = None
+    if visit.context_snapshot_id:
+        context_snapshot = db.execute(
+            select(PatientContextSnapshot).where(PatientContextSnapshot.id == visit.context_snapshot_id)
+        ).scalar_one_or_none()
+    context_json = (context_snapshot.content_json if context_snapshot else {}) or {}
 
-    # تمريرة السند قبل أن يرى الدكتور أي شيء — ما لا سند له في المحادثة يُحذف لا يُعلَّم
-    sections_out = _verify_sections(transcript_scrubbed, sections_out)
+    # الاستثناءات خام — التصنيف/الإعادة وتغليف MDF-5032 في services/processing (المرحلة 3)
+    output, model_ref = get_llm().complete_json(
+        "P2-summary",
+        version,
+        {
+            "transcript": transcript_scrubbed,
+            "patient_context": deid.scrub(json.dumps(context_json, ensure_ascii=False)),
+            "template_structure": template.structure_json,
+            "specialty": template.specialty or "",
+            "visit_type": template.visit_type or "",
+            "custom_prompt": custom_prompt,
+        },
+    )
+    sections_out = output["sections"]
+    assert isinstance(sections_out, list) and sections_out
+
+    # تمريرة السند قبل أن يرى الدكتور أي شيء — ما لا سند له يُحذف، والربط يُحفظ (م10)
+    segments = (transcript.content_json or {}).get("segments", [])
+    sections_out, sentences_by_key = _verify_sections(transcript_scrubbed, sections_out, segments)
+    segments_by_id = {str(s.get("id")): s for s in segments if s.get("id")}
 
     summary = Summary(
         visit_id=visit.id,
@@ -220,26 +257,40 @@ def run_summary(db: Session, visit: Visit) -> Summary:
     db.flush()
     for index, section in enumerate(sections_out):
         content = deid.restore(str(section.get("content", "")))
+        key = str(section.get("section_key", f"X{index}"))
+        evidence = build_section_evidence(sentences_by_key.get(key, []), segments_by_id)
+        for entry in evidence:
+            entry["text"] = deid.restore(entry["text"])  # نص الجملة يعود لهويته قبل التخزين
         db.add(
             SummarySection(
                 summary_id=summary.id,
                 facility_id=visit.facility_id,
-                section_key=str(section.get("section_key", f"X{index}")),
+                section_key=key,
                 position=index,
                 content_current=content,
                 content_original=content,
+                evidence_json=evidence or None,
             )
         )
     db.flush()
+    # م11: درجات الثقة تدخل telemetry كأرقام فقط
+    confidence_props = {}
+    if isinstance(transcript.language_stats, dict):
+        for stat_key in ("confidence_mean", "confidence_min"):
+            value = transcript.language_stats.get(stat_key)
+            if isinstance(value, (int, float)):
+                confidence_props[stat_key] = value
     track(
         "summary.generated", visit.facility_id, "doctor", visit.id,
         sections_count=len(sections_out), prompt_version=version, model_ref=model_ref,
+        **confidence_props,
     )
     return summary
 
 
 def run_guidance(db: Session, visit: Visit, summary: Summary) -> bool:
-    """P3 — الإرشاد المدمج. الفشل لا يحجب التدفق: ملخص بلا إرشادات + W-224 (MDF-5033)."""
+    """P3 — الإرشاد المدمج. الاستثناءات خام؛ عدم الحجب (ملخص بلا إرشادات + W-224/MDF-5033)
+    تتولاه services/processing بعد استنفاد الإعادات (المرحلة 3)."""
     sections = db.execute(
         select(SummarySection).where(SummarySection.summary_id == summary.id).order_by(SummarySection.position)
     ).scalars().all()
@@ -262,27 +313,22 @@ def run_guidance(db: Session, visit: Visit, summary: Summary) -> bool:
     if history is None:
         history = previous_visits(db, visit.patient_id, visit.doctor_id, exclude_visit_id=visit.id)
 
-    try:
-        output, _model_ref = get_llm().complete_json(
-            "P3-guidance",
-            version,
-            {
-                "summary_sections": [
-                    {"section_key": s.section_key, "content": deid.scrub(s.content_current)} for s in sections
-                ],
-                "patient_context": deid.scrub(str(context_json)),
-                "previous_visits": deid.scrub(json.dumps(history, ensure_ascii=False)),
-                "transcript_highlights": deid.scrub(_transcript_text(transcript)[:2000] if transcript else ""),
-                "active_coding_systems": ", ".join(systems),
-            },
-        )
-        items = output["items"]
-        assert isinstance(items, list)
-    except Exception as exc:
-        logger.error("P3 فشل للزيارة %s: %s", visit.id, exc)
-        notify(db, visit.facility_id, visit.doctor_id, "dr.analysis_failed", {"visit_id": str(visit.id), "mdf": "MDF-5033"})
-        track("error.5xx", visit.facility_id, "doctor", visit.id, mdf_code="MDF-5033", pipeline_id="P3")
-        return False
+    # الاستثناءات خام — الإعادة على العابر وإخطار MDF-5033 غير المعطِّل في services/processing
+    output, _model_ref = get_llm().complete_json(
+        "P3-guidance",
+        version,
+        {
+            "summary_sections": [
+                {"section_key": s.section_key, "content": deid.scrub(s.content_current)} for s in sections
+            ],
+            "patient_context": deid.scrub(str(context_json)),
+            "previous_visits": deid.scrub(json.dumps(history, ensure_ascii=False)),
+            "transcript_highlights": deid.scrub(_transcript_text(transcript)[:2000] if transcript else ""),
+            "active_coding_systems": ", ".join(systems),
+        },
+    )
+    items = output["items"]
+    assert isinstance(items, list)
 
     counts_by_kind: dict[str, int] = {}
     per_section: dict[str, int] = {}
@@ -436,6 +482,7 @@ def run_edit_chat(
             continue
         old_content = section.content_current
         section.content_current = new_content
+        refresh_section_evidence(section)  # م10: الجمل الجديدة/المعدَّلة تُوسم «تحرير طبيب»
         applied.append(
             {
                 "section_id": str(section.id),

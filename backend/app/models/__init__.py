@@ -7,13 +7,18 @@ from .base import Base
 from .clinical import (
     Addendum,
     Approval,
+    AudioChunk,
+    DeliveryReceipt,
     EditEvent,
     GuidanceItem,
     NoteApproval,
     NoteUnlock,
+    NoteVersion,
     Patient,
     PatientContextSnapshot,
+    ProcessingAttempt,
     Recording,
+    RetentionPolicy,
     Summary,
     SummarySection,
     Template,
@@ -25,7 +30,7 @@ from .clinical import (
 )
 from .platform import Plan, PlatformAdmin, PlatformAuditLog, PlatformDefaultPrompt, PlatformSetting
 from .reference import RegistryCode
-from .system import AuditLog, Notification
+from .system import AuditLog, DailyMetric, MetricEvent, Notification
 from .tenancy import (
     Clinic,
     CodingSystemConfig,

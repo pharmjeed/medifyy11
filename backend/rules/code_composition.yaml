@@ -1,0 +1,33 @@
+# تركيب الأكواد — م12، قاعدة (3). قائمة صغيرة قابلة للنمو بلا نشر كود.
+
+- rule_id: NOT_VALID_PRIMARY_DIAGNOSIS
+  type: code_composition
+  severity: block
+  message_ar: "هذا الكود لا يصلح تشخيصاً أولياً للمطالبة."
+  params:
+    not_primary_diagnosis:
+      - Z00.0   # فحص طبي عام دون شكوى
+      - R51     # صداع (عرَض لا تشخيص)
+      - R50.9   # حمى غير محددة
+
+- rule_id: MANIFESTATION_REQUIRES_UNDERLYING
+  type: code_composition
+  severity: block
+  message_ar: "كود مظهري بلا حالته الأساسية."
+  params:
+    manifestation_requires:
+      - code: H36.0
+        requires_any: [E10, E11, E13]
+        message_ar: "اعتلال الشبكية السكري (H36.0) يتطلب توثيق نوع السكري (E10/E11/E13)."
+      - code: G63.2
+        requires_any: [E10, E11, E13]
+        message_ar: "الاعتلال العصبي السكري (G63.2) يتطلب توثيق نوع السكري."
+
+- rule_id: CONFLICTING_CODE_PAIRS
+  type: code_composition
+  severity: warn
+  message_ar: "زوج أكواد متعارض — راجع الترميز."
+  params:
+    conflicting_pairs:
+      - pair: [Z00.0, I10]
+        message_ar: "فحص دوري لشخص سليم (Z00.0) لا يجتمع مع تشخيص نشط (I10)."

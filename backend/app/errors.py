@@ -1,5 +1,6 @@
-"""رموز الأخطاء MDF — الـ28 المعتمدة (22 + رمزا DOC-20 + ثلاثة رموز توجيه المالك 2026-07-22
-+ MDF-4233 السجل المرجعي للأكواد — قرار مالك 2026-08-02).
+"""رموز الأخطاء MDF — الـ29 المعتمدة (22 + رمزا DOC-20 + ثلاثة رموز توجيه المالك 2026-07-22
++ MDF-4233 السجل المرجعي للأكواد — قرار مالك 2026-08-02
++ MDF-4234 سلامة ملف الصوت — مهمة التحصين المرحلة 2، 2026-08-03).
 لا يُخترع رمز هنا؛ يُضاف في الوثيقة أولاً."""
 from __future__ import annotations
 
@@ -29,6 +30,10 @@ MDF_CATALOG: dict[str, tuple[int, str, str]] = {
     "MDF-4231": (422, "بوابة اعتماد نص المذكرة ① لم تُنجز بعد.", "Note approval (gate 1) has not been completed yet."),
     "MDF-4232": (422, "التصدير غير متاح قبل اعتماد الأكواد ②.", "Export is unavailable before code approval (gate 2)."),
     "MDF-4233": (422, "الكود غير موجود أو ملغى في السجل المرجعي — اختر كوداً نشطاً.", "Code not found or inactive in the reference registry — pick an active code."),
+    "MDF-4234": (409, "ملف الصوت غير مكتمل أو غير مطابق — أعد مزامنة التسجيل قبل الإنهاء.", "Audio file incomplete or mismatched — resync the recording before finalizing."),
+    "MDF-4235": (410, "المحتوى أُبطل سريرياً (Void) — لا مخارج لزيارة مُبطلة.", "Content clinically voided — no exports for a voided visit."),
+    "MDF-4236": (409, "فتح المذكرة غير متاح — البوابة ② أُنجزت أو حالة الزيارة لا تسمح (المسار Addendum/Reopen).", "Note unlock unavailable — gate 2 completed or visit state disallows it (use Addendum/Reopen)."),
+    "MDF-4237": (422, "لا يمكن الاعتماد — جاهزية المطالبة غير مكتملة (بنود حاجبة يجب حسمها).", "Approval blocked — claim readiness incomplete (blocking findings must be resolved)."),
     "MDF-4291": (429, "تجاوزت حد المعدل — أعد المحاولة بعد قليل.", "Rate limit exceeded — retry shortly."),
     # ٣ — المعالجة والتكامل (50xx)
     "MDF-5031": (500, "انقطاع خط التفريغ الفوري.", "Live transcription pipeline interrupted."),
@@ -40,10 +45,12 @@ MDF_CATALOG: dict[str, tuple[int, str, str]] = {
     "MDF-5001": (500, "خطأ داخلي غير مصنّف.", "Unclassified internal error."),
 }
 
-assert len(MDF_CATALOG) == 28, (
-    "28 رمزاً لا غير: 22 (DOC-13 v1.2) + MDF-4015/4229 (DOC-20) "
+assert len(MDF_CATALOG) == 32, (
+    "32 رمزاً لا غير: 22 (DOC-13 v1.2) + MDF-4015/4229 (DOC-20) "
     "+ MDF-4230/4231/4232 (بوابتا الاعتماد وموافقة المريض — توجيه المالك 2026-07-22) "
-    "+ MDF-4233 (السجل المرجعي للأكواد — قرار مالك 2026-08-02)"
+    "+ MDF-4233 (السجل المرجعي للأكواد — قرار مالك 2026-08-02) "
+    "+ MDF-4234/4235/4236/4237 (سلامة الصوت · مخارج المُبطلة · حواجز Unlock · "
+    "جاهزية المطالبة — التحصين م2/م4/م5/م12)"
 )
 
 

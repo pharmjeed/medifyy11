@@ -17,37 +17,50 @@ from ...envelope import ok
 from ...errors import MedifyError
 from ...models import Approval, Visit
 from ...services.export import export_filename, export_meta, note_pdf, note_text
+from ...services.versions import latest_uploaded_version
 from ...services.visits import get_visit_for_doctor
 
 router = APIRouter()
 
 
-def _require_gate_two(db, visit: Visit) -> None:
-    approval = db.execute(select(Approval).where(Approval.visit_id == visit.id)).scalar_one_or_none()
-    if approval is None:
+def _require_exportable(db, visit: Visit) -> None:
+    """المُبطلة مختومة (410 — م4) قبل أي فحص بوابة؛ ثم لا خروج بيانات قبل البوابة ②.
+
+    م6: أثناء إعداد نسخة جديدة (reopen) تبقى آخر منقولة قابلة للتصدير — البوابة
+    تتحقق من اعتماد الدورة الحالية أو وجود نسخة منقولة سابقة.
+    """
+    if visit.state == "voided":
+        raise MedifyError("MDF-4235", details={"visit_id": str(visit.id)})
+    approval = db.execute(
+        select(Approval).where(Approval.visit_id == visit.id, Approval.cycle == visit.cycle)
+    ).scalar_one_or_none()
+    if approval is None and latest_uploaded_version(db, visit.id) is None:
         raise MedifyError("MDF-4232", details={"visit_id": str(visit.id)})
 
 
 @router.get("/visits/{visit_id}/export/text")
-def export_text(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB):
-    """نص نظيف يُلصق في الـ EMR (F-086) — يُنسخ من الواجهة بنقرة."""
+def export_text(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB, version: int | None = None):
+    """نص نظيف يُلصق في الـ EMR (F-086) — ?version=N لقطة مجمّدة، الافتراضي آخر منقولة."""
     visit = get_visit_for_doctor(db, visit_id)
-    _require_gate_two(db, visit)
-    content = note_text(db, visit)
-    audit(db, ctx.facility_id, "note.exported", "visit", visit.id, ctx.user_id, {"format": "text"})
+    _require_exportable(db, visit)
+    content = note_text(db, visit, version)
+    audit(db, ctx.facility_id, "note.exported", "visit", visit.id, ctx.user_id,
+          {"format": "text", "version": version})
     track("note.exported", ctx.facility_id, "doctor", visit.id, format="text", chars=len(content))
-    return ok({"format": "text", "content": content, **export_meta(db, visit)})
+    return ok({"format": "text", "content": content, **export_meta(db, visit, version)})
 
 
 @router.get("/visits/{visit_id}/export/pdf")
-def export_pdf(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB):
-    """PDF بترويسة وتذييل ثنائيي اللغة (F-038/F-084)."""
+def export_pdf(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB, version: int | None = None):
+    """PDF بترويسة وتذييل ثنائيي اللغة (F-038/F-084) — ?version=N لقطة مجمّدة (م6)."""
     visit = get_visit_for_doctor(db, visit_id)
-    _require_gate_two(db, visit)
-    payload = note_pdf(db, visit)
-    audit(db, ctx.facility_id, "note.exported", "visit", visit.id, ctx.user_id, {"format": "pdf"})
+    _require_exportable(db, visit)
+    payload = note_pdf(db, visit, version)
+    audit(db, ctx.facility_id, "note.exported", "visit", visit.id, ctx.user_id,
+          {"format": "pdf", "version": version})
     track("note.exported", ctx.facility_id, "doctor", visit.id, format="pdf", bytes=len(payload))
-    filename = export_filename(visit, "pdf")
+    meta = export_meta(db, visit, version)
+    filename = export_filename(visit, "pdf", meta.get("version"))
     return Response(
         content=payload,
         media_type="application/pdf",

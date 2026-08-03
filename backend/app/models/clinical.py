@@ -6,6 +6,7 @@ import uuid
 from typing import Any
 
 from sqlalchemy import (
+    BigInteger,
     CheckConstraint,
     DateTime,
     Enum,
@@ -95,6 +96,10 @@ class Visit(Base, TimestampMixin):
     patient_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("patients.id"), nullable=False)
     template_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("templates.id"), nullable=False)
     state: Mapped[str] = mapped_column(VISIT_STATE, nullable=False, default="draft")
+    # دورة النسخ (م6): يرتفع مع كل reopen — بوابتا كل نسخة مستقلتان (triggers 0014)
+    cycle: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    # م8: تجميد كل حذف احتفاظي لأثار الزيارة (تحقيق/نزاع) — لا يُحذف منها شيء وهو مرفوع
+    legal_hold: Mapped[bool] = mapped_column(default=False, nullable=False, server_default="false")
     context_snapshot_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("patient_context_snapshots.id"), nullable=True
     )
@@ -110,6 +115,48 @@ class Recording(Base, TimestampMixin):
     duration_sec: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     retention_until: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     deleted_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class AudioChunk(Base, TimestampMixin):
+    """سجل مقاطع الصوت المتدفقة (المرحلة 2 من التحصين) — ترقيم عالمي معمَّر عبر الاتصالات.
+
+    القيد الفريد (visit_id, chunk_index) يجعل إعادة رفع نفس المقطع idempotent:
+    الخادم يعيد ack بلا كتابة — لا تكرار في WAV عند ضياع الإقرار. sha256 والإزاحة/الطول
+    يتيحان تحقق finalize الصارم (لا-فجوات + bit-exact) قبل إطلاق P1.
+    """
+
+    __tablename__ = "audio_chunks"
+    __table_args__ = (UniqueConstraint("visit_id", "chunk_index", name="uq_audio_chunks_visit_index"),)
+
+    id: Mapped[uuid.UUID] = pk()
+    visit_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("visits.id"), nullable=False, index=True)
+    facility_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("facilities.id"), nullable=False, index=True)
+    chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    byte_offset: Mapped[int] = mapped_column(BigInteger, nullable=False)  # إزاحة PCM (بلا ترويسة WAV)
+    byte_length: Mapped[int] = mapped_column(Integer, nullable=False)
+    sha256: Mapped[str] = mapped_column(Text, nullable=False)
+    received_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ProcessingAttempt(Base, TimestampMixin):
+    """محاولة معالجة لمرحلة P1/P2/P3 (المرحلة 3 من التحصين) — سجل معمَّر بلا PHI.
+
+    يُكتب بجلسة نظام مستقلة عن معاملة الطلب: الفشل النهائي يُرجِع rollback للطلب
+    لكن سجل محاولاته يبقى (المرجع عند MDF-5031/5032 وتقرير processing-status).
+    """
+
+    __tablename__ = "processing_attempts"
+
+    id: Mapped[uuid.UUID] = pk()
+    visit_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("visits.id"), nullable=False, index=True)
+    facility_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("facilities.id"), nullable=False, index=True)
+    stage: Mapped[str] = mapped_column(Text, nullable=False)  # P1 | P2 | P3
+    attempt_no: Mapped[int] = mapped_column(Integer, nullable=False)
+    error_class: Mapped[str] = mapped_column(Text, nullable=False)  # retryable | non_retryable | none
+    error_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    succeeded: Mapped[bool] = mapped_column(default=False, nullable=False)
+    started_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    finished_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class VisitConsent(Base, TimestampMixin):
@@ -135,6 +182,8 @@ class Transcript(Base, TimestampMixin):
     facility_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("facilities.id"), nullable=False, index=True)
     content_json: Mapped[Any] = mapped_column(EncryptedJSON, nullable=False)  # segments بطوابع زمنية
     language_stats: Mapped[Any | None] = mapped_column(JSONB, nullable=True)
+    # م8: مرحلة soft قبل الحذف الصلب (سماح 7 أيام) — transcript_raw=90 يوماً افتراضاً
+    deleted_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class Summary(Base, TimestampMixin):
@@ -157,6 +206,8 @@ class SummarySection(Base, TimestampMixin):
     position: Mapped[int] = mapped_column(Integer, nullable=False)
     content_current: Mapped[str] = mapped_column(EncryptedText, nullable=False)
     content_original: Mapped[str] = mapped_column(EncryptedText, nullable=False)
+    # م10: السند جملةً بجملة — [{text, segment_ids, audio_start_ms, audio_end_ms, origin}]
+    evidence_json: Mapped[Any | None] = mapped_column(EncryptedJSON, nullable=True)
 
 
 class GuidanceItem(Base, TimestampMixin):
@@ -225,6 +276,7 @@ class NoteApproval(Base, TimestampMixin):
     id: Mapped[uuid.UUID] = pk()
     visit_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("visits.id"), nullable=False, index=True)
     facility_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("facilities.id"), nullable=False, index=True)
+    cycle: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")  # دورة النسخة (م6)
     approved_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
     approved_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     summary_hash: Mapped[str] = mapped_column(Text, nullable=False)  # بصمة البوابة ①
@@ -256,13 +308,16 @@ class Approval(Base, TimestampMixin):
     """بوابة الاعتماد ② — اعتماد الأكواد. إلحاقي فقط (REVOKE + trigger). بصمة ما اعتُمد (NFR-10).
 
     لا تُنشأ إلا بوجود note_approval (①)، ولا رفع/تصدير إلا بوجودها هي (upload_jobs FK).
+    م6: اعتماد واحد لكل دورة (visit_id, cycle) — كل نسخة reopen تعيد بوابتها ②.
     """
 
     __tablename__ = "approvals"
+    __table_args__ = (UniqueConstraint("visit_id", "cycle", name="uq_approvals_visit_cycle"),)
 
     id: Mapped[uuid.UUID] = pk()
-    visit_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("visits.id"), unique=True, nullable=False)
+    visit_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("visits.id"), nullable=False, index=True)
     facility_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("facilities.id"), nullable=False, index=True)
+    cycle: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
     note_approval_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("note_approvals.id"), nullable=False
     )
@@ -273,18 +328,66 @@ class Approval(Base, TimestampMixin):
 
 
 class UploadJob(Base, TimestampMixin):
-    """لا يُنشأ صف إلا بوجود approval — FK إلى approvals.visit_id يفرض FR-803 على مستوى القاعدة."""
+    """لا يُنشأ صف إلا بوجود approval — FK إلى approvals.id يفرض FR-803 على مستوى القاعدة.
+
+    م6: مهمة رفع لكل نسخة (approval_id UNIQUE) — retry-upload يعيد نفس المهمة/النسخة
+    بلا بوابات (عطل تقني)، بينما reopen نسخة واعتماد ومهمة جديدة (قرار سريري).
+    """
 
     __tablename__ = "upload_jobs"
+    __table_args__ = (
+        UniqueConstraint("approval_id", name="uq_upload_jobs_approval"),
+        UniqueConstraint("idempotency_key", name="uq_upload_jobs_idempotency"),
+    )
 
     id: Mapped[uuid.UUID] = pk()
-    visit_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("approvals.visit_id"), unique=True, nullable=False
-    )
+    visit_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("visits.id"), nullable=False, index=True)
     facility_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("facilities.id"), nullable=False, index=True)
+    approval_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("approvals.id"), nullable=False)
+    # م7: "{visit_id}:{version}" — الـretry بنفس المفتاح، والنسخة الجديدة مفتاح جديد
+    idempotency_key: Mapped[str] = mapped_column(Text, nullable=False)
     fhir_payload_ref: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(UPLOAD_STATUS, nullable=False, default="queued")
     attempts_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
+class NoteVersion(Base, TimestampMixin):
+    """لقطة نسخة معتمدة (م6) — المبدأ 3: المنقولة immutable (trigger القاعدة يرفض أي UPDATE).
+
+    تُنشأ مكتملة لحظة اعتماد البوابة ② (نص الأقسام + الأكواد المعتمدة + بصمة الحزمة
+    + طوابع البوابتين)، وتتحدث حالتها حتى `uploaded` فتتجمد للأبد. reopen لا يمسها —
+    ينشئ دورة جديدة تنتهي بصف نسخة جديد. diff عن السابقة يُخزن هنا مشفراً (محتوى
+    سريري) — audit_logs يحمل الأعداد فقط.
+    """
+
+    __tablename__ = "note_versions"
+    __table_args__ = (UniqueConstraint("visit_id", "version_number", name="uq_note_versions_visit_number"),)
+
+    id: Mapped[uuid.UUID] = pk()
+    visit_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("visits.id"), nullable=False, index=True)
+    facility_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("facilities.id"), nullable=False, index=True)
+    version_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    # {sections: [{section_key, position, content}]} — عند reopen نسخة من السابقة (مسودة)
+    # ثم تُستبدل بالنص المعتمد حرفياً لحظة البوابة ②
+    note_snapshot: Mapped[Any] = mapped_column(EncryptedJSON, nullable=False)
+    # الأكواد المعتمدة (accepted|modified) بأنظمتها وربط تشخيصها ونصها
+    approved_codes_snapshot: Mapped[Any] = mapped_column(EncryptedJSON, nullable=False)
+    # حقول الاعتماد تكتمل عند البوابة ② — المسودة (draft) قبلها بلا بصمة ولا طوابع
+    bundle_hash: Mapped[str | None] = mapped_column(Text, nullable=True)  # sha256 لحزمة FHIR الكاملة
+    note_approved_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    note_approved_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    codes_approved_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    codes_approved_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    uploaded_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    upload_status: Mapped[str] = mapped_column(Text, nullable=False, default="draft")  # draft|pending|uploaded|upload_failed
+    # م14: ملخص المريض بالعربي — جزء من مخرجات النسخة (reopen يعيد توليده)
+    patient_summary_json: Mapped[Any | None] = mapped_column(EncryptedJSON, nullable=True)
+    patient_summary_included: Mapped[bool] = mapped_column(default=False, nullable=False, server_default="false")
+    patient_summary_note_hash: Mapped[str | None] = mapped_column(Text, nullable=True)  # stale detection
+    # سبب إعادة الفتح الذي أنتج هذه النسخة (v≥2) — محتوى سريري محتمل، مشفر
+    reopen_reason: Mapped[str | None] = mapped_column(EncryptedText, nullable=True)
+    # diff نصي + أكواد عن النسخة السابقة (v≥2) — {sections: [...], codes: {...}, counts: {...}}
+    diff_json: Mapped[Any | None] = mapped_column(EncryptedJSON, nullable=True)
 
 
 class UploadAttempt(Base, TimestampMixin):
@@ -295,6 +398,44 @@ class UploadAttempt(Base, TimestampMixin):
     started_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     result: Mapped[str | None] = mapped_column(Text, nullable=True)  # confirmed | failed
     error_code: Mapped[str | None] = mapped_column(Text, nullable=True)  # رموز DOC-13
+
+
+class RetentionPolicy(Base, TimestampMixin):
+    """تجاوز احتفاظ لكل منشأة (م8) — الافتراضات مضمّنة في services/retention.DEFAULTS.
+
+    retention_days = NULL يعني «بلا حذف» لهذا النوع. legal_hold على الزيارة يتقدم
+    على كل سياسة. الأدمن يعدّل سياسات منشأته من /settings/retention.
+    """
+
+    __tablename__ = "retention_policies"
+    __table_args__ = (UniqueConstraint("facility_id", "artifact_type", name="uq_retention_facility_artifact"),)
+
+    id: Mapped[uuid.UUID] = pk()
+    facility_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("facilities.id"), nullable=False, index=True)
+    artifact_type: Mapped[str] = mapped_column(Text, nullable=False)
+    retention_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    updated_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+
+
+class DeliveryReceipt(Base, TimestampMixin):
+    """إيصال تسليم لنظام المستشفى (م7) — كل استقبال ناجح يكتب إيصاله فوراً.
+
+    الفحص قبل أي إرسال: إيصال قائم بنفس (المفتاح، الوجهة) = النجاح السابق يُرجَع
+    بلا إرسال — انهيار بعد الإيصال وقبل تحديث المهمة لا يسبب كتابة مزدوجة في HIS.
+    الكتابة بجلسة نظام مستقلة (commit فوري) والقيد الفريد صمام الأمان الأخير.
+    """
+
+    __tablename__ = "delivery_receipts"
+    __table_args__ = (
+        UniqueConstraint("idempotency_key", "target_system", name="uq_delivery_receipts_key_target"),
+    )
+
+    id: Mapped[uuid.UUID] = pk()
+    facility_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("facilities.id"), nullable=False, index=True)
+    idempotency_key: Mapped[str] = mapped_column(Text, nullable=False, index=True)
+    target_system: Mapped[str] = mapped_column(Text, nullable=False)  # mock | http | hl7
+    delivered_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    response_hash: Mapped[str] = mapped_column(Text, nullable=False)  # بصمة ردّ الوجهة — لا محتوى
 
 
 class Addendum(Base, TimestampMixin):

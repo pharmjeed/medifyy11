@@ -17,8 +17,8 @@ from __future__ import annotations
 import io
 import json
 import logging
+import math
 import re
-import time
 import wave
 from abc import ABC, abstractmethod
 from pathlib import Path
@@ -28,68 +28,9 @@ from ..config import get_settings
 logger = logging.getLogger("medify.pipelines")
 
 
-def _is_retryable_error(exc: Exception) -> bool:
-    """تحديد إن كان الخطأ عابراً (قابل للإعادة) أم نهائياً.
-
-    قابل للإعادة: timeout، مشاكل شبكة، أخطاء 5xx من الخادم.
-    غير قابل: ملف تالف، صيغة غير مدعومة، مفاتيح API غير صحيحة.
-    """
-    exc_str = str(exc).lower()
-    exc_name = exc.__class__.__name__
-
-    # Timeout وشبكة
-    if any(x in exc_str for x in ["timeout", "timed out", "connection", "refused", "reset"]):
-        return True
-    if any(x in exc_name for x in ["Timeout", "Connection", "Network", "IOError", "OSError"]):
-        return True
-
-    # أخطاء 5xx و 429 من خوادم الخدمات
-    if any(x in exc_str for x in ["500", "502", "503", "504", "429", "too many requests"]):
-        return True
-
-    # أخطاء Google/Gemini العابرة
-    if "Service Unavailable" in str(exc) or "RESOURCE_EXHAUSTED" in str(exc):
-        return True
-
-    # أخطاء Whisper العابرة
-    if "CUDA out of memory" in str(exc):
-        return True
-
-    return False
-
-
-def retry_with_backoff(func, max_retries: int = 3, backoff_seconds: list[float] | None = None):
-    """تكرار دالة مع exponential backoff.
-
-    Args:
-        func: دالة بدون معاملات (lambda أو partial)
-        max_retries: عدد إعادة المحاولات (3 افتراضياً)
-        backoff_seconds: قائمة التأخيرات بالثواني [30, 120, 300]
-    """
-    if backoff_seconds is None:
-        backoff_seconds = [30.0, 120.0, 300.0]  # 30 ثانية، دقيقتين، 5 دقائق
-
-    last_error = None
-    for attempt in range(max_retries):
-        try:
-            return func()
-        except Exception as exc:
-            last_error = exc
-            if not _is_retryable_error(exc):
-                logger.debug("خطأ غير قابل للإعادة: %s", exc)
-                raise  # رفع الخطأ فوراً إن لم يكن قابل للإعادة
-
-            if attempt < max_retries - 1:
-                delay = backoff_seconds[min(attempt, len(backoff_seconds) - 1)]
-                logger.warning(
-                    "STT — محاولة %d فشلت (%s) — إعادة بعد %.0f ثانية",
-                    attempt + 1, exc, delay
-                )
-                time.sleep(delay)
-            else:
-                logger.error("STT — كل المحاولات فشلت بعد %d محاولة", max_retries)
-
-    raise last_error
+# المصنّف والإعادة انتقلا إلى pipelines/classify.py وservices/processing.py (المرحلة 3):
+# المصنّف القديم هنا كان يعدّ FileNotFoundError «عابراً» (عائلة OSError) ويحجب الطلب
+# بـ time.sleep حتى 150 ثانية بلا سجل محاولات.
 
 
 class STTEngine(ABC):
@@ -147,6 +88,8 @@ class MockSTTEngine(STTEngine):
                 "text": text,
                 "t0": round(index * self.SENTENCE_SECONDS, 2),
                 "t1": round(index * self.SENTENCE_SECONDS + 3.5, 2),
+                # م11: تسجيل نظيف افتراضاً (فوق العتبتين) — لا إبراز في المراجعة
+                "confidence": 0.9,
             }
             for index, text in enumerate(MOCK_DIALOGUE)
         ]
@@ -291,15 +234,38 @@ class WhisperSTTEngine(STTEngine):
 
         self._model = WhisperModel("small", device="cpu", compute_type="int8")
 
+    @staticmethod
+    def _segment_confidence(segment) -> float | None:
+        """م11: تطبيع إشارتي Whisper إلى 0..1 — كانتا تُهدران.
+
+        exp(avg_logprob) يقارب متوسط احتمال الكلمة (لوغاريتمي سالب → 0..1)، ويُخصم
+        منه احتمال «لا كلام» — مقطع مشوّش أو صامت جزئياً ينخفض بالإشارتين معاً.
+        """
+        avg_logprob = getattr(segment, "avg_logprob", None)
+        no_speech = getattr(segment, "no_speech_prob", None) or 0.0
+        if avg_logprob is None:
+            return None
+        base = math.exp(min(0.0, float(avg_logprob)))
+        return round(max(0.0, min(1.0, base * (1.0 - float(no_speech)))), 3)
+
     def transcribe_visit(self, path: str) -> list[dict]:
         if not Path(path).exists():
             return []
         segments, _info = self._model.transcribe(path, language="ar")
         spoken = [segment for segment in segments if segment.text.strip()]
-        return [
-            {"id": f"s-{index}", "text": segment.text.strip(), "t0": round(segment.start, 2), "t1": round(segment.end, 2)}
-            for index, segment in enumerate(spoken)
-        ]
+        out: list[dict] = []
+        for index, segment in enumerate(spoken):
+            entry = {
+                "id": f"s-{index}",
+                "text": segment.text.strip(),
+                "t0": round(segment.start, 2),
+                "t1": round(segment.end, 2),
+            }
+            confidence = self._segment_confidence(segment)
+            if confidence is not None:
+                entry["confidence"] = confidence
+            out.append(entry)
+        return out
 
     def transcribe_file(self, path: str) -> str:
         segments, _info = self._model.transcribe(path, language="ar")

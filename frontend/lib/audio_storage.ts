@@ -8,8 +8,9 @@
 
 export interface AudioChunk {
   visitId: string;
-  seq: number;
+  seq: number; // ترقيم عالمي معمَّر — هو نفسه chunk_index على الخادم (المرحلة 2)
   payload: string; // base64 PCM16
+  sha256?: string; // بصمة بايتات PCM — يتحقق منها الخادم قبل الكتابة
   timestamp: number; // when captured
   synced: boolean; // confirmed by server
 }
@@ -157,6 +158,23 @@ export async function getBufferSize(visitId: string): Promise<number> {
       const chunks = req.result as AudioChunk[];
       const bytes = chunks.reduce((sum, chunk) => sum + chunk.payload.length, 0);
       resolve(bytes);
+    };
+  });
+}
+
+/** أعلى seq مخزَّن للزيارة (متزامناً أو لا) — لاستكمال الترقيم بعد قتل التبويبة */
+export async function getMaxStoredSeq(visitId: string): Promise<number> {
+  const db = await getDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction([STORE_NAME], "readonly");
+    const store = tx.objectStore(STORE_NAME);
+    const req = store.index("visitId").getAll(IDBKeyRange.only(visitId));
+
+    tx.onerror = () => reject(tx.error);
+    req.onerror = () => reject(req.error);
+    req.onsuccess = () => {
+      const chunks = req.result as AudioChunk[];
+      resolve(chunks.reduce((max, chunk) => Math.max(max, chunk.seq), -1));
     };
   });
 }

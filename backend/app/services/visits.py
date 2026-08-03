@@ -8,13 +8,20 @@ from sqlalchemy import select
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.orm import Session
 
+from ..audit import audit
 from ..errors import MedifyError
 from ..models import GuidanceItem, NoteApproval, NoteUnlock, Summary, SummarySection, Visit
 
 
-def transition(db: Session, visit: Visit, new_state: str) -> None:
-    """تحديث الحالة — أي انتقال ممنوع يرفضه trigger القاعدة → MDF-4223."""
+def transition(db: Session, visit: Visit, new_state: str,
+               actor_user_id: uuid.UUID | None = None) -> None:
+    """تحديث الحالة — أي انتقال ممنوع يرفضه trigger القاعدة → MDF-4223.
+
+    كل انتقال ناجح يكتب سطراً موحّداً visit.state_changed في audit_logs (المرحلة 1):
+    من/إلى + الفاعل (None = النظام) — بلا معرّفات مرضى.
+    """
     visit_id = str(visit.id)  # قبل flush — rollback يفقد سياق RLS للمعاملة (SET LOCAL)
+    old_state = visit.state
     visit.state = new_state
     try:
         db.flush()
@@ -27,18 +34,25 @@ def transition(db: Session, visit: Visit, new_state: str) -> None:
         if "MDF-4223" in message:
             raise MedifyError("MDF-4223", details={"visit_id": visit_id, "to": new_state}) from exc
         raise
+    audit(db, visit.facility_id, "visit.state_changed", "visit", visit.id, actor_user_id,
+          {"from": old_state, "to": new_state})
 
 
-def active_note_approval(db: Session, visit_id: uuid.UUID) -> NoteApproval | None:
-    """اعتماد البوابة ① النشط — ما لم يُنقض بمسار Unlock (قرار مالك 2026-08-03).
+def active_note_approval(db: Session, visit: Visit) -> NoteApproval | None:
+    """اعتماد البوابة ① النشط للدورة الحالية — ما لم يُنقض بمسار Unlock.
 
     بعد كل نقض يتراكم التاريخ في note_approvals؛ النشط هو ما لا صف نقض له في note_unlocks
-    (trigger القاعدة يضمن ألا يوجد أكثر من نشط واحد قبل البوابة ②).
+    (trigger القاعدة يضمن ألا يوجد أكثر من نشط واحد قبل البوابة ②). م6: النشاط محصور
+    بدورة النسخة الحالية (visit.cycle) — اعتمادات الدورات المنقولة تاريخ مجمّد.
     """
     unlocked = select(NoteUnlock.note_approval_id)
     return db.execute(
         select(NoteApproval)
-        .where(NoteApproval.visit_id == visit_id, NoteApproval.id.not_in(unlocked))
+        .where(
+            NoteApproval.visit_id == visit.id,
+            NoteApproval.cycle == visit.cycle,
+            NoteApproval.id.not_in(unlocked),
+        )
         .order_by(NoteApproval.approved_at.desc())
     ).scalars().first()
 

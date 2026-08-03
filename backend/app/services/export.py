@@ -4,6 +4,8 @@
 - `note_pdf`   : PDF بترويسة وتذييل ثنائيي اللغة يعتمدان خط الهوية نفسه.
 
 المخرجان لا يُتاحان إلا بعد البوابة ② (يفرضه المسار في api/v1/export.py).
+م6: ?version=N يخدم لقطة note_versions المجمّدة؛ الافتراضي آخر نسخة منقولة —
+وكل مخرج يحمل تذييل النسخة («النسخة N — اعتُمدت ونُقلت بتاريخ …»).
 """
 from __future__ import annotations
 
@@ -11,23 +13,27 @@ import datetime as dt
 import io
 from functools import lru_cache
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..errors import MedifyError
 from ..models import (
     Approval,
     Clinic,
     Facility,
     GuidanceItem,
     NoteApproval,
+    NoteVersion,
     Patient,
     Summary,
     SummarySection,
     User,
     Visit,
 )
+from .versions import get_version, latest_uploaded_version
 
 # عناوين الأقسام كما تعرضها الواجهة — مصدر واحد للتسمية في كل المخرجات
 SECTION_TITLES: dict[str, tuple[str, str]] = {
@@ -53,42 +59,108 @@ _FONT_BOLD = "MedifyPlexAr-Bold"
 
 
 class ExportBundle:
-    """كل ما تحتاجه المخرجات مجموعاً بنداء واحد على القاعدة."""
+    """كل ما تحتاجه المخرجات مجموعاً بنداء واحد على القاعدة.
 
-    def __init__(self, db: Session, visit: Visit) -> None:
+    م6: version يحدد المصدر — لقطة note_versions المجمّدة (المطلوبة أو آخر منقولة
+    افتراضاً) وإلا المحتوى الحي للدورة الحالية (وضع الجسر قبل أول نقل).
+    """
+
+    def __init__(self, db: Session, visit: Visit, version: int | None = None) -> None:
         self.visit = visit
         self.facility = db.execute(select(Facility).where(Facility.id == visit.facility_id)).scalar_one()
         self.patient = db.execute(select(Patient).where(Patient.id == visit.patient_id)).scalar_one()
         self.doctor = db.execute(select(User).where(User.id == visit.doctor_id)).scalar_one()
         self.clinic = db.execute(select(Clinic).where(Clinic.id == visit.clinic_id)).scalar_one_or_none()
         self.summary = db.execute(select(Summary).where(Summary.visit_id == visit.id)).scalar_one()
-        self.sections = db.execute(
-            select(SummarySection)
-            .where(SummarySection.summary_id == self.summary.id)
-            .order_by(SummarySection.position)
-        ).scalars().all()
+
+        # اختيار مصدر المحتوى: لقطة نسخة أم المحتوى الحي
+        self.version_row: NoteVersion | None = None
+        if version is not None:
+            row = get_version(db, visit.id, version)
+            if row is None or row.upload_status == "draft":
+                raise MedifyError("MDF-4041", details={"version": version})
+            self.version_row = row
+        else:
+            self.version_row = latest_uploaded_version(db, visit.id)
+
+        if self.version_row is not None:
+            snapshot = self.version_row.note_snapshot or {}
+            self.sections = [
+                SimpleNamespace(
+                    section_key=s.get("section_key", ""),
+                    position=s.get("position", index),
+                    content_current=s.get("content", ""),
+                )
+                for index, s in enumerate(snapshot.get("sections", []))
+            ]
+            self.codes = [
+                SimpleNamespace(
+                    kind=c.get("kind", ""),
+                    suggestion_text=c.get("suggestion_text", ""),
+                    code_system=c.get("code_system"),
+                    code_value=c.get("code_value"),
+                    code_secondary_system=c.get("code_secondary_system"),
+                    code_secondary_value=c.get("code_secondary_value"),
+                    linked_dx_code=c.get("linked_dx_code"),
+                    justification=c.get("justification"),
+                    code_registry_version=c.get("code_registry_version"),
+                    code_effective_date=c.get("code_effective_date"),
+                    requires_doctor_input=bool(c.get("requires_doctor_input")),
+                )
+                for c in (self.version_row.approved_codes_snapshot or {}).get("codes", [])
+            ]
+            gate_cycle = self.version_row.version_number
+        else:
+            self.sections = db.execute(
+                select(SummarySection)
+                .where(SummarySection.summary_id == self.summary.id)
+                .order_by(SummarySection.position)
+            ).scalars().all()
+            self.codes = []
+            for section in self.sections:
+                self.codes.extend(
+                    db.execute(
+                        select(GuidanceItem)
+                        .where(
+                            GuidanceItem.section_id == section.id,
+                            GuidanceItem.status.in_(["accepted", "modified"]),
+                        )
+                        .order_by(GuidanceItem.created_at)
+                    ).scalars().all()
+                )
+            gate_cycle = visit.cycle
+
+        # بوابتا النسخة المستهدفة تحديداً (م6: اعتماد لكل دورة)
         self.approval = db.execute(
-            select(Approval).where(Approval.visit_id == visit.id)
+            select(Approval).where(Approval.visit_id == visit.id, Approval.cycle == gate_cycle)
         ).scalar_one_or_none()
-        # بصمة ① المعروضة هي المرتبطة بالاعتماد النهائي — مسار Unlock قد خلّف تاريخاً منقوضاً
-        # في note_approvals (قرار مالك 2026-08-03)، والمخرجات لا تُتاح إلا بعد البوابة ② أصلاً
         self.note_approval = None
         if self.approval is not None:
             self.note_approval = db.execute(
                 select(NoteApproval).where(NoteApproval.id == self.approval.note_approval_id)
             ).scalar_one_or_none()
-        self.codes: list[GuidanceItem] = []
-        for section in self.sections:
-            self.codes.extend(
-                db.execute(
-                    select(GuidanceItem)
-                    .where(
-                        GuidanceItem.section_id == section.id,
-                        GuidanceItem.status.in_(["accepted", "modified"]),
-                    )
-                    .order_by(GuidanceItem.created_at)
-                ).scalars().all()
-            )
+
+    @property
+    def version_number(self) -> int | None:
+        return self.version_row.version_number if self.version_row is not None else None
+
+    def included_patient_summary(self) -> dict[str, Any] | None:
+        """ملخص المريض إن قرّر الطبيب تضمينه في مخارج هذه النسخة (م14) — وإلا None."""
+        if self.version_row is None or not self.version_row.patient_summary_included:
+            return None
+        return self.version_row.patient_summary_json or None
+
+    def version_footer(self) -> tuple[str, str] | None:
+        """تذييل النسخة (م6) — يظهر في كل مخرج لنسخة منقولة."""
+        if self.version_row is None or self.version_row.uploaded_at is None:
+            return None
+        stamp = _fmt(self.version_row.uploaded_at)
+        return (
+            f"النسخة {self.version_row.version_number} — اعتُمدت ونُقلت بتاريخ {stamp} — "
+            "يُرجع لملف المريض في نظام المستشفى للنسخة السارية",
+            f"Version {self.version_row.version_number} — approved and transferred {stamp} — "
+            "the hospital record holds the authoritative copy",
+        )
 
     def section_title(self, key: str) -> tuple[str, str]:
         return SECTION_TITLES.get(key, (key, key))
@@ -112,9 +184,9 @@ def _code_of(item: GuidanceItem) -> str:
 
 # ===================== نص نظيف للـ EMR =====================
 
-def note_text(db: Session, visit: Visit) -> str:
-    """نص عادي بلا أي ترميز — «نسخ للـ EMR» (F-086)."""
-    data = ExportBundle(db, visit)
+def note_text(db: Session, visit: Visit, version: int | None = None) -> str:
+    """نص عادي بلا أي ترميز — «نسخ للـ EMR» (F-086). version يخدم لقطة مجمّدة (م6)."""
+    data = ExportBundle(db, visit, version)
     lines: list[str] = []
     lines.append(f"{data.facility.name}")
     lines.append("Clinical note — مذكرة سريرية")
@@ -160,6 +232,22 @@ def note_text(db: Session, visit: Visit) -> str:
         lines.append(f"Codes approved (gate 2) / اعتماد الأكواد: {_fmt(data.approval.approved_at)}"
                      f" · SHA-256 {data.approval.codes_hash[:16]}")
     lines.append("Reviewed and approved by the treating clinician — روجعت واعتُمدت من الطبيب المعالج.")
+    # م14: ملخص المريض يظهر في مخارج النسخة فقط إذا قرر الطبيب تضمينه (toggle)
+    patient_summary = data.included_patient_summary()
+    if patient_summary is not None:
+        lines.append("")
+        lines.append("-" * 68)
+        lines.append("PATIENT SUMMARY (Arabic) — ملخص المريض")
+        for key, title in (("diagnosis", "التشخيص"), ("medications", "الأدوية وكيفية الاستخدام"),
+                           ("instructions", "التعليمات"), ("follow_up", "موعد المراجعة"),
+                           ("red_flags", "علامات الخطر — الطوارئ")):
+            value = str(patient_summary.get(key, "") or "").strip()
+            if value:
+                lines.append(f"{title}: {value}")
+    version_footer = data.version_footer()
+    if version_footer is not None:
+        lines.append(version_footer[0])
+        lines.append(version_footer[1])
     return "\n".join(lines)
 
 
@@ -197,14 +285,14 @@ def _ar(text: str) -> str:
     return get_display(arabic_reshaper.reshape(text))
 
 
-def note_pdf(db: Session, visit: Visit) -> bytes:
-    """مذكرة PDF بترويسة/تذييل ثنائيي اللغة (F-038/F-084)."""
+def note_pdf(db: Session, visit: Visit, version: int | None = None) -> bytes:
+    """مذكرة PDF بترويسة/تذييل ثنائيي اللغة (F-038/F-084). version = لقطة مجمّدة (م6)."""
     from reportlab.lib.colors import HexColor
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.units import mm
     from reportlab.pdfgen import canvas as pdfcanvas
 
-    data = ExportBundle(db, visit)
+    data = ExportBundle(db, visit, version)
     fonts_ok = _register_fonts()
     regular = _FONT_REGULAR if fonts_ok else "Helvetica"
     bold = _FONT_BOLD if fonts_ok else "Helvetica-Bold"
@@ -402,22 +490,71 @@ def note_pdf(db: Session, visit: Visit) -> bytes:
         label_row("Gate 2 / بوابة ②",
                   f"{_fmt(data.approval.approved_at)}   ·   SHA-256 {data.approval.codes_hash[:24]}")
         label_row("Approved by / اعتمدها", approver.full_name if approver else "—")
+    # م14: ملخص المريض المُضمَّن — صفحة عربية RTL داخل مخرج النسخة
+    patient_summary = data.included_patient_summary()
+    if patient_summary is not None:
+        ensure(20 * mm)
+        state["y"] -= 3 * mm
+        pdf.setFillColor(teal_dark)
+        pdf.setFont(bold, 10.5)
+        pdf.drawString(left, state["y"], "PATIENT SUMMARY (Arabic)")
+        pdf.setFillColor(muted)
+        pdf.setFont(regular, 9)
+        pdf.drawRightString(right, state["y"], arabic("ملخص المريض"))
+        state["y"] -= 2 * mm
+        pdf.setStrokeColor(line)
+        pdf.line(left, state["y"], right, state["y"])
+        state["y"] -= 6 * mm
+        for key, title in (("diagnosis", "التشخيص"), ("medications", "الأدوية وكيفية الاستخدام"),
+                           ("instructions", "التعليمات"), ("follow_up", "موعد المراجعة"),
+                           ("red_flags", "علامات الخطر — الطوارئ")):
+            value = str(patient_summary.get(key, "") or "").strip()
+            if not value:
+                continue
+            ensure(8 * mm)
+            pdf.setFillColor(ink)
+            pdf.setFont(bold, 9)
+            pdf.drawRightString(right, state["y"], arabic(title))
+            state["y"] -= 4.8 * mm
+            pdf.setFont(regular, 9)
+            for row in wrap(value, regular, 9, right - left - 6 * mm):
+                ensure(5 * mm)
+                pdf.setFillColor(ink)
+                pdf.setFont(regular, 9)
+                pdf.drawRightString(right, state["y"], arabic(row))
+                state["y"] -= 4.6 * mm
+            state["y"] -= 2 * mm
+
+    version_footer = data.version_footer()
+    if version_footer is not None:
+        # تذييل النسخة (م6) — إلزامي على كل مخرج لنسخة منقولة
+        ensure(10 * mm)
+        pdf.setFillColor(muted)
+        pdf.setFont(regular, 8)
+        pdf.drawString(left, state["y"], version_footer[1])
+        state["y"] -= 4.6 * mm
+        pdf.drawRightString(right, state["y"], arabic(version_footer[0]))
+        state["y"] -= 5 * mm
 
     footer()
     pdf.save()
     return buffer.getvalue()
 
 
-def export_filename(visit: Visit, extension: str) -> str:
+def export_filename(visit: Visit, extension: str, version: int | None = None) -> str:
     stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%d")
-    return f"medify-note-{str(visit.id)[:8]}-{stamp}.{extension}"
+    suffix = f"-v{version}" if version else ""
+    return f"medify-note-{str(visit.id)[:8]}{suffix}-{stamp}.{extension}"
 
 
-def export_meta(db: Session, visit: Visit) -> dict[str, Any]:
-    data = ExportBundle(db, visit)
+def export_meta(db: Session, visit: Visit, version: int | None = None) -> dict[str, Any]:
+    data = ExportBundle(db, visit, version)
     return {
         "sections": len(data.sections),
         "coded_items": len(data.codes),
         "gate1_at": data.note_approval.approved_at.isoformat() if data.note_approval else None,
         "gate2_at": data.approval.approved_at.isoformat() if data.approval else None,
+        "version": data.version_number,
+        "uploaded_at": (data.version_row.uploaded_at.isoformat()
+                        if data.version_row is not None and data.version_row.uploaded_at else None),
     }

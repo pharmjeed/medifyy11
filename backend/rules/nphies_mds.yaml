@@ -1,0 +1,17 @@
+# اكتمال الحد الأدنى من بيانات NPHIES (MDS) — م12، قاعدة (2)
+# الحقول قابلة للتهيئة: احذف/أضف سطراً هنا بلا نشر كود.
+
+- rule_id: NPHIES_MDS_REQUIRED_FIELDS
+  type: mds_completeness
+  severity: block
+  message_ar: "بيانات إلزامية ناقصة في ملف المطالبة."
+  params:
+    required_fields:
+      - field: patient_mrn
+        message_ar: "رقم ملف المريض (MRN) غير متوفر — لا تُقبل المطالبة بدونه."
+      - field: encounter_date
+        message_ar: "تاريخ الزيارة غير متوفر."
+      - field: physician_name
+        message_ar: "اسم الطبيب المعالج غير متوفر."
+      - field: primary_diagnosis
+        message_ar: "لا يوجد تشخيص أولي معتمد — كل مطالبة تتطلب تشخيصاً واحداً على الأقل."

@@ -29,7 +29,7 @@ services:
 
   backend:
     build: ../backend
-    environment:
+    environment: &backend-env
       DATABASE_URL: postgresql+psycopg://medify_app:${MEDIFY_APP_PASSWORD:-medify_app_dev}@postgres:5432/medify
       MIGRATIONS_DATABASE_URL: postgresql+psycopg://medify_owner:${POSTGRES_PASSWORD:-medify_dev_pw}@postgres:5432/medify
       JWT_SECRET: ${JWT_SECRET:-dev-only-change-me}
@@ -61,6 +61,19 @@ services:
       sh -c "alembic upgrade head &&
              python -c 'import urllib.request' &&
              uvicorn app.main:app --host 0.0.0.0 --port 8000"
+
+  worker:
+    # عامل المعالجة (المرحلة 3): P1→P3 خارج دورة الطلب — نفس الصورة وبيئة backend
+    build: ../backend
+    environment: *backend-env
+    volumes:
+      - appdata:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: ["arq", "app.worker.WorkerSettings"]
 
   seed:
     build: ../backend

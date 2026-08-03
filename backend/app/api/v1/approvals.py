@@ -23,9 +23,12 @@ from ...models import (
     UploadAttempt,
     UploadJob,
 )
+from ...services.claim_readiness import blocking_findings
 from ...services.code_registry import check_code, registry_systems
 from ...services.fhir import build_bundle, store_bundle
+from ...services.metrics import record_approval_metrics
 from ...services.uploader import process_upload_job
+from ...services.versions import finalize_version
 from ...services.visits import active_note_approval, get_visit_for_doctor, summary_hashes, transition
 
 router = APIRouter()
@@ -45,7 +48,7 @@ def note_approve_visit(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB):
     if summary is None:
         raise MedifyError("MDF-4041")
 
-    existing = active_note_approval(db, visit.id)
+    existing = active_note_approval(db, visit)
     if existing is not None:
         return ok({
             "note_approved": True,
@@ -59,6 +62,7 @@ def note_approve_visit(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB):
     note_approval = NoteApproval(
         visit_id=visit.id,
         facility_id=ctx.facility_id,
+        cycle=visit.cycle,
         approved_by=ctx.user_id,
         approved_at=dt.datetime.now(dt.timezone.utc),
         summary_hash=content_hash,
@@ -99,12 +103,16 @@ def note_unlock_visit(visit_id: uuid.UUID, body: NoteUnlockIn, ctx: DoctorAuth, 
     reason = body.reason.strip()
     if not reason:
         raise MedifyError("MDF-4225", details={"missing": "reason"})
+    # حاجزا Unlock البنيويان → MDF-4236 (م5): بعد ② المسار Addendum، وبعد النقل المسار Reopen
     if visit.state != "in_review":
-        raise MedifyError("MDF-4223", details={"state": visit.state, "after_final_approval": "addendum"})
-    approval = db.execute(select(Approval).where(Approval.visit_id == visit.id)).scalar_one_or_none()
+        raise MedifyError("MDF-4236", details={"state": visit.state, "after_final_approval": "addendum"})
+    # م6: الحاجز بدورة النسخة الحالية — بوابة ② لدورة منقولة سابقة لا تمنع unlock الدورة الجديدة
+    approval = db.execute(
+        select(Approval).where(Approval.visit_id == visit.id, Approval.cycle == visit.cycle)
+    ).scalar_one_or_none()
     if approval is not None:
-        raise MedifyError("MDF-4223", details={"reason": "gate2_completed", "path": "addendum"})
-    note_approval = active_note_approval(db, visit.id)
+        raise MedifyError("MDF-4236", details={"reason": "gate2_completed", "path": "addendum"})
+    note_approval = active_note_approval(db, visit)
     if note_approval is None:
         raise MedifyError("MDF-4231", details={"reason": "nothing_to_unlock"})
 
@@ -148,7 +156,7 @@ def approve_visit(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB):
         raise MedifyError("MDF-4041")
 
     # النشط فقط — اعتماد ① منقوض بمسار Unlock لا يمرّر البوابة ② (قرار مالك 2026-08-03)
-    note_approval = active_note_approval(db, visit.id)
+    note_approval = active_note_approval(db, visit)
     if note_approval is None:
         raise MedifyError("MDF-4231", details={"visit_id": str(visit.id)})
 
@@ -206,10 +214,17 @@ def approve_visit(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB):
         if invalid_codes:
             raise MedifyError("MDF-4233", details={"items": invalid_codes})
 
+    # م12: محرك جاهزية المطالبة — أي block غير محسوم يمنع الاعتماد (نمط MDF-4222)
+    blocks = blocking_findings(db, visit)
+    first_pass = not blocks  # نسبة العبور من أول فحص → telemetry
+    if blocks:
+        raise MedifyError("MDF-4237", details={"findings": blocks})
+
     content_hash, codes_hash = summary_hashes(db, visit)
     approval = Approval(
         visit_id=visit.id,
         facility_id=ctx.facility_id,
+        cycle=visit.cycle,
         note_approval_id=note_approval.id,
         approved_by=ctx.user_id,
         approved_at=dt.datetime.now(dt.timezone.utc),
@@ -218,13 +233,21 @@ def approve_visit(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB):
     )
     db.add(approval)
     db.flush()  # الاعتماد أولاً — قيد FK على upload_jobs يفرض الترتيب
-    transition(db, visit, "approved")
+    transition(db, visit, "approved", ctx.user_id)
 
-    bundle = build_bundle(db, visit)
-    payload_ref = store_bundle(visit.id, bundle)
+    # م6: الحزمة بدلالة النسخة (amended + relatesTo للنسخ ≥2) + لقطة note_versions المكتملة
+    bundle = build_bundle(db, visit, visit.cycle)
+    payload_ref = store_bundle(visit.id, bundle, visit.cycle)
+    version_row = finalize_version(db, visit, note_approval, approval, bundle)
+    if version_row.version_number > 1 and version_row.diff_json is not None:
+        # الـdiff الكامل مشفّر مع النسخة — سجل التدقيق يحمل الأعداد فقط (لا PHI)
+        audit(db, ctx.facility_id, "visit.version_diff", "note_version", version_row.id, ctx.user_id,
+              version_row.diff_json.get("counts", {}))
     job = UploadJob(
         visit_id=visit.id,
         facility_id=ctx.facility_id,
+        approval_id=approval.id,
+        idempotency_key=f"{visit.id}:{visit.cycle}",  # م7: retry نفس المفتاح؛ نسخة جديدة مفتاح جديد
         fhir_payload_ref=payload_ref,
         status="queued",
         attempts_count=0,
@@ -234,7 +257,7 @@ def approve_visit(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB):
 
     audit(db, ctx.facility_id, "visit.approved", "visit", visit.id, ctx.user_id,
           {"gate": 2, "summary_hash": content_hash[:12], "codes_hash": codes_hash[:12],
-           "note_approval_id": str(note_approval.id)})
+           "note_approval_id": str(note_approval.id), "version": version_row.version_number})
     review_ms = int((approval.approved_at - summary.generated_at).total_seconds() * 1000)
     edits_count = db.execute(
         select(func.count(SummarySection.id)).where(
@@ -242,7 +265,10 @@ def approve_visit(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB):
             SummarySection.content_current != SummarySection.content_original,
         )
     ).scalar_one()
-    track("visit.approved", ctx.facility_id, "doctor", visit.id, review_ms=review_ms, edits_count=edits_count)
+    track("visit.approved", ctx.facility_id, "doctor", visit.id, review_ms=review_ms,
+          edits_count=edits_count, claim_readiness_first_pass=1 if first_pass else 0)
+    # م15: مقاييس الزيارة المعمَّرة (edit_distance/الأزمنة/نسب P3/الجاهزية) — أرقام فقط
+    record_approval_metrics(db, visit, review_ms=review_ms, claim_readiness_first_pass=first_pass)
 
     # الرفع الفوري (FR-802) — محاولات آلية ثم إشعارات فشل نهائي
     process_upload_job(db, job.id)
@@ -260,7 +286,11 @@ def approve_visit(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB):
 def upload_status(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB):
     """حالة الرفع ومحاولاته (FR-805) — W-219."""
     visit = get_visit_for_doctor(db, visit_id)
-    job = db.execute(select(UploadJob).where(UploadJob.visit_id == visit.id)).scalar_one_or_none()
+    # م6: مهمة لكل نسخة — الحالة المعروضة لأحدث مهمة (النسخة الحالية)
+    job = db.execute(
+        select(UploadJob).where(UploadJob.visit_id == visit.id)
+        .order_by(UploadJob.created_at.desc(), UploadJob.id.desc())
+    ).scalars().first()
     if job is None:
         raise MedifyError("MDF-4041")
     attempts = db.execute(
@@ -284,9 +314,15 @@ def upload_status(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB):
 
 @router.post("/visits/{visit_id}/upload-retry")
 def upload_retry(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB):
-    """إعادة محاولة يدوية بعد فشل نهائي — للدكتور لزياراته (DOC-06)."""
+    """retry-upload (م6): من upload_failed — نفس النسخة والمهمة، بلا بوابات (عطل تقني).
+
+    يقابله reopen: نسخة جديدة ببوابتين (قرار سريري) — الفصل صارم بين المسارين.
+    """
     visit = get_visit_for_doctor(db, visit_id)
-    job = db.execute(select(UploadJob).where(UploadJob.visit_id == visit.id)).scalar_one_or_none()
+    job = db.execute(
+        select(UploadJob).where(UploadJob.visit_id == visit.id)
+        .order_by(UploadJob.created_at.desc(), UploadJob.id.desc())
+    ).scalars().first()
     if job is None:
         raise MedifyError("MDF-4041")
     if job.status != "failed":

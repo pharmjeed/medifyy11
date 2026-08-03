@@ -68,18 +68,19 @@ def test_void_recorded_in_audit_log_with_actor_and_reason(client, voided_visit, 
 
 
 def test_void_requires_reason_from_catalog(client, doctor_token, void_patient):
+    """سبب خارج القائمة أو «أخرى» بلا توضيح = 422 بمغلف التحقق القياسي (م4 — كان 404 خطأً)."""
     headers = auth(doctor_token)
     visit_id = _visit_to_in_review(client, headers, void_patient)
     bad = client.post(f"/api/v1/visits/{visit_id}/void", headers=headers,
                       json={"reason": "changed_my_mind"})
-    assert bad.status_code == 404
-    assert bad.json()["error"]["code"] == "MDF-4041"
+    assert bad.status_code == 422
+    assert bad.json()["error"]["code"] == "MDF-5001"
 
     # «أخرى» بلا توضيح نصي مرفوضة
     other = client.post(f"/api/v1/visits/{visit_id}/void", headers=headers,
                         json={"reason": "other", "note": "  "})
-    assert other.status_code == 404
-    assert other.json()["error"]["code"] == "MDF-4041"
+    assert other.status_code == 422
+    assert other.json()["error"]["code"] == "MDF-5001"
 
     # «أخرى» بتوضيح تمر
     good = client.post(f"/api/v1/visits/{visit_id}/void", headers=headers,
@@ -169,6 +170,67 @@ def test_voided_excluded_from_dashboards_but_visible_in_state_distribution(clien
     # لوحة الجودة: صفوف المحتوى السريري محجوبة عن الأدمن أصلاً (RLS) فلا دلتا تُقاس —
     # يكفي أن الإبطال لا يغيّر مؤشراتها (المبطلة خارجها بالبناء)
     assert quality_after == quality_before
+
+
+def test_void_from_summarized_and_approved_pre_upload(client, doctor_token, void_patient, owner_engine):
+    """مصادر الإبطال الموسّعة (م4): summarized وapproved قبل النقل عبر API نفسها."""
+    headers = auth(doctor_token)
+    templates = client.get("/api/v1/templates", headers=headers).json()["data"]
+
+    def _consented_draft() -> str:
+        created = client.post("/api/v1/visits", headers=headers,
+                              json={"patient_id": void_patient, "template_id": templates[0]["id"]})
+        assert created.status_code == 201, created.text
+        visit_id = created.json()["data"]["id"]
+        record_consent(client, visit_id, headers)
+        return visit_id
+
+    # summarized (مشي مملوك للقاعدة — stop عبر API يمضي إلى in_review دفعة واحدة)
+    v1 = _consented_draft()
+    with owner_engine.begin() as conn:
+        for state in ("recording", "transcribed", "summarized"):
+            conn.execute(text("UPDATE visits SET state = :s WHERE id = :id"), {"s": state, "id": v1})
+    voided = client.post(f"/api/v1/visits/{v1}/void", headers=headers, json={"reason": "test_recording"})
+    assert voided.status_code == 200, voided.text
+    assert voided.json()["data"]["state"] == "voided"
+
+    # approved قبل النقل
+    v2 = _consented_draft()
+    with owner_engine.begin() as conn:
+        for state in ("recording", "transcribed", "summarized", "in_review", "approved"):
+            conn.execute(text("UPDATE visits SET state = :s WHERE id = :id"), {"s": state, "id": v2})
+    voided2 = client.post(f"/api/v1/visits/{v2}/void", headers=headers, json={"reason": "duplicate"})
+    assert voided2.status_code == 200, voided2.text
+
+
+def test_admin_can_void_doctor_visit(client, doctor_token, admin_token, void_patient):
+    """RBAC (م4): أدمن المنشأة يبطل زيارة الدكتور — فعل إداري على الحالة بلا قراءة محتوى."""
+    doctor_headers = auth(doctor_token)
+    visit_id = _visit_to_in_review(client, doctor_headers, void_patient)
+    voided = client.post(f"/api/v1/visits/{visit_id}/void", headers=auth(admin_token),
+                         json={"reason": "consent_withdrawn"})
+    assert voided.status_code == 200, voided.text
+
+    logs = client.get("/api/v1/audit-logs", headers=auth(admin_token),
+                      params={"action": "visit.voided", "per_page": 100}).json()["data"]
+    entry = next(row for row in logs if row["entity_id"] == visit_id)
+    assert entry["meta"]["actor_role"] == "admin"
+
+
+def test_voided_exports_return_410(client, doctor_token, void_patient):
+    """Void ≠ Delete لكنه ختم: أي مخرج لزيارة مُبطلة = 410 MDF-4235 (م4)."""
+    headers = auth(doctor_token)
+    visit_id = _visit_to_in_review(client, headers, void_patient)
+    assert client.post(f"/api/v1/visits/{visit_id}/void", headers=headers,
+                       json={"reason": "wrong_patient"}).status_code == 200
+
+    text_export = client.get(f"/api/v1/visits/{visit_id}/export/text", headers=headers)
+    assert text_export.status_code == 410
+    assert text_export.json()["error"]["code"] == "MDF-4235"
+
+    pdf_export = client.get(f"/api/v1/visits/{visit_id}/export/pdf", headers=headers)
+    assert pdf_export.status_code == 410
+    assert pdf_export.json()["error"]["code"] == "MDF-4235"
 
 
 def test_voided_excluded_from_patient_history(client, doctor_token, void_patient):

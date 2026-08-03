@@ -8,8 +8,10 @@ from typing import Any
 from fastapi import APIRouter, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import select
+from uuid6 import uuid7
 
 from ...analytics import track
+from ...audit import audit
 from ...deps import DoctorAuth, DB
 from ...envelope import ok
 from ...errors import MedifyError
@@ -19,15 +21,21 @@ from ...models import (
     GuidanceItem,
     NoteApproval,
     NoteUnlock,
+    NoteVersion,
+    PatientContextSnapshot,
     Summary,
     SummarySection,
+    Transcript,
     Visit,
 )
 from ...pipelines.run import run_edit_chat
 from ...pipelines.stt import get_stt
+from ...services.claim_readiness import diagnosis_options, evaluate_visit, unlinked_items
 from ...services.code_registry import check_code, registry_systems
+from ...services.evidence import refresh_section_evidence
 from ...services.history import previous_visits
-from ...services.visits import active_note_approval, get_visit_for_doctor, summary_etag
+from ...services.stt_confidence import resolve_thresholds
+from ...services.visits import active_note_approval, get_visit_for_doctor, summary_etag, summary_hashes
 
 router = APIRouter()
 
@@ -41,8 +49,11 @@ def _get_summary(db, visit: Visit) -> Summary:
 
 def _guard_not_approved(db, visit: Visit) -> None:
     """حسم الأكواد مفتوح حتى البوابة ② — يُغلق بعدها. المبطلة voided مختومة كذلك:
-    محتواها يبقى للقراءة (سجل ما حدث) ولا يُعدَّل بعد الإبطال (قرار مالك 2026-08-03)."""
-    approval = db.execute(select(Approval).where(Approval.visit_id == visit.id)).scalar_one_or_none()
+    محتواها يبقى للقراءة (سجل ما حدث) ولا يُعدَّل بعد الإبطال (قرار مالك 2026-08-03).
+    م6: الفحص بدورة النسخة الحالية — اعتماد نسخة منقولة سابقة لا يغلق الدورة الجديدة."""
+    approval = db.execute(
+        select(Approval).where(Approval.visit_id == visit.id, Approval.cycle == visit.cycle)
+    ).scalar_one_or_none()
     if approval is not None or visit.state in ("approved", "uploaded", "upload_failed", "voided"):
         raise MedifyError("MDF-4226")
 
@@ -54,7 +65,7 @@ def _guard_note_open(db, visit: Visit) -> None:
     حتى إعادة الاعتماد — لذا يُفحص الاعتماد النشط (غير المنقوض) لا مجرد وجود صف.
     """
     _guard_not_approved(db, visit)
-    if active_note_approval(db, visit.id) is not None:
+    if active_note_approval(db, visit) is not None:
         raise MedifyError("MDF-4226", details={"reason": "note_approved_gate_1"})
 
 
@@ -102,6 +113,8 @@ def get_summary(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB, response: Response
             "content_current": section.content_current,
             "content_original": section.content_original,
             "is_edited": section.content_current != section.content_original,
+            # م10: السند جملةً بجملة — الواجهة ترسم منه المشغّل والوسوم
+            "evidence": section.evidence_json,
             "guidance": [
                 {
                     "id": str(item.id),
@@ -138,7 +151,10 @@ def get_summary(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB, response: Response
         row = db.execute(select(User).where(User.id == user_id)).scalar_one_or_none()
         return row.full_name if row else "—"
 
-    approval = db.execute(select(Approval).where(Approval.visit_id == visit.id)).scalar_one_or_none()
+    # م6: اعتماد الدورة الحالية فقط — اعتمادات النسخ المنقولة السابقة تاريخ مجمّد لا يظهر كبوابة
+    approval = db.execute(
+        select(Approval).where(Approval.visit_id == visit.id, Approval.cycle == visit.cycle)
+    ).scalar_one_or_none()
     # بعد البوابة ② تُعرض بصمة ① المرتبطة بالاعتماد النهائي نفسه؛ قبلها الاعتماد النشط
     # (غير المنقوض بمسار Unlock — قرار مالك 2026-08-03)
     if approval is not None:
@@ -146,7 +162,7 @@ def get_summary(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB, response: Response
             select(NoteApproval).where(NoteApproval.id == approval.note_approval_id)
         ).scalar_one_or_none()
     else:
-        note_approval = active_note_approval(db, visit.id)
+        note_approval = active_note_approval(db, visit)
     # مذكرة مفتوحة بعد نقض: آخر نقض يُعرض للدكتور (السبب + الوقت) حتى يعيد الاعتماد
     note_unlock_out = None
     if note_approval is None:
@@ -155,10 +171,17 @@ def get_summary(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB, response: Response
             .order_by(NoteUnlock.unlocked_at.desc())
         ).scalars().first()
         if last_unlock is not None:
+            # مقارنة hash (م5): النص الحالي مقابل بصمة الاعتماد المنقوض — لم يتغيّر →
+            # الواجهة تعرض «إعادة اعتماد بنقرة» بلا مراجعة diff
+            revoked = db.execute(
+                select(NoteApproval).where(NoteApproval.id == last_unlock.note_approval_id)
+            ).scalar_one_or_none()
+            current_content_hash, _codes = summary_hashes(db, visit)
             note_unlock_out = {
                 "reason": last_unlock.reason,
                 "unlocked_at": last_unlock.unlocked_at.isoformat(),
                 "unlocked_by": _actor(last_unlock.unlocked_by),
+                "text_unchanged": revoked is not None and revoked.summary_hash == current_content_hash,
             }
     approval_out = None
     if approval is not None:
@@ -188,6 +211,46 @@ def get_summary(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB, response: Response
     )
     # المراجعات السابقة لهذا المريض — سياق المراجعة نفسه الذي رآه الإرشاد (تعديل مالك 2026-07-26)
     history = previous_visits(db, visit.patient_id, visit.doctor_id, exclude_visit_id=visit.id)
+    # م17: لوحة سياق المريض للقراءة — من لقطة الزيارة (تشمل HIS إن توفّر)
+    patient_context = None
+    if visit.context_snapshot_id:
+        snapshot = db.execute(
+            select(PatientContextSnapshot).where(PatientContextSnapshot.id == visit.context_snapshot_id)
+        ).scalar_one_or_none()
+        if snapshot is not None:
+            content = snapshot.content_json or {}
+            patient_context = {
+                "problems": content.get("problems", []),
+                "medications": content.get("medications", []),
+                "allergies": content.get("allergies", []),
+                "context_unavailable": bool(content.get("context_unavailable", True)),
+                "his_available": bool((content.get("his") or {}).get("available", False)),
+            }
+    # م6: تاريخ النسخ — للواجهة (لافتة النسخة + قائمة التصدير ?version=)
+    version_rows = db.execute(
+        select(NoteVersion).where(NoteVersion.visit_id == visit.id)
+        .order_by(NoteVersion.version_number)
+    ).scalars().all()
+    versions_out = [
+        {
+            "version_number": row.version_number,
+            "upload_status": row.upload_status,
+            "uploaded_at": row.uploaded_at.isoformat() if row.uploaded_at else None,
+            "reopen_reason": row.reopen_reason,
+            "diff_counts": (row.diff_json or {}).get("counts") if row.diff_json else None,
+        }
+        for row in version_rows
+    ]
+    has_uploaded_version = any(row.upload_status == "uploaded" for row in version_rows)
+    # م11: جودة التفريغ + العتبات الحية (تغييرها من الكونسول يسري بلا deploy)
+    transcript_stats = db.execute(
+        select(Transcript.language_stats).where(Transcript.visit_id == visit.id)
+    ).scalar_one_or_none() or {}
+    stt_confidence = {
+        "mean": transcript_stats.get("confidence_mean"),
+        "min": transcript_stats.get("confidence_min"),
+        "thresholds": resolve_thresholds(),
+    }
     return ok({
         "visit_id": str(visit.id),
         "state": visit.state,
@@ -200,10 +263,82 @@ def get_summary(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB, response: Response
         "gates": gates,
         "note_approved": note_approval is not None,
         "note_unlock": note_unlock_out,
-        "can_export": approval is not None,
+        # آخر منقولة تبقى قابلة للتصدير حتى أثناء إعداد نسخة جديدة (م6)
+        "can_export": approval is not None or has_uploaded_version,
         "approval": approval_out,
+        "version": visit.cycle,
+        "versions": versions_out,
+        "stt_confidence": stt_confidence,
+        "patient_context": patient_context,
         "previous_visits": history,
     })
+
+
+@router.get("/visits/{visit_id}/evidence")
+def get_evidence(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB):
+    """السند المرتبط كاملاً (م10) — لكل قسم: جمله بمقاطعها وأزمنتها ووسومها."""
+    visit = get_visit_for_doctor(db, visit_id)
+    summary = _get_summary(db, visit)
+    sections = db.execute(
+        select(SummarySection)
+        .where(SummarySection.summary_id == summary.id)
+        .order_by(SummarySection.position)
+    ).scalars().all()
+    return ok({
+        "visit_id": str(visit.id),
+        "sections": [
+            {
+                "section_id": str(section.id),
+                "section_key": section.section_key,
+                "sentences": section.evidence_json or [],
+            }
+            for section in sections
+        ],
+    })
+
+
+@router.get("/visits/{visit_id}/claim-readiness")
+def claim_readiness(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB):
+    """جاهزية المطالبة (م12) — يُستدعى عند دخول البوابة ② وبعد كل تغيير أكواد.
+
+    القواعد بيانات في backend/rules/*.yaml — إضافة قاعدة لا تتطلب deploy.
+    """
+    visit = get_visit_for_doctor(db, visit_id)
+    result = evaluate_visit(db, visit)
+    result["diagnosis_options"] = diagnosis_options(db, visit)
+    result["unlinked_items"] = unlinked_items(db, visit)
+    return ok(result)
+
+
+class GuidanceLinkIn(BaseModel):
+    linked_dx_code: str = Field(min_length=1, max_length=32)
+
+
+@router.patch("/guidance-items/{item_id}/link-diagnosis")
+def link_diagnosis(item_id: uuid.UUID, body: GuidanceLinkIn, ctx: DoctorAuth, db: DB):
+    """ربط بند غير تشخيصي بتشخيص مبرِّر (واجهة الربط في البوابة ② — م12).
+
+    التشخيص يجب أن يكون من تشخيصات الزيارة المعتمدة نفسها — لا ربط بكود خارجها.
+    """
+    item = db.execute(select(GuidanceItem).where(GuidanceItem.id == item_id)).scalar_one_or_none()
+    if item is None:
+        raise MedifyError("MDF-4041")
+    section = db.execute(select(SummarySection).where(SummarySection.id == item.section_id)).scalar_one()
+    summary = db.execute(select(Summary).where(Summary.id == section.summary_id)).scalar_one()
+    visit = get_visit_for_doctor(db, summary.visit_id)
+    _guard_not_approved(db, visit)
+
+    available = {option["code_value"] for option in diagnosis_options(db, visit)}
+    if body.linked_dx_code not in available:
+        raise MedifyError("MDF-4233", details={
+            "code_value": body.linked_dx_code,
+            "reason": "not_an_approved_diagnosis_of_this_visit",
+            "available": sorted(available),
+        })
+    item.linked_dx_code = body.linked_dx_code
+    db.flush()
+    return ok({"item_id": str(item.id), "linked_dx_code": item.linked_dx_code,
+               "claim_readiness": evaluate_visit(db, visit)})
 
 
 class SectionPatchIn(BaseModel):
@@ -223,6 +358,7 @@ def patch_section(section_id: uuid.UUID, body: SectionPatchIn, ctx: DoctorAuth, 
 
     old_content = section.content_current
     section.content_current = body.content_current
+    refresh_section_evidence(section)  # م10: الجملة المعدَّلة/الجديدة → وسم «تحرير طبيب»
     db.add(EditEvent(
         visit_id=visit.id,
         section_id=section.id,
@@ -262,6 +398,7 @@ def dictate_section(section_id: uuid.UUID, body: DictateIn, ctx: DoctorAuth, db:
         section.content_current = dictated_text
     else:
         section.content_current = (old_content.rstrip() + " " + dictated_text).strip()
+    refresh_section_evidence(section)  # م10
     db.add(EditEvent(
         visit_id=visit.id,
         section_id=section.id,
@@ -345,6 +482,46 @@ def resolve_guidance(item_id: uuid.UUID, body: GuidancePatchIn, ctx: DoctorAuth,
         "code_value": item.code_value,
         "requires_doctor_input": item.requires_doctor_input,
         "confidence": item.confidence,
+    })
+
+
+@router.post("/visits/{visit_id}/guidance/reject-remaining")
+def reject_remaining_guidance(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB):
+    """رفض كل الإرشادات المعلّقة دفعة واحدة (م13).
+
+    كل إرشاد يُكتب سطر رفض فردي مستقل في Audit مع bulk_action_id مشترك — الفعل
+    الجماعي لا يذيب المسؤولية الفردية عن كل بند (المبدأ 4).
+    """
+    visit = get_visit_for_doctor(db, visit_id)
+    _guard_not_approved(db, visit)
+    summary = _get_summary(db, visit)
+    pending = db.execute(
+        select(GuidanceItem)
+        .join(SummarySection, SummarySection.id == GuidanceItem.section_id)
+        .where(SummarySection.summary_id == summary.id, GuidanceItem.status == "pending")
+        .order_by(GuidanceItem.id)
+    ).scalars().all()
+    if not pending:
+        return ok({"rejected_count": 0, "bulk_action_id": None})
+
+    bulk_action_id = str(uuid7())
+    now = dt.datetime.now(dt.timezone.utc)
+    for item in pending:
+        started = item.created_at
+        item.status = "rejected"
+        item.resolved_by = ctx.user_id
+        item.resolved_at = now
+        audit(db, ctx.facility_id, "guidance.rejected", "guidance_item", item.id, ctx.user_id,
+              {"bulk_action_id": bulk_action_id, "kind": item.kind,
+               "code_system": item.code_system, "code_value": item.code_value})
+        track("guidance.resolved", ctx.facility_id, "doctor", visit.id,
+              kind=item.kind, status="rejected",
+              time_to_resolve_ms=int((now - started).total_seconds() * 1000))
+    db.flush()
+    return ok({
+        "rejected_count": len(pending),
+        "bulk_action_id": bulk_action_id,
+        "claim_readiness": evaluate_visit(db, visit),
     })
 
 

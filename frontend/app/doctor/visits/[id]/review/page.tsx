@@ -10,7 +10,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, api, apiWithHeaders, getToken } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
 import type {
-  ChatPatch, CodeSearchResult, GuidanceItem, SummarySection, TranscriptSegment, UploadStatus, VisitSummary,
+  ChatPatch, ClaimReadiness, CodeSearchResult, EvidenceSentence, GuidanceItem,
+  PatientSummaryState, PatientSummaryText, SummarySection, TranscriptSegment, UploadStatus, VisitSummary,
 } from "@/lib/types";
 import { ProgressBar7 } from "@/components/ProgressBar7";
 import { Shell } from "@/components/Shell";
@@ -47,7 +48,7 @@ const PENDING_TEXT = /\[[^\]]*\]/;
 const VOID_REASONS: { key: string; ar: string; en: string }[] = [
   { key: "wrong_patient", ar: "سُجّلت على ملف المريض الخطأ", en: "Recorded on the wrong patient file" },
   { key: "duplicate", ar: "زيارة مكررة أُنشئت بالغلط", en: "Duplicate visit created by mistake" },
-  { key: "test", ar: "تسجيل تجريبي / تدريب", en: "Test recording / training" },
+  { key: "test_recording", ar: "تسجيل تجريبي / تدريب", en: "Test recording / training" },
   { key: "consent_withdrawn", ar: "المريض سحب موافقته", en: "Patient withdrew consent" },
   { key: "other", ar: "سبب آخر (يتطلب توضيحاً)", en: "Other (explanation required)" },
 ];
@@ -111,6 +112,25 @@ export default function ReviewPage() {
   const [unlockOpen, setUnlockOpen] = useState(false);
   const [unlockReason, setUnlockReason] = useState("");
   const [unlockBusy, setUnlockBusy] = useState(false);
+  // مسار Reopen (م6) — نسخة جديدة ببوابتين بعد النقل
+  const [reopenOpen, setReopenOpen] = useState(false);
+  const [reopenReason, setReopenReason] = useState("");
+  const [reopenBusy, setReopenBusy] = useState(false);
+  // مشغّل السند (م10): نقرة جملة → مقطعها الصوتي بسياق ±1ث + إبراز مقطع التفريغ
+  const [player, setPlayer] = useState<{
+    sectionId: string; index: number; startMs: number; endMs: number; segmentIds: string[];
+  } | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  // م12: جاهزية المطالبة — تُفحص عند دخول البوابة ② وبعد كل تغيير أكواد
+  const [claim, setClaim] = useState<ClaimReadiness | null>(null);
+  // م13: رفض المتبقي دفعة واحدة
+  const [rejectAllOpen, setRejectAllOpen] = useState(false);
+  const [rejectAllBusy, setRejectAllBusy] = useState(false);
+  // م14: ملخص المريض بالعربي — بعد البوابة ① حصراً
+  const [patientSummary, setPatientSummary] = useState<PatientSummaryState | null>(null);
+  const [psBusy, setPsBusy] = useState(false);
+  const [psEditing, setPsEditing] = useState<keyof PatientSummaryText | null>(null);
+  const [psDraft, setPsDraft] = useState("");
   const chatRef = useRef<HTMLDivElement | null>(null);
   const dictTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -122,6 +142,20 @@ export default function ReviewPage() {
       if (["approved", "uploaded", "upload_failed"].includes(result.body.data.state)) {
         const status = await api<UploadStatus>(`/visits/${visitId}/upload-status`);
         setUpload({ phase: "done", status: status.data });
+      }
+      // م12: الفحص يعمل تلقائياً مع كل تحميل/تغيير أكواد — البوابة ② تقرأ منه
+      if (result.body.data.state === "in_review") {
+        const readiness = await api<ClaimReadiness>(`/visits/${visitId}/claim-readiness`);
+        setClaim(readiness.data);
+      } else {
+        setClaim(null);
+      }
+      // م14: ملخص المريض إن وُجد (404 = لم يُولَّد بعد — حالة طبيعية)
+      try {
+        const stored = await api<PatientSummaryState>(`/visits/${visitId}/patient-summary`);
+        setPatientSummary(stored.data);
+      } catch {
+        setPatientSummary(null);
       }
     } catch (err) {
       showError(err);
@@ -151,6 +185,8 @@ export default function ReviewPage() {
   };
   // A5: بند محسوم بكود محجوب دون العتبة يمنع البوابة ②
   const awaitingInput = summary?.awaiting_doctor_input_count ?? 0;
+  // م12: بنود جاهزية المطالبة الحاجبة تمنع البوابة ② كذلك (MDF-4237)
+  const claimBlocked = claim?.blocking_count ?? 0;
   // نص المذكرة يُحرَّر حتى البوابة ① فقط
   const noteEditable = summary !== null && !locked && !noteApproved;
   // تفريغ فارغ = الميكروفون لم يلتقط كلاماً — سببٌ أدق من «فشل التحليل» ويُعرض بدله
@@ -244,6 +280,99 @@ export default function ReviewPage() {
       else if (status === "rejected") toast(L("رُفض الإرشاد — يبقى القرار مسجلاً", "Guidance item rejected — the decision stays on record"));
       else toast(L("حُفظ الإرشاد معدلاً — النص والرمز معاً — وقُبل (FR-704)", "Guidance item saved as modified — text and code together — and accepted (FR-704)"));
       setModifying(null);
+      void load();
+    } catch (err) {
+      handleMutationError(err);
+    }
+  };
+
+  // م14: توليد/تحديث ملخص المريض
+  const generatePatientSummary = async () => {
+    setPsBusy(true);
+    try {
+      const result = await api<PatientSummaryState>(`/visits/${visitId}/patient-summary`, { method: "POST" });
+      setPatientSummary(result.data);
+      toast(L("وُلِّد ملخص المريض — عاينه وعدّله قبل قرار التضمين",
+              "Patient summary generated — review and edit it before deciding on inclusion"));
+    } catch (err) {
+      handleMutationError(err);
+    } finally {
+      setPsBusy(false);
+    }
+  };
+
+  const savePatientSummaryField = async (field: keyof PatientSummaryText, value: string) => {
+    try {
+      const result = await api<PatientSummaryState>(`/visits/${visitId}/patient-summary`, {
+        method: "PATCH", body: { summary: { [field]: value } },
+      });
+      setPatientSummary(result.data);
+      setPsEditing(null);
+    } catch (err) {
+      handleMutationError(err);
+    }
+  };
+
+  const togglePatientSummaryInclusion = async (included: boolean) => {
+    try {
+      const result = await api<PatientSummaryState>(`/visits/${visitId}/patient-summary`, {
+        method: "PATCH", body: { included },
+      });
+      setPatientSummary(result.data);
+      toast(included
+        ? L("سيُضمَّن الملخص في مخارج هذه النسخة", "The summary will be included in this version's outputs")
+        : L("لن يُضمَّن الملخص في المخارج", "The summary will not be included in the outputs"));
+    } catch (err) {
+      handleMutationError(err);
+    }
+  };
+
+  const downloadPatientSummaryPdf = async () => {
+    try {
+      const token = getToken();
+      const response = await fetch(`/api/v1/visits/${visitId}/patient-summary/pdf`, {
+        headers: token !== null ? { Authorization: `Bearer ${token}` } : {},
+        credentials: "include",
+      });
+      if (!response.ok) { toast(L("تعذّر توليد PDF", "Could not generate the PDF")); return; }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `medify-patient-summary-${visitId.slice(0, 8)}.pdf`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      toast(L("تعذّر توليد PDF", "Could not generate the PDF"));
+    }
+  };
+
+  // م13: رفض كل المعلّق دفعة واحدة — سطر Audit فردي لكل بند بمعرّف دفعة مشترك
+  const rejectRemaining = async () => {
+    setRejectAllBusy(true);
+    try {
+      const result = await api<{ rejected_count: number }>(
+        `/visits/${visitId}/guidance/reject-remaining`, { method: "POST" });
+      setRejectAllOpen(false);
+      toast(L(`رُفضت ${result.data.rejected_count} إرشادات — كل قرار مسجّل منفرداً في التدقيق`,
+              `${result.data.rejected_count} guidance items rejected — each decision individually audited`));
+      await load();
+    } catch (err) {
+      handleMutationError(err);
+    } finally {
+      setRejectAllBusy(false);
+    }
+  };
+
+  // م12: ربط بند غير تشخيصي بتشخيص مبرِّر — يرفع حجب الضرورة الطبية
+  const linkDiagnosis = async (itemId: string, code: string) => {
+    try {
+      const result = await api<{ claim_readiness: ClaimReadiness }>(
+        `/guidance-items/${itemId}/link-diagnosis`, { method: "PATCH", body: { linked_dx_code: code } });
+      setClaim(result.data.claim_readiness);
+      toast(L("رُبط البند بالتشخيص المبرِّر", "Item linked to its justifying diagnosis"));
       void load();
     } catch (err) {
       handleMutationError(err);
@@ -409,6 +538,31 @@ export default function ReviewPage() {
     }
   };
 
+  // م6: إعادة فتح زيارة منقولة — نسخة جديدة ببوابتين (المبدأ 2: لا تحرير بعد النقل إلا هكذا)
+  const reopenVisit = async () => {
+    if (reopenReason.trim().length === 0) {
+      toast(L("سبب إعادة الفتح إلزامي — يُسجّل مع النسخة الجديدة", "A reopen reason is required — recorded with the new version"));
+      return;
+    }
+    setReopenBusy(true);
+    try {
+      const body = await api<{ state: string; version: number }>(`/visits/${visitId}/reopen`, {
+        method: "POST",
+        body: { reason: reopenReason.trim() },
+      });
+      setReopenOpen(false);
+      setReopenReason("");
+      setUpload({ phase: "idle" });
+      toast(L(`فُتحت النسخة ${body.data.version} — النسخة السابقة منقولة ومجمّدة، وتلزم إعادة البوابتين`,
+              `Version ${body.data.version} opened — the previous version is transferred and frozen; both gates are required again`));
+      await load();
+    } catch (err) {
+      handleMutationError(err);
+    } finally {
+      setReopenBusy(false);
+    }
+  };
+
   const downloadPdf = async () => {
     // التوكن يُرسل كترويسة Bearer لا ككوكي، فلا يصلح window.open — نجلب PDF كـ blob بالمصادقة
     try {
@@ -431,6 +585,29 @@ export default function ReviewPage() {
       toast(L("تعذّر توليد PDF", "Could not generate the PDF"));
     }
   };
+
+  // م10: تشغيل سند جملة — بسياق ثانية قبل البداية وثانية بعد النهاية
+  const playEvidence = (sectionId: string, index: number, sentence: EvidenceSentence) => {
+    if (sentence.audio_start_ms === null || sentence.audio_end_ms === null) return;
+    setPlayer({
+      sectionId, index,
+      startMs: sentence.audio_start_ms,
+      endMs: sentence.audio_end_ms,
+      segmentIds: sentence.segment_ids,
+    });
+  };
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (audio === null || player === null) return;
+    const start = Math.max(0, player.startMs / 1000 - 1);
+    const end = player.endMs / 1000 + 1;
+    const stopAtEnd = () => { if (audio.currentTime >= end) audio.pause(); };
+    audio.currentTime = start;
+    void audio.play().catch(() => undefined); // حظر التشغيل التلقائي — يضغط الدكتور تشغيل يدوياً
+    audio.addEventListener("timeupdate", stopAtEnd);
+    return () => audio.removeEventListener("timeupdate", stopAtEnd);
+  }, [player]);
 
   const retryUpload = async () => {
     setUpload({ phase: "uploading" });
@@ -487,11 +664,20 @@ export default function ReviewPage() {
           <span className="badge success">{L("مقبول", "Accepted")} <span className="num">{counters.accepted}</span></span>
           <span className="badge danger">{L("مرفوض", "Rejected")} <span className="num">{counters.rejected}</span></span>
           <button className="btn-row" onClick={() => void openTranscript()}>{L("نص المحادثة الكامل", "Full transcript")}</button>
+          {/* م13: يظهر فقط عند وجود معلّق — وحسم آخر بند يحلّ شرط MDF-4222 فوراً */}
+          {!locked && counters.pending > 0 ? (
+            <button className="btn-row" onClick={() => setRejectAllOpen(true)}
+              title={L("رفض كل الإرشادات المعلّقة — كل قرار يُسجّل منفرداً في سجل التدقيق",
+                       "Reject all pending guidance — each decision is individually recorded in the audit log")}>
+              {L(`رفض كل المتبقي (${counters.pending})`, `Reject all remaining (${counters.pending})`)}
+            </button>
+          ) : null}
           {approvedLocked ? (
             <span className="badge success">{L("🔒 معتمدة — قراءة فقط (MDF-4226)", "🔒 Approved — read-only (MDF-4226)")}</span>
           ) : voided ? (
             <span className="badge" style={{ background: "#fbeaea", color: "#a13333" }}>{L("⊘ مُبطلة — قراءة فقط", "⊘ Voided — read-only")}</span>
-          ) : summary.state === "in_review" ? (
+          ) : ["summarized", "in_review", "approved"].includes(summary.state) ? (
+            // مصادر الإبطال الموسّعة (م4): قبل النقل — بعد النقل المسار reopen
             <button className="btn-danger-outline" style={{ height: 34 }} onClick={() => setVoidOpen(true)}
               title={L("زيارة لا يصح اعتمادها (مريض خطأ / مكررة / تجريبية / سحب موافقة) — إبطال بسبب مدوَّن في التدقيق",
                        "A visit that must not be approved (wrong patient / duplicate / test / consent withdrawn) — void with an audited reason")}>
@@ -527,6 +713,156 @@ export default function ReviewPage() {
             <span style={{ fontSize: 12.5, color: "#5c7096" }}>
               {L("الملخص متاح بلا إرشادات — المراجعة والاعتماد متاحان، وسجّلنا إشعاراً بذلك.",
                  "The summary is available without guidance — review and approval remain available, and a notification was logged.")}
+            </span>
+          </div>
+        ) : null}
+
+        {/* م17: لوحة سياق المريض — قابلة للطي، للقراءة فقط، الحساسيات بارزة */}
+        {summary.patient_context !== null ? (
+          <details className="card" style={{ marginTop: 12 }}
+                   open={summary.patient_context.allergies.length > 0}>
+            <summary style={{ cursor: "pointer", fontWeight: 700, fontSize: 14 }}>
+              {L("سياق المريض", "Patient context")}
+              {summary.patient_context.allergies.length > 0 ? (
+                <span className="badge danger" style={{ marginInlineStart: 8 }}>
+                  {L(`حساسيات: ${summary.patient_context.allergies.length}`,
+                     `Allergies: ${summary.patient_context.allergies.length}`)}
+                </span>
+              ) : null}
+              {summary.patient_context.context_unavailable ? (
+                <span className="badge" style={{ marginInlineStart: 8, background: "#eef2f7", color: "#5c7096" }}>
+                  {L("سجل المستشفى غير متاح", "Hospital record unavailable")}
+                </span>
+              ) : summary.patient_context.his_available ? (
+                <span className="badge success" style={{ marginInlineStart: 8 }}>
+                  {L("مُحدَّث من سجل المستشفى", "Synced from hospital record")}
+                </span>
+              ) : null}
+            </summary>
+            <div style={{ marginTop: 10, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
+              {summary.patient_context.allergies.length > 0 ? (
+                <div style={{ border: "1.5px solid var(--m-danger)", background: "var(--m-danger-bg)",
+                              borderRadius: 10, padding: "8px 12px" }}>
+                  <strong style={{ fontSize: 13, color: "var(--m-danger)" }}>{L("الحساسيات", "Allergies")}</strong>
+                  <ul style={{ margin: "4px 0 0", paddingInlineStart: 18, fontSize: 13 }}>
+                    {summary.patient_context.allergies.map((entry, index) => <li key={index}>{entry}</li>)}
+                  </ul>
+                </div>
+              ) : null}
+              {([["problems", L("المشاكل النشطة", "Active problems")],
+                 ["medications", L("الأدوية الحالية", "Current medications")]] as const).map(([key, title]) => {
+                const values = summary.patient_context?.[key] ?? [];
+                return (
+                  <div key={key} className="sub-box">
+                    <strong style={{ fontSize: 13 }}>{title}</strong>
+                    {values.length > 0 ? (
+                      <ul style={{ margin: "4px 0 0", paddingInlineStart: 18, fontSize: 13 }}>
+                        {values.map((entry, index) => <li key={index}>{entry}</li>)}
+                      </ul>
+                    ) : (
+                      <p style={{ margin: "4px 0 0", fontSize: 12.5, color: "#5c7096" }}>
+                        {L("— لا شيء مسجَّل —", "— nothing on record —")}
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            <p style={{ fontSize: 12, color: "#5c7096", margin: "8px 0 0" }}>
+              {L("للقراءة فقط — سياق من السجل لا يُدرج في المذكرة إلا إن ذُكر في المحادثة.",
+                 "Read-only — record context is not added to the note unless it was said in the conversation.")}
+            </p>
+          </details>
+        ) : null}
+
+        {/* م12: لوحة جاهزية المطالبة — تظهر عند وجود حجب/تحذير، مع واجهة الربط */}
+        {claim !== null && (claim.blocking_count > 0 || claim.warning_count > 0) ? (
+          <div className="card" style={{ marginTop: 12,
+                                         borderInlineStart: `4px solid ${claim.blocking_count > 0 ? "var(--m-danger)" : "var(--m-info)"}` }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <strong style={{ color: claim.blocking_count > 0 ? "var(--m-danger)" : "var(--m-info)" }}>
+                {claim.blocking_count > 0
+                  ? L(`جاهزية المطالبة: ${claim.blocking_count} بند حاجب`, `Claim readiness: ${claim.blocking_count} blocking finding(s)`)
+                  : L("جاهزية المطالبة: تنبيهات للمراجعة", "Claim readiness: advisory notes")}
+              </strong>
+              <span style={{ fontSize: 12, color: "#5c7096" }}>
+                {L("يُفحص تلقائياً مع كل تغيير في الأكواد (MDF-4237 يمنع الاعتماد حتى الحسم).",
+                   "Checked automatically on every code change (MDF-4237 blocks approval until resolved).")}
+              </span>
+            </div>
+            <ul style={{ margin: "8px 0 0", paddingInlineStart: 18, fontSize: 13 }}>
+              {claim.findings.filter((f) => f.severity !== "pass").map((finding, index) => (
+                <li key={`${finding.rule_id}-${index}`} style={{ marginBottom: 4 }}>
+                  <span className={`badge ${finding.severity === "block" ? "danger" : "warn"}`}
+                        style={{ marginInlineEnd: 6 }}>
+                    {finding.severity === "block" ? L("حاجب", "Block") : L("تنبيه", "Warn")}
+                  </span>
+                  {finding.message_ar}
+                  {finding.related_codes.length > 0 ? (
+                    <span style={{ color: "#5c7096" }}> — <bdi>{finding.related_codes.join(" · ")}</bdi></span>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+            {claim.unlinked_items.length > 0 && claim.diagnosis_options.length > 0 ? (
+              <div style={{ marginTop: 10, borderTop: "1px dashed #c7d1e0", paddingTop: 10 }}>
+                <div style={{ fontSize: 12.5, fontWeight: 700, color: "#5c7096", marginBottom: 6 }}>
+                  {L("اربط كل بند بالتشخيص الذي يبرره", "Link each item to the diagnosis that justifies it")}
+                </div>
+                {claim.unlinked_items.map((item) => (
+                  <div key={item.item_id} style={{ display: "flex", alignItems: "center", gap: 8,
+                                                   flexWrap: "wrap", marginBottom: 6 }}>
+                    <span style={{ flex: 1, fontSize: 13 }}>
+                      <bdi className="tech-badge">{item.code_system} {item.code_value}</bdi> {item.suggestion_text}
+                    </span>
+                    <select className="field" style={{ maxWidth: 320, marginBottom: 0 }}
+                      defaultValue={claim.diagnosis_options.length === 1
+                        ? (claim.diagnosis_options[0]?.code_value ?? "") : ""}
+                      onChange={(event) => { if (event.target.value) void linkDiagnosis(item.item_id, event.target.value); }}>
+                      <option value="">{L("— اختر التشخيص المبرِّر —", "— select justifying diagnosis —")}</option>
+                      {claim.diagnosis_options.map((option) => (
+                        <option key={option.item_id} value={option.code_value ?? ""}>
+                          {option.code_value} — {option.suggestion_text.slice(0, 60)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
+        {/* م11: شريط جودة الصوت — الدرجة الإجمالية دون العتبة الدنيا */}
+        {summary.stt_confidence.mean !== null
+          && summary.stt_confidence.mean < summary.stt_confidence.thresholds.low ? (
+          <div className="card" style={{ marginTop: 12, borderInlineStart: "4px solid var(--m-warn)",
+                                         background: "var(--m-warn-bg)", display: "flex", gap: 10,
+                                         alignItems: "center", flexWrap: "wrap" }}>
+            <strong style={{ color: "var(--m-warn)" }}>
+              {L("جودة الصوت منخفضة — راجع بعناية", "Low audio quality — review carefully")}
+            </strong>
+            <span style={{ fontSize: 12.5, color: "#5c7096", flex: 1 }}>
+              {L("متوسط ثقة التفريغ لهذه الزيارة دون العتبة. الجمل المبرزة أدناه هي الأقل ثقة — اسمع مصادرها قبل الاعتماد.",
+                 "Average transcription confidence for this visit is below the threshold. The highlighted sentences are the least confident — listen to their sources before approving.")}
+            </span>
+          </div>
+        ) : null}
+
+        {/* لافتة النسخة الجديدة (م6): reopen جارٍ — السابقة منقولة ومجمّدة */}
+        {summary.version > 1 && summary.state === "in_review" ? (
+          <div className="card" style={{ marginTop: 12, borderInlineStart: "4px solid var(--m-info)",
+                                         display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+            <span className="badge info">{L(`النسخة ${summary.version} قيد الإعداد`, `Version ${summary.version} in progress`)}</span>
+            <span style={{ fontSize: 12.5, color: "#5c7096", flex: 1 }}>
+              {L(`النسخة ${summary.version - 1} منقولة ومجمّدة لدى المستشفى — هذه النسخة تستبدلها بعد إعادة البوابتين (① بنقرة إن لم يتغيّر النص، و② كاملة).`,
+                 `Version ${summary.version - 1} is transferred and frozen at the hospital — this version replaces it after both gates (① one-click if the text is unchanged, ② in full).`)}
+              {(() => {
+                const current = summary.versions.find((row) => row.version_number === summary.version);
+                return current?.reopen_reason
+                  ? " " + L(`سبب الفتح: «${current.reopen_reason}»`, `Reopen reason: "${current.reopen_reason}"`)
+                  : "";
+              })()}
             </span>
           </div>
         ) : null}
@@ -591,9 +927,58 @@ export default function ReviewPage() {
                                                 "Short non-streaming path on the same P1 model — merged into the selected section (FR-706).")}
                   </p>
                 </div>
+              ) : section.evidence !== null && section.evidence.length > 0 ? (
+                // م10: عرض جملةً بجملة — نقرة الجملة المسنودة تشغّل مقطعها الصوتي (±1ث)
+                <p className="clinical" style={{ margin: "10px 0 0", lineHeight: 2.1 }}>
+                  {section.evidence.map((sentence, index) => {
+                    const hasAudio = sentence.audio_start_ms !== null && sentence.segment_ids.length > 0;
+                    const isActive = player !== null && player.sectionId === section.id && player.index === index;
+                    // م11: درجتان بصريتان — دون low إبراز قوي، وبينها وbين medium إبراز خفيف
+                    const conf = sentence.confidence;
+                    const thresholds = summary.stt_confidence.thresholds;
+                    const confClass = conf === null ? ""
+                      : conf < thresholds.low ? " conf-low"
+                      : conf < thresholds.medium ? " conf-medium" : "";
+                    return (
+                      <span key={index}
+                        className={`ev-sentence${hasAudio ? " has-audio" : ""}${isActive ? " active" : ""}${confClass}`}
+                        onClick={hasAudio ? () => playEvidence(section.id, index, sentence) : undefined}
+                        title={confClass !== ""
+                          ? L("ثقة تفريغ منخفضة — اسمع المصدر", "Low transcription confidence — listen to the source")
+                          : hasAudio
+                            ? L("اسمع المقطع المصدر من المحادثة (±1 ثانية سياق)", "Play the source segment from the conversation (±1s context)")
+                            : undefined}>
+                        {sentence.text}
+                        {hasAudio ? <span className="ev-icon" aria-hidden>🎧</span> : null}
+                        {!hasAudio && sentence.origin === "ai" ? (
+                          <span className="ev-tag">{L("بلا مصدر صوتي", "No audio source")}</span>
+                        ) : null}
+                        {sentence.origin === "doctor" ? (
+                          <span className="ev-tag doctor">{L("تحرير طبيب", "Clinician edit")}</span>
+                        ) : null}
+                        {" "}
+                      </span>
+                    );
+                  })}
+                </p>
               ) : (
                 <p className="clinical" style={{ margin: "10px 0 0", whiteSpace: "pre-wrap" }}>{section.content_current}</p>
               )}
+
+              {player !== null && player.sectionId === section.id ? (
+                <div className="ev-player">
+                  <span aria-hidden>🎧</span>
+                  <audio ref={audioRef} controls preload="metadata"
+                    src={`/api/v1/visits/${visitId}/audio?token=${encodeURIComponent(getToken() ?? "")}`}
+                    style={{ flex: 1, height: 34 }} />
+                  <span style={{ fontSize: 11.5, color: "#5c7096" }}>
+                    {L("المقطع المصدر مُبرز في نص المحادثة الكامل", "The source segment is highlighted in the full transcript")}
+                  </span>
+                  <button className="btn-row" onClick={() => { audioRef.current?.pause(); setPlayer(null); }}>
+                    {L("إغلاق", "Close")}
+                  </button>
+                </div>
+              ) : null}
 
               {section.guidance.length > 0 ? (
                 <div style={{ borderTop: "1px dashed #c7d1e0", marginTop: 12, paddingTop: 10 }}>
@@ -724,6 +1109,88 @@ export default function ReviewPage() {
           );
         })}
 
+        {/* م14: ملخص المريض بالعربي — بعد البوابة ① حصراً */}
+        {noteApproved && !voided ? (
+          <section className="card" style={{ marginTop: 14 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <strong style={{ fontSize: 16, flex: 1 }}>{L("ملخص المريض بالعربي", "Patient summary (Arabic)")}</strong>
+              {patientSummary === null ? (
+                <button className="btn-secondary" disabled={psBusy} onClick={() => void generatePatientSummary()}>
+                  {psBusy ? L("جارٍ التوليد…", "Generating…") : L("توليد ملخص المريض", "Generate patient summary")}
+                </button>
+              ) : (
+                <>
+                  {patientSummary.stale ? (
+                    <span className="badge warn">{L("تغيّر النص — أعد التوليد", "Note changed — regenerate")}</span>
+                  ) : null}
+                  <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13 }}>
+                    <input type="checkbox" checked={patientSummary.included}
+                      disabled={approvedLocked}
+                      onChange={(event) => void togglePatientSummaryInclusion(event.target.checked)} />
+                    {L("تضمينه في مخارج هذه النسخة", "Include it in this version's outputs")}
+                  </label>
+                  {!approvedLocked ? (
+                    <button className="btn-row" disabled={psBusy} onClick={() => void generatePatientSummary()}>
+                      {L("إعادة التوليد", "Regenerate")}
+                    </button>
+                  ) : null}
+                  <button className="btn-row" onClick={() => void downloadPatientSummaryPdf()}>
+                    {L("تنزيل PDF عربي", "Download Arabic PDF")}
+                  </button>
+                </>
+              )}
+            </div>
+            <p style={{ fontSize: 12.5, color: "#5c7096", margin: "6px 0 0" }}>
+              {L("يُولَّد من المذكرة المعتمدة حصراً — لا يضيف أي معلومة طبية جديدة. عاينه وعدّله قبل قرار التضمين.",
+                 "Generated strictly from the approved note — it adds no new medical information. Review and edit it before deciding on inclusion.")}
+            </p>
+            {patientSummary !== null ? (
+              <div style={{ marginTop: 10 }}>
+                {([
+                  ["diagnosis", L("التشخيص بلغة مفهومة", "Diagnosis in plain language")],
+                  ["medications", L("الأدوية وكيفية الاستخدام", "Medications and how to use them")],
+                  ["instructions", L("التعليمات", "Instructions")],
+                  ["follow_up", L("موعد المراجعة", "Follow-up appointment")],
+                  ["red_flags", L("علامات الخطر — الطوارئ", "Red flags — emergency")],
+                ] as [keyof PatientSummaryText, string][]).map(([field, title]) => (
+                  <div key={field} style={{ borderTop: "1px dashed #c7d1e0", padding: "8px 0" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <strong style={{ fontSize: 13, color: field === "red_flags" ? "var(--m-danger)" : "#005a55", flex: 1 }}>
+                        {title}
+                      </strong>
+                      {!approvedLocked && psEditing !== field ? (
+                        <button className="btn-row" onClick={() => {
+                          setPsEditing(field);
+                          setPsDraft(patientSummary.summary[field]);
+                        }}>{L("✏ تعديل", "✏ Edit")}</button>
+                      ) : null}
+                    </div>
+                    {psEditing === field ? (
+                      <div style={{ marginTop: 6 }}>
+                        <textarea className="field" rows={3} value={psDraft}
+                          onChange={(event) => setPsDraft(event.target.value)} />
+                        <div style={{ display: "flex", gap: 8 }}>
+                          <button className="btn-success" style={{ height: 34 }}
+                            onClick={() => void savePatientSummaryField(field, psDraft)}>
+                            {L("حفظ", "Save")}
+                          </button>
+                          <button className="btn-neutral" style={{ height: 34 }}
+                            onClick={() => setPsEditing(null)}>{L("إلغاء", "Cancel")}</button>
+                        </div>
+                      </div>
+                    ) : (
+                      <p style={{ margin: "4px 0 0", fontSize: 13.5, lineHeight: 1.9,
+                                  color: patientSummary.summary[field] ? "var(--m-ink)" : "#5c7096" }}>
+                        {patientSummary.summary[field] || L("— لا محتوى لهذا القسم في المذكرة —", "— no content for this section in the note —")}
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </section>
+        ) : null}
+
         {/* محادثة AI الختامية W-217 */}
         <section id="ai-chat" className="card" style={{ marginTop: 14 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -816,6 +1283,31 @@ export default function ReviewPage() {
               <button className="btn-secondary" onClick={() => router.push("/doctor/visits")}>{L("سجل الزيارات", "Visit log")}</button>
             </span>
           ) : null}
+          {/* زيارة معتمدة/منقولة محمّلة من جديد — قراءة فقط + مسار reopen (م6) */}
+          {upload.phase === "idle" && approvedLocked && summary !== null ? (
+            <span style={{ display: "flex", alignItems: "center", gap: 10, flex: 1, flexWrap: "wrap" }}>
+              <span className={`badge ${summary.state === "upload_failed" ? "danger" : "success"}`}>
+                {summary.state === "uploaded"
+                  ? L(`منقولة ✓ — النسخة ${summary.versions.filter(v => v.upload_status === "uploaded").length || 1}`,
+                      `Uploaded ✓ — version ${summary.versions.filter(v => v.upload_status === "uploaded").length || 1}`)
+                  : summary.state === "upload_failed"
+                    ? L("فشل الرفع — أعد المحاولة (نفس النسخة، بلا بوابات)", "Upload failed — retry (same version, no gates)")
+                    : L("معتمدة — بانتظار الرفع", "Approved — awaiting upload")}
+              </span>
+              <span style={{ flex: 1 }} />
+              {canExport ? <ExportButtons L={L} onPdf={() => void downloadPdf()} onCopy={() => void copyForEmr()} /> : null}
+              {summary.state === "upload_failed" ? (
+                <button className="btn" onClick={() => void retryUpload()}>{L("إعادة محاولة الرفع", "Retry upload")}</button>
+              ) : null}
+              {summary.state === "uploaded" ? (
+                <button className="btn-secondary" onClick={() => setReopenOpen(true)}
+                  title={L("تعديل بعد النقل؟ نسخة جديدة ببوابتين تستبدل السابقة لدى المستشفى (replace) — السابقة تبقى مجمّدة",
+                           "Editing after transfer? A new version with both gates replaces the previous one at the hospital — the old version stays frozen")}>
+                  {L("↺ إعادة فتح — نسخة جديدة", "↺ Reopen — new version")}
+                </button>
+              ) : null}
+            </span>
+          ) : null}
           {/* مؤشر البوابتين */}
           {upload.phase === "idle" && !locked ? (
             <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 700 }}>
@@ -833,14 +1325,19 @@ export default function ReviewPage() {
             <>
               <span style={{ fontSize: 12.5, color: summary.note_unlock !== null ? "#9c6f00" : "#5c7096", fontWeight: 700, flex: 1 }}>
                 {summary.note_unlock !== null
-                  ? L(`فُتحت المذكرة بعد نقض الاعتماد — السبب: «${summary.note_unlock.reason}». عدّل النص ثم أعد اعتماده (①). قرارات الأكواد السابقة محفوظة.`,
-                      `Note unlocked after revoking approval — reason: "${summary.note_unlock.reason}". Edit the text, then re-approve it (①). Previous code decisions are preserved.`)
+                  ? summary.note_unlock.text_unchanged
+                    ? L(`فُتحت المذكرة — السبب: «${summary.note_unlock.reason}». النص لم يتغيّر منذ الاعتماد المنقوض (البصمة مطابقة) — أعد الاعتماد بنقرة واحدة أو عدّل أولاً.`,
+                        `Note unlocked — reason: "${summary.note_unlock.reason}". The text is unchanged since the revoked approval (hash matches) — re-approve with one click, or edit first.`)
+                    : L(`فُتحت المذكرة بعد نقض الاعتماد — السبب: «${summary.note_unlock.reason}». النص تغيّر؛ راجعه ثم أعد اعتماده (①). قرارات الأكواد السابقة محفوظة.`,
+                        `Note unlocked after revoking approval — reason: "${summary.note_unlock.reason}". The text changed; review it, then re-approve (①). Previous code decisions are preserved.`)
                   : L("راجع نص المذكرة ثم اعتمده (البوابة ①). بعدها يتجمّد النص ويُفتح حسم الأكواد.",
                       "Review the note text, then approve it (gate ①). The text then freezes and code resolution opens.")}
               </span>
               <button className="btn-success btn-approve" onClick={() => void approveNote()}>
                 {summary.note_unlock !== null
-                  ? L("① إعادة اعتماد النص", "① Re-approve note")
+                  ? summary.note_unlock.text_unchanged
+                    ? L("① إعادة الاعتماد — النص لم يتغيّر", "① Re-approve — text unchanged")
+                    : L("① إعادة اعتماد النص", "① Re-approve note")
                   : L("① اعتماد نص المذكرة", "① Approve note")}
               </button>
             </>
@@ -848,15 +1345,18 @@ export default function ReviewPage() {
           {/* البوابة ② — اعتماد الأكواد ثم الرفع */}
           {upload.phase === "idle" && !locked && noteApproved ? (
             <>
-              <span style={{ fontSize: 12.5, color: counters.pending === 0 && awaitingInput === 0 ? "#12a594" : "#9c6f00", fontWeight: 700, flex: 1 }}>
+              <span style={{ fontSize: 12.5, color: counters.pending === 0 && awaitingInput === 0 && claimBlocked === 0 ? "#12a594" : "#9c6f00", fontWeight: 700, flex: 1 }}>
                 {counters.pending > 0
                   ? L(`${counters.pending} إرشادات معلقة — احسمها قبل اعتماد الأكواد (MDF-4222)`,
                       `${counters.pending} pending guidance items — resolve them before code approval (MDF-4222)`)
                   : awaitingInput > 0
                     ? L(`${awaitingInput} كود محجوب يتطلب إدخال الطبيب — لا تخمين`,
                         `${awaitingInput} withheld code(s) require clinician input — no guessing`)
-                    : L("جاهزة لاعتماد الأكواد · بالاعتماد تُرفع الزيارة FHIR/NPHIES ويُتاح التصدير (FR-802)",
-                        "Ready for code approval · Approval uploads the visit (FHIR/NPHIES) and unlocks export (FR-802)")}
+                    : claimBlocked > 0
+                      ? L(`${claimBlocked} بند حاجب في جاهزية المطالبة — احسمها أعلاه (MDF-4237)`,
+                          `${claimBlocked} blocking claim-readiness finding(s) — resolve them above (MDF-4237)`)
+                      : L("جاهزة لاعتماد الأكواد · بالاعتماد تُرفع الزيارة FHIR/NPHIES ويُتاح التصدير (FR-802)",
+                          "Ready for code approval · Approval uploads the visit (FHIR/NPHIES) and unlocks export (FR-802)")}
               </span>
               {/* مسار Unlock: متاح فقط في مرحلة ② قبل إتمامها — بعد الاعتماد النهائي المسار Addendum */}
               <button className="btn-secondary" onClick={() => setUnlockOpen(true)}
@@ -864,7 +1364,9 @@ export default function ReviewPage() {
                          "A code needs a detail the frozen text lacks (laterality, with/without complications…)? Unlock with an audited reason")}>
                 {L("🔓 فتح المذكرة", "🔓 Unlock note")}
               </button>
-              <button className="btn-success btn-approve" disabled={counters.pending > 0 || awaitingInput > 0} onClick={() => void approve()}>
+              <button className="btn-success btn-approve"
+                disabled={counters.pending > 0 || awaitingInput > 0 || claimBlocked > 0}
+                onClick={() => void approve()}>
                 {L("② اعتماد الأكواد والرفع", "② Approve codes & upload")}
               </button>
             </>
@@ -934,7 +1436,9 @@ export default function ReviewPage() {
                   </span>
                 </div>
               ) : transcript.map((segment) => (
-                <div key={segment.id} style={{ marginBottom: 10, fontSize: 14, lineHeight: 1.9 }}>
+                <div key={segment.id}
+                  className={player !== null && player.segmentIds.includes(segment.id) ? "tr-highlight" : undefined}
+                  style={{ marginBottom: 10, fontSize: 14, lineHeight: 1.9 }}>
                   <SpeakerBadge speaker={segment.speaker} confidence={segment.speaker_confidence} />{" "}
                   <bdi className="tech-badge">{segment.t0.toFixed(0)}s</bdi> {segment.text}
                 </div>
@@ -995,6 +1499,56 @@ export default function ReviewPage() {
               {unlockBusy ? L("جارٍ الفتح…", "Unlocking…") : L("🔓 فتح المذكرة وإلغاء اعتماد ①", "🔓 Unlock note & revoke gate ①")}
             </button>
             <button className="btn-neutral" onClick={() => setUnlockOpen(false)}>{L("تراجع", "Back")}</button>
+          </div>
+        </Modal>
+      ) : null}
+
+      {/* مودال رفض المتبقي (م13) — يعرض القائمة قبل التأكيد */}
+      {rejectAllOpen && summary !== null ? (
+        <Modal title={L(`رفض كل الإرشادات المعلّقة (${counters.pending})`, `Reject all pending guidance (${counters.pending})`)}
+               onClose={() => setRejectAllOpen(false)} wide>
+          <p style={{ fontSize: 14, color: "#5c7096", marginTop: 0 }}>
+            {L("سيُرفض كل بند من القائمة أدناه، ويُسجَّل قرار الرفض لكل بند منفرداً في سجل التدقيق (بمعرّف دفعة مشترك). الرفض قرار سريري مسجَّل — لا حذف للاقتراح.",
+               "Every item below will be rejected, and each rejection is recorded individually in the audit log (sharing one bulk action id). Rejection is a recorded clinical decision — the suggestion is not deleted.")}
+          </p>
+          <div style={{ maxHeight: 300, overflowY: "auto", border: "1px solid #c7d1e0", borderRadius: 10, padding: 10 }}>
+            {allGuidance.filter((item) => item.status === "pending").map((item) => (
+              <div key={item.id} style={{ fontSize: 13, padding: "6px 0", borderBottom: "1px dashed #eef2f7" }}>
+                <span className="badge" style={{ background: KIND_META[item.kind].bg, color: KIND_META[item.kind].fg, marginInlineEnd: 6 }}>
+                  {L(KIND_META[item.kind].label.ar, KIND_META[item.kind].label.en)}
+                </span>
+                {item.suggestion_text}
+                {item.code_value ? <bdi className="tech-badge" style={{ marginInlineStart: 6 }}>{item.code_system} {item.code_value}</bdi> : null}
+              </div>
+            ))}
+          </div>
+          <div className="modal-actions">
+            <button className="btn-danger" disabled={rejectAllBusy} onClick={() => void rejectRemaining()}>
+              {rejectAllBusy ? L("جارٍ الرفض…", "Rejecting…") : L(`تأكيد رفض ${counters.pending}`, `Confirm rejecting ${counters.pending}`)}
+            </button>
+            <button className="btn-neutral" onClick={() => setRejectAllOpen(false)}>{L("تراجع", "Back")}</button>
+          </div>
+        </Modal>
+      ) : null}
+
+      {/* مودال إعادة الفتح (م6) — نسخة جديدة ببوابتين تستبدل المنقولة */}
+      {reopenOpen ? (
+        <Modal title={L("إعادة فتح — نسخة جديدة تستبدل المنقولة", "Reopen — a new version replacing the transferred one")} onClose={() => setReopenOpen(false)}>
+          <p style={{ fontSize: 14, color: "#5c7096", marginTop: 0 }}>
+            {L("التحرير حصراً داخل Medify: تُفتح نسخة جديدة تنسخ الأخيرة، تعدّلها ثم تعيد البوابتين (① بنقرة إن لم يتغيّر النص، و② كاملة)، فتُنقل بدلالة استبدال (replace) تستهدف وثيقة Medify السابقة حصراً. النسخة المنقولة تبقى مجمّدة حرفياً لدى الطرفين. عطل تقني في الرفع؟ استخدم «إعادة محاولة الرفع» لا إعادة الفتح.",
+               "Editing happens only inside Medify: a new version copies the last one; you edit it, redo both gates (① one-click if the text is unchanged, ② in full), and it transfers with replace semantics targeting the previous Medify document only. The transferred version stays frozen verbatim on both sides. Technical upload failure? Use “Retry upload”, not reopen.")}
+          </p>
+          <label className="field-label" style={{ fontSize: 12.5 }}>
+            {L("سبب إعادة الفتح — إلزامي، يُخزَّن مع النسخة الجديدة", "Reopen reason — required, stored with the new version")}
+          </label>
+          <textarea className="field" rows={3} maxLength={2000} value={reopenReason}
+            onChange={(event) => setReopenReason(event.target.value)}
+            placeholder={L("مثال: وصلت نتيجة مختبر تغيّر التقييم والخطة", "e.g., a lab result arrived that changes the assessment and plan")} />
+          <div className="modal-actions">
+            <button className="btn" disabled={reopenBusy || reopenReason.trim().length === 0} onClick={() => void reopenVisit()}>
+              {reopenBusy ? L("جارٍ الفتح…", "Reopening…") : L("↺ فتح نسخة جديدة", "↺ Open a new version")}
+            </button>
+            <button className="btn-neutral" onClick={() => setReopenOpen(false)}>{L("تراجع", "Back")}</button>
           </div>
         </Modal>
       ) : null}

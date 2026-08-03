@@ -169,12 +169,57 @@ def test_reapprove_creates_new_gate1_then_gate2_passes(client, journey):
 
 
 def test_unlock_after_gate2_rejected_use_addendum(client, journey):
-    """بعد الاعتماد النهائي لا Unlock أبداً — المسار Addendum (MDF-4223)."""
+    """بعد الاعتماد النهائي لا Unlock أبداً — المسار Addendum (MDF-4236 المخصص — م5)."""
     response = client.post(f"/api/v1/visits/{journey['visit_id']}/note-unlock",
                            headers=journey["headers"],
                            json={"reason": "محاولة بعد الاعتماد النهائي"})
     assert response.status_code == 409
-    assert response.json()["error"]["code"] == "MDF-4223"
+    assert response.json()["error"]["code"] == "MDF-4236"
+
+
+def test_hash_compare_one_click_reapprove(client, doctor_token):
+    """م5: نقض بلا تعديل → text_unchanged=true وإعادة الاعتماد بنفس البصمة؛
+    وبعد تعديل فعلي → text_unchanged=false وبصمة جديدة."""
+    headers = auth(doctor_token)
+    patients = client.get("/api/v1/patients", headers=headers, params={"query": "العتيبي"}).json()["data"]
+    templates = client.get("/api/v1/templates", headers=headers).json()["data"]
+    created = client.post("/api/v1/visits", headers=headers,
+                          json={"patient_id": patients[0]["id"], "template_id": templates[0]["id"]})
+    assert created.status_code == 201, created.text
+    visit_id = created.json()["data"]["id"]
+    record_consent(client, visit_id, headers)
+    assert client.post(f"/api/v1/visits/{visit_id}/recording/start", headers=headers).status_code == 200
+    assert client.post(f"/api/v1/visits/{visit_id}/recording/stop", headers=headers,
+                       json={"duration_sec": 30}).status_code == 200
+
+    first = client.post(f"/api/v1/visits/{visit_id}/note-approve", headers=headers)
+    assert first.status_code == 200, first.text
+    first_hash = first.json()["data"]["summary_hash"]
+
+    # نقض بلا أي تعديل — CDI اكتشف أن التعديل غير لازم مثلاً
+    assert client.post(f"/api/v1/visits/{visit_id}/note-unlock", headers=headers,
+                       json={"reason": "مراجعة إضافية"}).status_code == 200
+    summary = client.get(f"/api/v1/visits/{visit_id}/summary", headers=headers).json()["data"]
+    assert summary["note_unlock"]["text_unchanged"] is True, "النص لم يتغيّر → إعادة اعتماد بنقرة"
+
+    reapproved = client.post(f"/api/v1/visits/{visit_id}/note-approve", headers=headers)
+    assert reapproved.status_code == 200
+    assert reapproved.json()["data"]["summary_hash"] == first_hash, "بصمة النص نفسها"
+
+    # نقض ثانٍ ثم تعديل فعلي → الواجهة تعرف أن النص تغيّر
+    assert client.post(f"/api/v1/visits/{visit_id}/note-unlock", headers=headers,
+                       json={"reason": "الكود يتطلب جهة الإصابة"}).status_code == 200
+    summary = client.get(f"/api/v1/visits/{visit_id}/summary", headers=headers).json()["data"]
+    section = summary["sections"][0]
+    edited = client.patch(f"/api/v1/summary-sections/{section['id']}",
+                          headers={**headers, "If-Match": summary["etag"]},
+                          json={"content_current": section["content_current"] + " الجهة اليمنى."})
+    assert edited.status_code == 200, edited.text
+    summary = client.get(f"/api/v1/visits/{visit_id}/summary", headers=headers).json()["data"]
+    assert summary["note_unlock"]["text_unchanged"] is False
+    changed = client.post(f"/api/v1/visits/{visit_id}/note-approve", headers=headers)
+    assert changed.status_code == 200
+    assert changed.json()["data"]["summary_hash"] != first_hash
 
 
 def test_unlock_trail_in_db_and_append_only(owner_engine, journey):
