@@ -206,6 +206,8 @@ class SummarySection(Base, TimestampMixin):
     position: Mapped[int] = mapped_column(Integer, nullable=False)
     content_current: Mapped[str] = mapped_column(EncryptedText, nullable=False)
     content_original: Mapped[str] = mapped_column(EncryptedText, nullable=False)
+    # م10: السند جملةً بجملة — [{text, segment_ids, audio_start_ms, audio_end_ms, origin}]
+    evidence_json: Mapped[Any | None] = mapped_column(EncryptedJSON, nullable=True)
 
 
 class GuidanceItem(Base, TimestampMixin):

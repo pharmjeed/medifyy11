@@ -10,7 +10,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, api, apiWithHeaders, getToken } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
 import type {
-  ChatPatch, CodeSearchResult, GuidanceItem, SummarySection, TranscriptSegment, UploadStatus, VisitSummary,
+  ChatPatch, CodeSearchResult, EvidenceSentence, GuidanceItem, SummarySection, TranscriptSegment,
+  UploadStatus, VisitSummary,
 } from "@/lib/types";
 import { ProgressBar7 } from "@/components/ProgressBar7";
 import { Shell } from "@/components/Shell";
@@ -115,6 +116,11 @@ export default function ReviewPage() {
   const [reopenOpen, setReopenOpen] = useState(false);
   const [reopenReason, setReopenReason] = useState("");
   const [reopenBusy, setReopenBusy] = useState(false);
+  // مشغّل السند (م10): نقرة جملة → مقطعها الصوتي بسياق ±1ث + إبراز مقطع التفريغ
+  const [player, setPlayer] = useState<{
+    sectionId: string; index: number; startMs: number; endMs: number; segmentIds: string[];
+  } | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
   const chatRef = useRef<HTMLDivElement | null>(null);
   const dictTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -461,6 +467,29 @@ export default function ReviewPage() {
     }
   };
 
+  // م10: تشغيل سند جملة — بسياق ثانية قبل البداية وثانية بعد النهاية
+  const playEvidence = (sectionId: string, index: number, sentence: EvidenceSentence) => {
+    if (sentence.audio_start_ms === null || sentence.audio_end_ms === null) return;
+    setPlayer({
+      sectionId, index,
+      startMs: sentence.audio_start_ms,
+      endMs: sentence.audio_end_ms,
+      segmentIds: sentence.segment_ids,
+    });
+  };
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (audio === null || player === null) return;
+    const start = Math.max(0, player.startMs / 1000 - 1);
+    const end = player.endMs / 1000 + 1;
+    const stopAtEnd = () => { if (audio.currentTime >= end) audio.pause(); };
+    audio.currentTime = start;
+    void audio.play().catch(() => undefined); // حظر التشغيل التلقائي — يضغط الدكتور تشغيل يدوياً
+    audio.addEventListener("timeupdate", stopAtEnd);
+    return () => audio.removeEventListener("timeupdate", stopAtEnd);
+  }, [player]);
+
   const retryUpload = async () => {
     setUpload({ phase: "uploading" });
     try {
@@ -639,9 +668,50 @@ export default function ReviewPage() {
                                                 "Short non-streaming path on the same P1 model — merged into the selected section (FR-706).")}
                   </p>
                 </div>
+              ) : section.evidence !== null && section.evidence.length > 0 ? (
+                // م10: عرض جملةً بجملة — نقرة الجملة المسنودة تشغّل مقطعها الصوتي (±1ث)
+                <p className="clinical" style={{ margin: "10px 0 0", lineHeight: 2.1 }}>
+                  {section.evidence.map((sentence, index) => {
+                    const hasAudio = sentence.audio_start_ms !== null && sentence.segment_ids.length > 0;
+                    const isActive = player !== null && player.sectionId === section.id && player.index === index;
+                    return (
+                      <span key={index}
+                        className={`ev-sentence${hasAudio ? " has-audio" : ""}${isActive ? " active" : ""}`}
+                        onClick={hasAudio ? () => playEvidence(section.id, index, sentence) : undefined}
+                        title={hasAudio
+                          ? L("اسمع المقطع المصدر من المحادثة (±1 ثانية سياق)", "Play the source segment from the conversation (±1s context)")
+                          : undefined}>
+                        {sentence.text}
+                        {hasAudio ? <span className="ev-icon" aria-hidden>🎧</span> : null}
+                        {!hasAudio && sentence.origin === "ai" ? (
+                          <span className="ev-tag">{L("بلا مصدر صوتي", "No audio source")}</span>
+                        ) : null}
+                        {sentence.origin === "doctor" ? (
+                          <span className="ev-tag doctor">{L("تحرير طبيب", "Clinician edit")}</span>
+                        ) : null}
+                        {" "}
+                      </span>
+                    );
+                  })}
+                </p>
               ) : (
                 <p className="clinical" style={{ margin: "10px 0 0", whiteSpace: "pre-wrap" }}>{section.content_current}</p>
               )}
+
+              {player !== null && player.sectionId === section.id ? (
+                <div className="ev-player">
+                  <span aria-hidden>🎧</span>
+                  <audio ref={audioRef} controls preload="metadata"
+                    src={`/api/v1/visits/${visitId}/audio?token=${encodeURIComponent(getToken() ?? "")}`}
+                    style={{ flex: 1, height: 34 }} />
+                  <span style={{ fontSize: 11.5, color: "#5c7096" }}>
+                    {L("المقطع المصدر مُبرز في نص المحادثة الكامل", "The source segment is highlighted in the full transcript")}
+                  </span>
+                  <button className="btn-row" onClick={() => { audioRef.current?.pause(); setPlayer(null); }}>
+                    {L("إغلاق", "Close")}
+                  </button>
+                </div>
+              ) : null}
 
               {section.guidance.length > 0 ? (
                 <div style={{ borderTop: "1px dashed #c7d1e0", marginTop: 12, paddingTop: 10 }}>
@@ -1012,7 +1082,9 @@ export default function ReviewPage() {
                   </span>
                 </div>
               ) : transcript.map((segment) => (
-                <div key={segment.id} style={{ marginBottom: 10, fontSize: 14, lineHeight: 1.9 }}>
+                <div key={segment.id}
+                  className={player !== null && player.segmentIds.includes(segment.id) ? "tr-highlight" : undefined}
+                  style={{ marginBottom: 10, fontSize: 14, lineHeight: 1.9 }}>
                   <SpeakerBadge speaker={segment.speaker} confidence={segment.speaker_confidence} />{" "}
                   <bdi className="tech-badge">{segment.t0.toFixed(0)}s</bdi> {segment.text}
                 </div>

@@ -203,12 +203,33 @@ class MockLLMEngine(LLMEngine):
         return {"sections": out}
 
     def _verify(self, variables: dict[str, Any]) -> dict[str, Any]:
-        """تمريرة السند تجريبياً: أقسام العيّنة مبنية لتطابق حوار العرض — تمر كما هي."""
+        """تمريرة السند تجريبياً (عقد 1.1): الأقسام تمر كما هي + ربط حتمي جملة→مقطع.
+
+        كل جملة تأخذ المقطع التالي بعدّاد متصاعد؛ ما جاوز عدد المقاطع → بلا مصدر
+        صوتي ([]) — يُظهر وسم «بلا مصدر صوتي» في الواجهة حتمياً (م10).
+        """
+        from ..services.evidence import split_sentences
+
         sections = variables.get("sections") or []
-        return {"sections": [
-            {"section_key": section.get("section_key"), "content": section.get("content", "")}
-            for section in sections if isinstance(section, dict)
-        ]}
+        segments = variables.get("segments") or []
+        counter = 0
+        out: list[dict[str, Any]] = []
+        for section in sections:
+            if not isinstance(section, dict):
+                continue
+            content = str(section.get("content", ""))
+            sentences: list[dict[str, Any]] = []
+            for sentence in split_sentences(content):
+                ids: list[str] = []
+                if counter < len(segments):
+                    sid = segments[counter].get("id") if isinstance(segments[counter], dict) else None
+                    if sid:
+                        ids = [str(sid)]
+                counter += 1
+                sentences.append({"text": sentence, "segment_ids": ids})
+            out.append({"section_key": section.get("section_key"), "content": content,
+                        "sentences": sentences})
+        return {"sections": out}
 
     def _guidance(self, variables: dict[str, Any]) -> dict[str, Any]:
         """عيّنة P3 v1.1 — بنود خطة مهيكلة بكودها ومبررها ودرجة ثقتها.

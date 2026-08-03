@@ -27,6 +27,7 @@ from ...models import (
 from ...pipelines.run import run_edit_chat
 from ...pipelines.stt import get_stt
 from ...services.code_registry import check_code, registry_systems
+from ...services.evidence import refresh_section_evidence
 from ...services.history import previous_visits
 from ...services.visits import active_note_approval, get_visit_for_doctor, summary_etag, summary_hashes
 
@@ -106,6 +107,8 @@ def get_summary(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB, response: Response
             "content_current": section.content_current,
             "content_original": section.content_original,
             "is_edited": section.content_current != section.content_original,
+            # م10: السند جملةً بجملة — الواجهة ترسم منه المشغّل والوسوم
+            "evidence": section.evidence_json,
             "guidance": [
                 {
                     "id": str(item.id),
@@ -239,6 +242,29 @@ def get_summary(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB, response: Response
     })
 
 
+@router.get("/visits/{visit_id}/evidence")
+def get_evidence(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB):
+    """السند المرتبط كاملاً (م10) — لكل قسم: جمله بمقاطعها وأزمنتها ووسومها."""
+    visit = get_visit_for_doctor(db, visit_id)
+    summary = _get_summary(db, visit)
+    sections = db.execute(
+        select(SummarySection)
+        .where(SummarySection.summary_id == summary.id)
+        .order_by(SummarySection.position)
+    ).scalars().all()
+    return ok({
+        "visit_id": str(visit.id),
+        "sections": [
+            {
+                "section_id": str(section.id),
+                "section_key": section.section_key,
+                "sentences": section.evidence_json or [],
+            }
+            for section in sections
+        ],
+    })
+
+
 class SectionPatchIn(BaseModel):
     content_current: str = Field(min_length=1)
 
@@ -256,6 +282,7 @@ def patch_section(section_id: uuid.UUID, body: SectionPatchIn, ctx: DoctorAuth, 
 
     old_content = section.content_current
     section.content_current = body.content_current
+    refresh_section_evidence(section)  # م10: الجملة المعدَّلة/الجديدة → وسم «تحرير طبيب»
     db.add(EditEvent(
         visit_id=visit.id,
         section_id=section.id,
@@ -295,6 +322,7 @@ def dictate_section(section_id: uuid.UUID, body: DictateIn, ctx: DoctorAuth, db:
         section.content_current = dictated_text
     else:
         section.content_current = (old_content.rstrip() + " " + dictated_text).strip()
+    refresh_section_evidence(section)  # م10
     db.add(EditEvent(
         visit_id=visit.id,
         section_id=section.id,

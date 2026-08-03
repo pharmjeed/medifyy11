@@ -224,6 +224,17 @@ export interface SummarySection {
   content_original: string;
   is_edited: boolean;
   guidance: GuidanceItem[];
+  /** م10: السند جملةً بجملة — null لملخصات ما قبل الميزة أو عند تعذّر التحقق */
+  evidence: EvidenceSentence[] | null;
+}
+
+/** م10: جملة مذكرة بسندها الصوتي/التفريغي */
+export interface EvidenceSentence {
+  text: string;
+  segment_ids: string[];
+  audio_start_ms: number | null;
+  audio_end_ms: number | null;
+  origin: "ai" | "doctor";
 }
 
 export interface ApprovalRecord {

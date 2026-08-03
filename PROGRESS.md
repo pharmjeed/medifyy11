@@ -16,7 +16,7 @@
 | 7 | Idempotency واعٍ بالنسخة | ✅ أُنجزت | هجرة 0015: `upload_jobs.idempotency_key` فريد ("{visit}:{version}" — backfill للقائم) + جدول `delivery_receipts` (فريد على مفتاح+وجهة) · الفحص قبل أي إرسال: إيصال قائم = نجاح مُعاد بلا إرسال (مُثبت باختبار «وجهة فاشلة + إيصال مزروع → نجاح») · الإيصال يُكتب فور الاستقبال بجلسة نظام · ifNoneExist وMSH-10 من م6 يكملان الدفاع بالطرف البعيد · 4 اختبارات (168 passed) |
 | 8 | سياسة الاحتفاظ الموحّدة | ✅ أُنجزت | هجرة 0016: `retention_policies` لكل منشأة (الافتراضات: audio/transcript 90 · وسيطة 30 · ai_chat 90 · نسخ منقولة 365 · تدقيق 3650 · مجمّعة بلا حذف) + `visits.legal_hold` + `transcripts.deleted_at` + صمام `medify.retention='purge'` في triggers الإلحاقية · كنس موحّد soft→hard بسماح 7 أيام مع Audit (نوع+عدد بلا محتوى) · المُبطلة على الأقصر · نقاط GET/PATCH `/settings/retention` + `/admin/retention-status` + `POST /visits/{id}/legal-hold` · cron ليلي في العامل + توافق خلفي للسكربت · `docs/retention-policy.md` · 4 اختبارات جديدة + تحديث القديم (172 passed) |
 | 9 | أرشفة FLAC | ✅ أُنجزت | `services/audio_archive.py`: WAV→FLAC بعد P1 بتحقق إلزامي (بصمة عينات PCM المفكوكة تُطابق الأصل قبل أي حذف؛ فشل = WAV باقٍ + إنذار Audit) · ffmpeg في صورة الباك اند · مربوطة بخط المعالجة خلف `FLAC_ARCHIVE=auto` (off في الاختبارات — حماية bit-exact التدفق) · سكربت دفعات ليلية `archive_flac_backfill.py` للأرشيف القائم · اختباران بترميز حقيقي (174 passed) |
-| 10 | إظهار السند | ⬜ لم تبدأ | تغيير عقد P2-verify ليُنتج evidence بدل الحذف الصامت + مشغّل صوت |
+| 10 | إظهار السند | ✅ أُنجزت | P2-verify@1.1: الحذف يبقى + الربط جملة↔مقاطع يُعاد ويُحفظ (كان يُرمى) · التخزين JSONB مشفّر مضمّن `summary_sections.evidence_json` (هجرة 0017 — المبرَّر: يُقرأ دائماً مع قسمه، لا استعلام عبر الزيارات) · أزمنة ms من P1 حرفياً · تعديل يدوي (كتابة/إملاء/AI chat) → `refresh_section_evidence` يوسم الجديد «تحرير طبيب» · GET `/visits/{id}/evidence` + `/visits/{id}/audio` بـ HTTP Range وtoken (وسم audio لا يحمل ترويسات) · واجهة: جمل قابلة للنقر 🎧 + مشغّل مضمّن ±1ث + إبراز مقطع التفريغ + وسما «بلا مصدر صوتي»/«تحرير طبيب» · 3 اختبارات (177 passed) |
 | 11 | إبراز الثقة المنخفضة | ⬜ لم تبدأ | التقاط avg_logprob/no_speech_prob (whisper) + عتبات قابلة للضبط |
 | 12 | محرك جاهزية المطالبة | ⬜ لم تبدأ | rules/ YAML + ربط الضرورة الطبية + NPHIES MDS + كود MDF جديد |
 | 13 | رفض المتبقي دفعة واحدة | ⬜ لم تبدأ | bulk_action_id في Audit |
@@ -37,6 +37,7 @@
 | 0014_note_versions | 6 | `note_versions` + trigger تجميد المنقولة + عمود cycle (visits/note_approvals/approvals) + approvals فريد (visit,cycle) + upload_jobs→approval_id + إعادة تعريف ثلاث دوال 0010 بوعي الدورة | يعيد دوال 0010 ويسقط note_versions؛ أعمدة cycle تبقى (بيانات) |
 | 0015_idempotency_receipts | 7 | `upload_jobs.idempotency_key` فريد + backfill + جدول `delivery_receipts` بقيد (مفتاح، وجهة) | يسقط الجدول والعمود والقيد |
 | 0016_retention_unified | 8 | `retention_policies` + `visits.legal_hold` + `transcripts.deleted_at` + صمام retention في `forbid_mutation` (audit_logs حصراً) و`forbid_uploaded_version_mutation` | يعيد الدوال الصارمة ويسقط الجدول والأعمدة |
+| 0017_evidence_links | 10 | `summary_sections.evidence_json` (نص مشفّر تطبيقياً — سند الجمل) | يسقط العمود |
 
 ## أكواد MDF الجديدة
 

@@ -6,7 +6,7 @@ import uuid
 from pathlib import Path
 from typing import Literal
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request, Response
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -489,6 +489,77 @@ def reopen_visit(visit_id: uuid.UUID, body: ReopenIn, ctx: DoctorAuth, db: DB):
     audit(db, ctx.facility_id, "visit.reopened", "visit", visit.id, ctx.user_id,
           {"new_version": draft.version_number, "draft_version_id": str(draft.id)})
     return ok({"state": visit.state, "version": draft.version_number})
+
+
+# ===== تشغيل الصوت للسند (م10) — HTTP Range + مصادقة عبر ?token= (وسم <audio> لا يحمل ترويسات) =====
+
+_AUDIO_MEDIA = {".wav": "audio/wav", ".flac": "audio/flac"}
+
+
+@router.get("/visits/{visit_id}/audio")
+def visit_audio(visit_id: uuid.UUID, request: Request, token: str = ""):
+    """بث ملف صوت الزيارة بدعم Range — للقفز الدقيق (±1ث) في مشغّل السند.
+
+    المصادقة كقناة WS: access token في الاستعلام (المتصفح لا يمرر Authorization
+    لوسم audio). RLS يضمن أن الدكتور لا يصل غير زياراته (MDF-4041 بلا كشف وجود).
+    """
+    from ...db import rls_session
+    from ...security import decode_token
+
+    try:
+        payload = decode_token(token, "access")
+    except Exception:
+        raise MedifyError("MDF-4012")
+    if payload.get("role") != "doctor":
+        raise MedifyError("MDF-4031")
+
+    with rls_session(payload["facility_id"], payload["sub"], "doctor") as adb:
+        visit = adb.execute(select(Visit).where(Visit.id == visit_id)).scalar_one_or_none()
+        if visit is None:
+            raise MedifyError("MDF-4041")
+        recording = adb.execute(
+            select(Recording).where(Recording.visit_id == visit_id)
+        ).scalar_one_or_none()
+        if recording is None or recording.deleted_at is not None:
+            raise MedifyError("MDF-4041")
+        storage_uri = recording.storage_uri
+
+    path = Path(storage_uri)
+    if not path.exists():
+        raise MedifyError("MDF-4041")
+    media_type = _AUDIO_MEDIA.get(path.suffix.lower(), "application/octet-stream")
+    file_size = path.stat().st_size
+
+    range_header = request.headers.get("Range", "")
+    if range_header.startswith("bytes="):
+        try:
+            start_s, _, end_s = range_header[6:].partition("-")
+            start = int(start_s) if start_s else 0
+            end = int(end_s) if end_s else file_size - 1
+        except ValueError:
+            start, end = 0, file_size - 1
+        end = min(end, file_size - 1)
+        if start > end or start >= file_size:
+            return Response(status_code=416, headers={"Content-Range": f"bytes */{file_size}"})
+        with path.open("rb") as handle:
+            handle.seek(start)
+            chunk = handle.read(end - start + 1)
+        return Response(
+            content=chunk,
+            status_code=206,
+            media_type=media_type,
+            headers={
+                "Content-Range": f"bytes {start}-{end}/{file_size}",
+                "Accept-Ranges": "bytes",
+                "Content-Length": str(len(chunk)),
+            },
+        )
+
+    return Response(
+        content=path.read_bytes(),
+        media_type=media_type,
+        headers={"Accept-Ranges": "bytes", "Content-Length": str(file_size)},
+    )
 
 
 @router.get("/visits/{visit_id}/transcript")
