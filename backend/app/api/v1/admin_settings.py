@@ -29,11 +29,20 @@ from ...models import (
     Visit,
 )
 from ...services.metrics import metrics_summary
+from ...services.pending_queue import pending_report
 from ...services.retention import DEFAULTS as RETENTION_DEFAULTS
 from ...services.retention import effective_policies, retention_status
 from ...services.uploader import process_upload_job
 
 router = APIRouter()
+
+
+# ===== تقرير المذكرات المعلّقة للمدير الطبي (م16) =====
+
+@router.get("/admin/pending-report")
+def admin_pending_report(ctx: AdminAuth, db: DB):
+    """لكل طبيب: العدد ومتوسط العمر والأقدم — أعداد فقط بلا أي محتوى سريري."""
+    return ok(pending_report(db, ctx.facility_id))
 
 
 # ===== لوحة المقاييس المجمّعة (م15) =====

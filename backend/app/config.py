@@ -54,6 +54,9 @@ class Settings(BaseSettings):
     # المرحلة 9 — أرشفة FLAC بعد P1: auto = مفعّلة عند توفر ffmpeg | off
     flac_archive: str = "auto"
 
+    # المرحلة 16 — ساعة التذكير اليومي بطابور «بانتظارك» (UTC، قابلة للضبط)
+    pending_reminder_hour: int = 5
+
     # حصر المعدل (DOC-05 §١) — طلب/دقيقة
     rate_limit_default: int = 240
     rate_limit_ai: int = 20

@@ -42,6 +42,7 @@ from ...services.processing import (
 )
 from ...services.metrics import record_reopen
 from ...services.patient_summary import regenerate_for_new_version
+from ...services.pending_queue import pending_for_doctor
 from ...services.retention import resolve_retention_days
 from ...services.versions import start_reopen_draft
 from ...services.visits import get_visit_for_doctor, transition
@@ -458,6 +459,14 @@ def void_visit(visit_id: uuid.UUID, body: VoidIn, ctx: Auth, db: DB):
     audit(db, ctx.facility_id, "visit.voided", "visit", visit.id, ctx.user_id,
           {"reason": reason, "note": note, "from_state": from_state, "actor_role": ctx.role})
     return ok({"state": "voided", "reason": reason})
+
+
+# ===== طابور «بانتظارك» (م16) =====
+
+@router.get("/physicians/me/pending")
+def my_pending_queue(ctx: DoctorAuth, db: DB):
+    """أربع مجموعات بعمر كل بند وترتيب بالأقدم — المُبطلة لا تظهر (خارج in_review)."""
+    return ok(pending_for_doctor(db, ctx.user_id))
 
 
 # ===== إعادة الفتح Reopen (م6) — نسخة جديدة ببوابتين =====

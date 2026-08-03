@@ -22,6 +22,7 @@ const ADMIN_NAV = [
 ];
 const DOCTOR_NAV = [
   { href: "/doctor", ar: "رئيسة الدكتور", en: "Doctor home" },
+  { href: "/doctor/pending", ar: "بانتظارك", en: "Awaiting you" },
   { href: "/doctor/visits", ar: "سجل الزيارات", en: "Visits log" },
   { href: "/doctor/templates", ar: "قوالب التلخيص", en: "Templates" },
   { href: "/doctor/visits/new", ar: "زيارة جديدة", en: "New visit" },
@@ -172,6 +173,7 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
   const [checked, setChecked] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
   const [unread, setUnread] = useState(0);
+  const [pendingCount, setPendingCount] = useState(0);  // م16
   const router = useRouter();
   const pathname = usePathname();
   const { L } = useLang();
@@ -207,6 +209,17 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
       } catch { /* تجاهل */ }
     })();
   }, [pathname]);
+
+  // م16: شارة عدّاد «بانتظارك» في الترويسة — للدكتور فقط
+  useEffect(() => {
+    if (user?.role !== "doctor") return;
+    void (async () => {
+      try {
+        const body = await api<{ total: number }>("/physicians/me/pending");
+        setPendingCount(body.data.total);
+      } catch { /* تجاهل */ }
+    })();
+  }, [pathname, user?.role]);
 
   if (!checked || user === null || roleMismatch) return null;
 
@@ -256,13 +269,22 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
                 const active = item.href === "/doctor/visits"
                   ? pathname === item.href || (pathname.startsWith("/doctor/visits/") && !pathname.startsWith("/doctor/visits/new"))
                   : pathname === item.href;
+                const showBadge = item.href === "/doctor/pending" && pendingCount > 0;
                 return (
                   <Link key={item.href} href={item.href} style={{
                     padding: "9px 14px", fontSize: 14, fontWeight: 700, textDecoration: "none",
                     color: active ? "#005a55" : "#5c7096",
                     borderBottom: active ? "3px solid #00736d" : "3px solid transparent",
                     whiteSpace: "nowrap",
-                  }}>{L(item.ar, item.en)}</Link>
+                  }}>
+                    {L(item.ar, item.en)}
+                    {showBadge ? (
+                      <span className="badge" style={{ marginInlineStart: 6, background: "#00736d",
+                                                       color: "#fff", padding: "0 7px" }}>
+                        <span className="num">{pendingCount}</span>
+                      </span>
+                    ) : null}
+                  </Link>
                 );
               })}
             </div>

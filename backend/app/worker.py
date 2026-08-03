@@ -75,13 +75,26 @@ async def metrics_nightly(ctx: dict) -> None:
     await asyncio.to_thread(_metrics_sync)
 
 
+def _reminders_sync() -> None:
+    from .services.pending_queue import send_daily_reminders
+
+    with system_session() as db:
+        send_daily_reminders(db)
+
+
+async def pending_reminders_daily(ctx: dict) -> None:
+    """تذكير «بانتظارك» اليومي (م16) — للأطباء ذوي المعلّق فقط."""
+    await asyncio.to_thread(_reminders_sync)
+
+
 def _cron_jobs():
     from arq import cron
 
-    # 02:30 UTC الكنس الاحتفاظي (م8) · 03:00 تجميع المقاييس (م15)
+    # 02:30 الكنس الاحتفاظي (م8) · 03:00 تجميع المقاييس (م15) · تذكير الطابور (م16)
     return [
         cron(retention_nightly, hour=2, minute=30),
         cron(metrics_nightly, hour=3, minute=0),
+        cron(pending_reminders_daily, hour=get_settings().pending_reminder_hour, minute=0),
     ]
 
 
