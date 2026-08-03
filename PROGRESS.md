@@ -27,6 +27,70 @@
 | 18 | جاهزية Streaming | ✅ أُنجزت | `pipelines/streaming.py`: `TranscriptionStream` (feed/finalize) يستهلك مقاطع مرتّبة ويُصدر مقاطع تفريغ + `IncrementalTranscript` (append + finalize) لمدخل P2 · P1 يمر عبرها ووحدة التدفق = مقطع م2 نفسه · batch حالة خاصة (تغذية ثم finalize) · **المرجع الذهبي التُقط قبل الـrefactor** (`scripts/capture_stt_reference.py` → `tests/fixtures/`) واختبار التكافؤ يثبت التطابق الحرفي · صفر تغيير في API/الواجهة وكل اختبارات المشروع تمر (213 passed) |
 | 19 | الوثائق | ✅ أُنجزت | `integration-spec-v1.md` (دلالة الاستبدال بأمثلة payload حقيقية من الكود + Idempotency + مريض خطأ/HIM — الفجوات الأربع الغائبة عن B2) · `runbook-upload-failures.md` (تشخيص/إصلاح/retry + «بلا فتح الاعتماد أبداً») · `contract-clauses.md` (٩ بنود كلٌّ بمرجعه المنفَّذ) · `retention-policy.md` روجعت ضد التنفيذ وصُحّحت (soft للصوت/التفريغ فقط) · **تدقيق التذييل كشف نقصه في قالب ملخص المريض فأُصلح** + اختبار يثبّت القوالب الثلاثة (214 passed) |
 
+---
+
+# التقرير الختامي — 2026-08-03
+
+**19/19 مرحلة مكتملة · 214 اختبار pytest يمر · typecheck وbuild الواجهة خضراوان · لا بنود BLOCKED.**
+
+## ما أُنجز — سطر لكل مرحلة
+
+| # | الإنجاز |
+|---|---------|
+| 0 | استكشاف ثلاثي المسارات (خطوط المعالجة/الموصّل/الواجهة) + CLAUDE.md بسياق المهمة + PROGRESS.md |
+| 1 | `reopened` ودورة `uploaded→reopened→in_review` + مصادر void موسّعة + Audit موحّد لكل انتقال |
+| 2 | سجل `audio_chunks` معمَّر بترقيم عالمي وsha256 — سدّ ثغرة تكرار الصوت + finalize صارم (MDF-4234) |
+| 3 | مصنّف أخطاء نوعي + `processing_attempts` ينجو من rollback + عامل arq بوضعين inline/queue |
+| 4 | Void من summarized/in_review/approved + RBAC أدمن + مخارج 410 (MDF-4235) |
+| 5 | إكمال Unlock: MDF-4236 للحاجزين + مقارنة hash لإعادة اعتماد بنقرة |
+| 6 | **دورة النسخ**: `note_versions` immutable + reopen + FHIR amended/relatesTo + محوّل HL7 MDM + exports بالنسخة |
+| 7 | Idempotency بمفتاح النسخة + `delivery_receipts` تُفحص قبل كل إرسال وتُكتب فور الاستقبال |
+| 8 | سياسة احتفاظ موحّدة (7 أنواع) + `legal_hold` + كنس ليلي soft→hard + وثيقة |
+| 9 | أرشفة FLAC بتحقق فكّ إلزامي قبل حذف الأصل + سكربت دفعات |
+| 10 | السند المرتبط: P2-verify@1.1 يحفظ الربط بدل رميه + مشغّل مقاطع ±1ث + وسوم المصدر |
+| 11 | إبراز الثقة: التقاط إشارات Whisper المهدرة + أدنى-لا-متوسط + عتبات حية |
+| 12 | محرك جاهزية المطالبة بقواعد YAML (4 أنواع) + MDF-4237 + واجهة ربط الضرورة الطبية |
+| 13 | رفض المتبقي دفعة واحدة بسطر Audit فردي لكل بند ومعرّف دفعة مشترك |
+| 14 | ملخص المريض بالعربي بعد البوابة ① + PDF RTL + تخزين مع النسخة وقرار التضمين |
+| 15 | `metric_events` بأرقام حصراً + edit_distance بـLevenshtein + تجميع ليلي + لوحة أدمن |
+| 16 | طابور «بانتظارك» بأربع مجموعات + تذكير يومي مشروط + تقرير المدير الطبي |
+| 17 | سحب سياق HIS خلف feature flag، غير معطِّل، بلا PHI في السجل، ضد mock FHIR |
+| 18 | refactor P1 لواجهة تدفق بتكافؤ مُثبت ضد مرجع ذهبي التُقط قبل التغيير |
+| 19 | 4 وثائق تسليم + مراجعة retention ضد التنفيذ + إصلاح تذييل ناقص كشفه التدقيق |
+
+## البنود BLOCKED
+
+**لا شيء.** كل مرحلة اكتملت بمعايير قبولها ومرّت حزمة الاختبارات كاملة قبل الانتقال.
+
+## أكواد MDF الجديدة (5)
+
+| الكود | HTTP | المرحلة | المعنى |
+|-------|------|---------|--------|
+| MDF-4234 | 409 | 2 | ملف الصوت غير مكتمل/غير مطابق عند finalize |
+| MDF-4235 | 410 | 4 | مخارج زيارة مُبطلة |
+| MDF-4236 | 409 | 5 | حاجز Unlock بنيوي (المسار Addendum/Reopen) |
+| MDF-4237 | 422 | 12 | جاهزية المطالبة غير مكتملة |
+| — | — | — | الكتالوج: 28 → **32** (الassert والاختبار محدَّثان) |
+
+## تغطية الاختبارات
+
+**141 → 214 اختباراً** (+73). ملفات جديدة: `test_state_machine` · `test_streaming_chunks` ·
+`test_processing_retry` · `test_versioned_reopen` · `test_upload_idempotency` ·
+`test_retention_sweep` · `test_flac_archive` · `test_evidence_links` ·
+`test_confidence_thresholds` · `test_zz_claim_readiness` · `test_zz_bulk_reject` ·
+`test_zz_patient_summary` · `test_zz_metrics` · `test_zz_pending_queue` ·
+`test_zz_his_context` · `test_zz_streaming_equivalence`.
+كل معيار قبول في التوجيه له اختبار مقابل. لم يُعطَّل أو يُزيَّف أي اختبار.
+
+## أعطال قائمة أُصلحت بالطريق
+
+- `addendums.py` كان معطوباً كلياً (توقيعات خاطئة · `uuid.uuid7` غير موجود · أحداث تحليلات غير مسجّلة · HTTPException خام) — أُصلح.
+- سياسة RLS في هجرة 0009 كانت تستخدم `app.scope` غير المضبوط — كانت تكسر كل استعلام addendums.
+- `MDF-4040` غير معرّف يُستخدم في superadmin (كان يرمي 500 بدل الخطأ المقصود).
+- حزمة FHIR كانت `transaction` بلا `entry.request` — غير صالحة R4 (تعمل لأن المحرك mock).
+- مصنّف أخطاء P1 كان يعدّ `FileNotFoundError` عابراً ويحجب الطلب 150 ثانية بلا سجل.
+- تذييل النسخة كان ناقصاً في قالب PDF ملخص المريض (كشفه تدقيق م19).
+
 ## سجل الهجرات (للمراجعة اليدوية)
 
 | الهجرة | المرحلة | الوصف | downgrade |
