@@ -22,6 +22,7 @@ from ...models import (
     NoteVersion,
     Summary,
     SummarySection,
+    Transcript,
     Visit,
 )
 from ...pipelines.run import run_edit_chat
@@ -29,6 +30,7 @@ from ...pipelines.stt import get_stt
 from ...services.code_registry import check_code, registry_systems
 from ...services.evidence import refresh_section_evidence
 from ...services.history import previous_visits
+from ...services.stt_confidence import resolve_thresholds
 from ...services.visits import active_note_approval, get_visit_for_doctor, summary_etag, summary_hashes
 
 router = APIRouter()
@@ -221,6 +223,15 @@ def get_summary(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB, response: Response
         for row in version_rows
     ]
     has_uploaded_version = any(row.upload_status == "uploaded" for row in version_rows)
+    # م11: جودة التفريغ + العتبات الحية (تغييرها من الكونسول يسري بلا deploy)
+    transcript_stats = db.execute(
+        select(Transcript.language_stats).where(Transcript.visit_id == visit.id)
+    ).scalar_one_or_none() or {}
+    stt_confidence = {
+        "mean": transcript_stats.get("confidence_mean"),
+        "min": transcript_stats.get("confidence_min"),
+        "thresholds": resolve_thresholds(),
+    }
     return ok({
         "visit_id": str(visit.id),
         "state": visit.state,
@@ -238,6 +249,7 @@ def get_summary(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB, response: Response
         "approval": approval_out,
         "version": visit.cycle,
         "versions": versions_out,
+        "stt_confidence": stt_confidence,
         "previous_visits": history,
     })
 

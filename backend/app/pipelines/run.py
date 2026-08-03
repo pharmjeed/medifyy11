@@ -129,7 +129,12 @@ def run_transcription(db: Session, visit: Visit) -> Transcript:
         attribute_segments(segments)
 
     content = {"segments": segments}
-    stats = {"segments": len(segments)}
+    stats: dict[str, Any] = {"segments": len(segments)}
+    # م11: إحصاء ثقة التفريغ (whisper يوفرها؛ gemini بلا ثقة ASR فتغيب الإحصاءات)
+    confidences = [s["confidence"] for s in segments if isinstance(s.get("confidence"), (int, float))]
+    if confidences:
+        stats["confidence_mean"] = round(sum(confidences) / len(confidences), 3)
+        stats["confidence_min"] = round(min(confidences), 3)
     transcript = db.execute(select(Transcript).where(Transcript.visit_id == visit.id)).scalar_one_or_none()
     if transcript is None:
         transcript = Transcript(
@@ -248,9 +253,17 @@ def run_summary(db: Session, visit: Visit) -> Summary:
             )
         )
     db.flush()
+    # م11: درجات الثقة تدخل telemetry كأرقام فقط
+    confidence_props = {}
+    if isinstance(transcript.language_stats, dict):
+        for stat_key in ("confidence_mean", "confidence_min"):
+            value = transcript.language_stats.get(stat_key)
+            if isinstance(value, (int, float)):
+                confidence_props[stat_key] = value
     track(
         "summary.generated", visit.facility_id, "doctor", visit.id,
         sections_count=len(sections_out), prompt_version=version, model_ref=model_ref,
+        **confidence_props,
     )
     return summary
 

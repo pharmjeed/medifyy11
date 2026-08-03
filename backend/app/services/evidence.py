@@ -41,17 +41,27 @@ def build_section_evidence(sentences: list[dict], segments_by_id: dict[str, dict
         ]
         start_ms: int | None = None
         end_ms: int | None = None
+        confidence: float | None = None
         if segment_ids:
             starts = [segments_by_id[sid].get("t0", 0.0) for sid in segment_ids]
             ends = [segments_by_id[sid].get("t1", 0.0) for sid in segment_ids]
             start_ms = int(min(starts) * 1000)
             end_ms = int(max(ends) * 1000)
+            # م11: ثقة الجملة = أدنى ثقة بين مقاطعها المصدرية — تشاؤم مقصود
+            values = [
+                segments_by_id[sid].get("confidence")
+                for sid in segment_ids
+                if isinstance(segments_by_id[sid].get("confidence"), (int, float))
+            ]
+            if values:
+                confidence = round(min(values), 3)
         entries.append({
             "text": text,
             "segment_ids": segment_ids,
             "audio_start_ms": start_ms,
             "audio_end_ms": end_ms,
             "origin": "ai",
+            "confidence": confidence,
         })
     return entries
 
@@ -76,5 +86,6 @@ def refresh_section_evidence(section: SummarySection) -> None:
                 "audio_start_ms": None,
                 "audio_end_ms": None,
                 "origin": "doctor",
+                "confidence": None,
             })
     section.evidence_json = rebuilt

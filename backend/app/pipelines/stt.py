@@ -17,6 +17,7 @@ from __future__ import annotations
 import io
 import json
 import logging
+import math
 import re
 import wave
 from abc import ABC, abstractmethod
@@ -87,6 +88,8 @@ class MockSTTEngine(STTEngine):
                 "text": text,
                 "t0": round(index * self.SENTENCE_SECONDS, 2),
                 "t1": round(index * self.SENTENCE_SECONDS + 3.5, 2),
+                # م11: تسجيل نظيف افتراضاً (فوق العتبتين) — لا إبراز في المراجعة
+                "confidence": 0.9,
             }
             for index, text in enumerate(MOCK_DIALOGUE)
         ]
@@ -231,15 +234,38 @@ class WhisperSTTEngine(STTEngine):
 
         self._model = WhisperModel("small", device="cpu", compute_type="int8")
 
+    @staticmethod
+    def _segment_confidence(segment) -> float | None:
+        """م11: تطبيع إشارتي Whisper إلى 0..1 — كانتا تُهدران.
+
+        exp(avg_logprob) يقارب متوسط احتمال الكلمة (لوغاريتمي سالب → 0..1)، ويُخصم
+        منه احتمال «لا كلام» — مقطع مشوّش أو صامت جزئياً ينخفض بالإشارتين معاً.
+        """
+        avg_logprob = getattr(segment, "avg_logprob", None)
+        no_speech = getattr(segment, "no_speech_prob", None) or 0.0
+        if avg_logprob is None:
+            return None
+        base = math.exp(min(0.0, float(avg_logprob)))
+        return round(max(0.0, min(1.0, base * (1.0 - float(no_speech)))), 3)
+
     def transcribe_visit(self, path: str) -> list[dict]:
         if not Path(path).exists():
             return []
         segments, _info = self._model.transcribe(path, language="ar")
         spoken = [segment for segment in segments if segment.text.strip()]
-        return [
-            {"id": f"s-{index}", "text": segment.text.strip(), "t0": round(segment.start, 2), "t1": round(segment.end, 2)}
-            for index, segment in enumerate(spoken)
-        ]
+        out: list[dict] = []
+        for index, segment in enumerate(spoken):
+            entry = {
+                "id": f"s-{index}",
+                "text": segment.text.strip(),
+                "t0": round(segment.start, 2),
+                "t1": round(segment.end, 2),
+            }
+            confidence = self._segment_confidence(segment)
+            if confidence is not None:
+                entry["confidence"] = confidence
+            out.append(entry)
+        return out
 
     def transcribe_file(self, path: str) -> str:
         segments, _info = self._model.transcribe(path, language="ar")

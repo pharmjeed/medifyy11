@@ -392,5 +392,9 @@ select.field { padding: 0 10px; }
 .ev-tag.doctor { color: var(--m-info); border-color: var(--m-info); border-style: solid; opacity: .95; }
 .ev-player { display: flex; align-items: center; gap: 10px; margin-top: 10px; padding: 8px 12px;
              background: var(--m-bg); border: 1px solid var(--m-line); border-radius: 10px; }
+/* م11: ثقة تفريغ منخفضة — خط سفلي متقطع بدرجتين (ليس الكهرماني: محجوز للبوابات) */
+.ev-sentence.conf-medium { text-decoration: underline dashed rgba(59,130,196,.55); text-underline-offset: 4px; }
+.ev-sentence.conf-low { text-decoration: underline dashed var(--m-danger); text-decoration-thickness: 2px;
+                        text-underline-offset: 4px; }
 .tr-highlight { background: var(--m-primary-light); border-radius: 8px; padding: 4px 6px;
                 box-shadow: inset 3px 0 0 var(--m-primary); }

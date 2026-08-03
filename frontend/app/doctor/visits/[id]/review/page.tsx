@@ -590,6 +590,22 @@ export default function ReviewPage() {
           </div>
         ) : null}
 
+        {/* م11: شريط جودة الصوت — الدرجة الإجمالية دون العتبة الدنيا */}
+        {summary.stt_confidence.mean !== null
+          && summary.stt_confidence.mean < summary.stt_confidence.thresholds.low ? (
+          <div className="card" style={{ marginTop: 12, borderInlineStart: "4px solid var(--m-warn)",
+                                         background: "var(--m-warn-bg)", display: "flex", gap: 10,
+                                         alignItems: "center", flexWrap: "wrap" }}>
+            <strong style={{ color: "var(--m-warn)" }}>
+              {L("جودة الصوت منخفضة — راجع بعناية", "Low audio quality — review carefully")}
+            </strong>
+            <span style={{ fontSize: 12.5, color: "#5c7096", flex: 1 }}>
+              {L("متوسط ثقة التفريغ لهذه الزيارة دون العتبة. الجمل المبرزة أدناه هي الأقل ثقة — اسمع مصادرها قبل الاعتماد.",
+                 "Average transcription confidence for this visit is below the threshold. The highlighted sentences are the least confident — listen to their sources before approving.")}
+            </span>
+          </div>
+        ) : null}
+
         {/* لافتة النسخة الجديدة (م6): reopen جارٍ — السابقة منقولة ومجمّدة */}
         {summary.version > 1 && summary.state === "in_review" ? (
           <div className="card" style={{ marginTop: 12, borderInlineStart: "4px solid var(--m-info)",
@@ -674,13 +690,21 @@ export default function ReviewPage() {
                   {section.evidence.map((sentence, index) => {
                     const hasAudio = sentence.audio_start_ms !== null && sentence.segment_ids.length > 0;
                     const isActive = player !== null && player.sectionId === section.id && player.index === index;
+                    // م11: درجتان بصريتان — دون low إبراز قوي، وبينها وbين medium إبراز خفيف
+                    const conf = sentence.confidence;
+                    const thresholds = summary.stt_confidence.thresholds;
+                    const confClass = conf === null ? ""
+                      : conf < thresholds.low ? " conf-low"
+                      : conf < thresholds.medium ? " conf-medium" : "";
                     return (
                       <span key={index}
-                        className={`ev-sentence${hasAudio ? " has-audio" : ""}${isActive ? " active" : ""}`}
+                        className={`ev-sentence${hasAudio ? " has-audio" : ""}${isActive ? " active" : ""}${confClass}`}
                         onClick={hasAudio ? () => playEvidence(section.id, index, sentence) : undefined}
-                        title={hasAudio
-                          ? L("اسمع المقطع المصدر من المحادثة (±1 ثانية سياق)", "Play the source segment from the conversation (±1s context)")
-                          : undefined}>
+                        title={confClass !== ""
+                          ? L("ثقة تفريغ منخفضة — اسمع المصدر", "Low transcription confidence — listen to the source")
+                          : hasAudio
+                            ? L("اسمع المقطع المصدر من المحادثة (±1 ثانية سياق)", "Play the source segment from the conversation (±1s context)")
+                            : undefined}>
                         {sentence.text}
                         {hasAudio ? <span className="ev-icon" aria-hidden>🎧</span> : null}
                         {!hasAudio && sentence.origin === "ai" ? (

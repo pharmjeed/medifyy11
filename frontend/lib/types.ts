@@ -228,13 +228,21 @@ export interface SummarySection {
   evidence: EvidenceSentence[] | null;
 }
 
-/** م10: جملة مذكرة بسندها الصوتي/التفريغي */
+/** م10: جملة مذكرة بسندها الصوتي/التفريغي · م11: ثقة التفريغ (أدنى مقاطعها) */
 export interface EvidenceSentence {
   text: string;
   segment_ids: string[];
   audio_start_ms: number | null;
   audio_end_ms: number | null;
   origin: "ai" | "doctor";
+  confidence: number | null;
+}
+
+/** م11: جودة تفريغ الزيارة + العتبات الحية من كونسول المالك */
+export interface SttConfidence {
+  mean: number | null;
+  min: number | null;
+  thresholds: { low: number; medium: number };
 }
 
 export interface ApprovalRecord {
@@ -274,6 +282,8 @@ export interface VisitSummary {
   /** م6: دورة النسخ — version = الدورة الحالية، وversions تاريخ اللقطات */
   version: number;
   versions: NoteVersionInfo[];
+  /** م11: جودة التفريغ والعتبات */
+  stt_confidence: SttConfidence;
 }
 
 export interface NoteVersionInfo {
