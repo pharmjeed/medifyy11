@@ -12,7 +12,17 @@ import uuid
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Numeric, Text, UniqueConstraint, func
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Numeric,
+    Text,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -20,7 +30,6 @@ from sqlalchemy.orm import Mapped, mapped_column
 from ..crypto import EncryptedText
 from .base import Base, TimestampMixin, pk
 
-BILLING_CYCLE = Enum("monthly", "yearly", name="billing_cycle")
 PLATFORM_ROLE = Enum("owner", "ops", "finance", "support", "read_only", name="platform_role")
 
 
@@ -48,20 +57,31 @@ class PlatformAdmin(Base, TimestampMixin):
 
 
 class Plan(Base, TimestampMixin):
-    """باقة = تكلفة الدكتور لدورة فوترة + ما تُظهره للدكتور (قرار مالك 2026-08-03).
+    """باقة منتج: سعر الدكتور لكل دورة + ما تُظهره له (قرار مالك 2026-08-03، هجرة 0022).
+
+    الباقة **صف واحد بسعرين** لا صفاً لكل دورة: خريطة مميزات واحدة لا تتفرّق بين
+    «احترافية-شهري» و«احترافية-سنوي». الدورة صارت خاصية اشتراكٍ لا خاصية باقة.
+    سعر NULL = الباقة لا تُباع بتلك الدورة (قيد CHECK يمنع باقة بلا سعر أصلاً).
 
     subscriptions.plan يشير تطبيقياً إلى code — يُتحقق عند الإسناد.
     """
 
     __tablename__ = "plans"
-    __table_args__ = (UniqueConstraint("code", name="uq_plans_code"),)
+    __table_args__ = (
+        UniqueConstraint("code", name="uq_plans_code"),
+        CheckConstraint(
+            "seat_price_sar IS NOT NULL OR seat_price_yearly_sar IS NOT NULL",
+            name="ck_plans_has_price",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = pk()
     code: Mapped[str] = mapped_column(Text, nullable=False)
     name_ar: Mapped[str] = mapped_column(Text, nullable=False)
     name_en: Mapped[str] = mapped_column(Text, nullable=False)
-    seat_price_sar: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)  # تكلفة الدكتور
-    billing_cycle: Mapped[str] = mapped_column(BILLING_CYCLE, nullable=False, default="monthly")
+    # تكلفة الدكتور الواحد — شهرياً وسنوياً؛ NULL = لا تُباع بهذه الدورة
+    seat_price_sar: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    seat_price_yearly_sar: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     # مميزات الباقة (هجرة 0021) — {feature_key: bool} لمفاتيح app.features حصراً.
     # NULL أو مفتاح غائب = افتراض الكتالوج، فالباقات القائمة لا تفقد شيئاً بالترقية.

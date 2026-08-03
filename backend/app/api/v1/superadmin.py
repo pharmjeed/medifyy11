@@ -17,7 +17,7 @@ from decimal import Decimal
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Form, Request, Response, UploadFile
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, model_validator
 from sqlalchemy import delete as sa_delete
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -490,6 +490,7 @@ def _facility_row(db: Session, facility: Facility) -> dict:
         "status": facility.status,
         "created_at": facility.created_at.isoformat(),
         "plan": subscription.plan if subscription else None,
+        "billing_cycle": subscription.billing_cycle if subscription else None,
         "seats_total": subscription.seats_total if subscription else 0,
         "doctors_active": used,
         "admins_count": admins,
@@ -527,7 +528,8 @@ class SaFacilityCreateIn(BaseModel):
     commercial_reg: str = Field(min_length=4)
     admin: SaFacilityAdminIn
     seats: int = Field(ge=1, le=500)   # عدد الدكاترة (§٠.١ تعديل ٢)
-    plan: str = "monthly"              # دورة الفوترة — السعر من كتالوج المنصة
+    plan: str = "standard"             # رمز الباقة — سعرها ومميزاتها من كتالوج المنصة
+    billing_cycle: Literal["monthly", "yearly"] = "monthly"
     issue_first_invoice: bool = False  # الإصدار من المنصة فعل صريح لا تلقائي
 
 
@@ -560,7 +562,11 @@ def sa_create_facility(body: SaFacilityCreateIn, ctx: SuperAuth, db: SystemDB):
         is_active=True,
     )
     db.add(admin)
-    subscription = Subscription(facility_id=facility.id, seats_total=body.seats, plan=plan.code)
+    if (plan.seat_price_yearly_sar if body.billing_cycle == "yearly" else plan.seat_price_sar) is None:
+        raise MedifyError("MDF-4041", details={"reason": "cycle_not_offered_for_plan",
+                                               "plan": plan.code, "billing_cycle": body.billing_cycle})
+    subscription = Subscription(facility_id=facility.id, seats_total=body.seats,
+                                plan=plan.code, billing_cycle=body.billing_cycle)
     db.add(subscription)
     db.flush()
     # NULL = فعل المنصة (لا مستخدم منشأة وراءه)
@@ -667,6 +673,8 @@ def sa_facility_detail(facility_id: uuid.UUID, ctx: SuperAuth, db: SystemDB):
         },
         "subscription": {
             "plan": subscription.plan,
+            "billing_cycle": subscription.billing_cycle,
+            "doctor_price_sar": str(plan_seat_price(db, subscription.plan, subscription.billing_cycle)),
             "seats_total": subscription.seats_total,
             "seats_used": used,
             "seats_available": subscription.seats_total - used,
@@ -713,11 +721,16 @@ def sa_patch_facility(facility_id: uuid.UUID, body: SaFacilityPatchIn, ctx: Supe
 class SaSubscriptionPatchIn(BaseModel):
     plan_code: str | None = None
     seats_total: int | None = Field(default=None, ge=1, le=500)  # عدد الدكاترة (§٠.١ تعديل ٢)
+    billing_cycle: Literal["monthly", "yearly"] | None = None    # الدورة صارت خاصية اشتراك (0022)
 
 
 @router.patch("/facilities/{facility_id}/subscription")
 def sa_patch_subscription(facility_id: uuid.UUID, body: SaSubscriptionPatchIn, ctx: SuperAuth, db: SystemDB):
-    """تغيير دورة الفوترة/عدد الدكاترة من المنصة — بلا فوترة تلقائية (الفاتورة فعل صريح)."""
+    """تغيير الباقة/الدورة/عدد الدكاترة من المنصة — بلا فوترة تلقائية (الفاتورة فعل صريح).
+
+    تغيير الباقة يغيّر ما يراه أطباء المنشأة فوراً (مميزات الباقة) كما يغيّر سعر
+    الفواتير اللاحقة — الفعلان معاً في سطر تدقيق واحد.
+    """
     require_cap(ctx, "facilities.write")
     facility = _get_facility(db, facility_id)
     subscription = db.execute(
@@ -727,12 +740,22 @@ def sa_patch_subscription(facility_id: uuid.UUID, body: SaSubscriptionPatchIn, c
         raise MedifyError("MDF-4041")
     changes: dict[str, object] = {}
 
-    if body.plan_code is not None and body.plan_code != subscription.plan:
-        plan = db.execute(select(Plan).where(Plan.code == body.plan_code)).scalar_one_or_none()
+    target_plan_code = body.plan_code if body.plan_code is not None else subscription.plan
+    target_cycle = body.billing_cycle if body.billing_cycle is not None else subscription.billing_cycle
+    if target_plan_code != subscription.plan or target_cycle != subscription.billing_cycle:
+        plan = db.execute(select(Plan).where(Plan.code == target_plan_code)).scalar_one_or_none()
         if plan is None or not plan.is_active:
             raise MedifyError("MDF-4041", details={"reason": "plan_not_found_or_inactive"})
-        changes["plan"] = {"from": subscription.plan, "to": body.plan_code}
-        subscription.plan = body.plan_code
+        # الباقة قد لا تُباع بهذه الدورة — لا نُسند اشتراكاً بلا سعر معلن
+        if (plan.seat_price_yearly_sar if target_cycle == "yearly" else plan.seat_price_sar) is None:
+            raise MedifyError("MDF-4041", details={"reason": "cycle_not_offered_for_plan",
+                                                   "plan": plan.code, "billing_cycle": target_cycle})
+        if target_plan_code != subscription.plan:
+            changes["plan"] = {"from": subscription.plan, "to": target_plan_code}
+            subscription.plan = target_plan_code
+        if target_cycle != subscription.billing_cycle:
+            changes["billing_cycle"] = {"from": subscription.billing_cycle, "to": target_cycle}
+            subscription.billing_cycle = target_cycle
 
     if body.seats_total is not None and body.seats_total != subscription.seats_total:
         used = seats_used(db, facility.id)
@@ -753,6 +776,7 @@ def sa_patch_subscription(facility_id: uuid.UUID, body: SaSubscriptionPatchIn, c
                  facility_id=facility.id, meta=changes)
     return ok({
         "plan": subscription.plan,
+        "billing_cycle": subscription.billing_cycle,
         "seats_total": subscription.seats_total,
         "seats_used": seats_used(db, facility.id),
     })
@@ -891,8 +915,10 @@ def _plan_out(db: Session, plan: Plan) -> dict:
         "code": plan.code,
         "name_ar": plan.name_ar,
         "name_en": plan.name_en,
-        "seat_price_sar": str(plan.seat_price_sar),
-        "billing_cycle": plan.billing_cycle,
+        "seat_price_sar": None if plan.seat_price_sar is None else str(plan.seat_price_sar),
+        "seat_price_yearly_sar": (
+            None if plan.seat_price_yearly_sar is None else str(plan.seat_price_yearly_sar)
+        ),
         "is_active": plan.is_active,
         "facilities_count": facilities_count,
         "features": features,
@@ -947,12 +973,26 @@ def sa_list_plans(ctx: SuperAuth, db: SystemDB):
     return ok([_plan_out(db, plan) for plan in plans])
 
 
+PRICE = Field(default=None, ge=0, le=Decimal("1000000"))
+
+
 class SaPlanCreateIn(BaseModel):
+    """باقة جديدة: تكلفة الدكتور شهرياً و/أو سنوياً (قرار مالك 2026-08-03).
+
+    سعر متروك = الباقة لا تُباع بتلك الدورة؛ ولا تُقبل باقة بلا سعر أصلاً.
+    """
+
     code: str = Field(min_length=2, max_length=40, pattern=r"^[a-z0-9][a-z0-9\-_]*$")
     name_ar: str = Field(min_length=2)
     name_en: str = Field(min_length=2)
-    seat_price_sar: Decimal = Field(ge=0, le=Decimal("1000000"))  # تكلفة الدكتور
-    billing_cycle: Literal["monthly", "yearly"] = "monthly"
+    seat_price_sar: Decimal | None = PRICE
+    seat_price_yearly_sar: Decimal | None = PRICE
+
+    @model_validator(mode="after")
+    def _at_least_one_price(self):
+        if self.seat_price_sar is None and self.seat_price_yearly_sar is None:
+            raise ValueError("باقة بلا سعر: حدّد السعر الشهري أو السنوي على الأقل")
+        return self
 
 
 @router.post("/plans", status_code=201)
@@ -967,35 +1007,63 @@ def sa_create_plan(body: SaPlanCreateIn, ctx: SuperAuth, request: Request, db: S
         name_ar=body.name_ar,
         name_en=body.name_en,
         seat_price_sar=body.seat_price_sar,
-        billing_cycle=body.billing_cycle,
+        seat_price_yearly_sar=body.seat_price_yearly_sar,
         is_active=True,
     )
     db.add(plan)
     db.flush()
-    sa_audit(db, ctx, "sa.plan_created", "plan", plan.id,
-             meta={"code": plan.code, "doctor_price_sar": str(plan.seat_price_sar)})
+    sa_audit(db, ctx, "sa.plan_created", "plan", plan.id, meta={
+        "code": plan.code,
+        "doctor_price_sar": str(plan.seat_price_sar) if plan.seat_price_sar is not None else None,
+        "doctor_price_yearly_sar": (
+            str(plan.seat_price_yearly_sar) if plan.seat_price_yearly_sar is not None else None
+        ),
+    })
     return ok(_plan_out(db, plan))
 
 
 class SaPlanPatchIn(BaseModel):
     name_ar: str | None = Field(default=None, min_length=2)
     name_en: str | None = Field(default=None, min_length=2)
-    seat_price_sar: Decimal | None = Field(default=None, ge=0, le=Decimal("1000000"))
+    seat_price_sar: Decimal | None = PRICE
+    seat_price_yearly_sar: Decimal | None = PRICE
+    # سحب الباقة من دورة: "monthly" و/أو "yearly" — يُفرَّق عن «لم يُذكر» في PATCH
+    clear_prices: list[Literal["monthly", "yearly"]] = []
     is_active: bool | None = None
 
 
 @router.patch("/plans/{plan_id}")
 def sa_patch_plan(plan_id: uuid.UUID, body: SaPlanPatchIn, ctx: SuperAuth, request: Request, db: SystemDB):
-    """تعديل تكلفة الدكتور (الرمز ثابت) — يسري على الفواتير اللاحقة فقط."""
+    """تعديل تكلفة الدكتور بدورتيها (الرمز ثابت) — يسري على الفواتير اللاحقة فقط."""
     require_cap(ctx, "plans.write")
     plan = db.execute(select(Plan).where(Plan.id == plan_id)).scalar_one_or_none()
     if plan is None:
         raise MedifyError("MDF-4041")
     changes: dict[str, object] = {}
-    if body.seat_price_sar is not None and body.seat_price_sar != plan.seat_price_sar:
-        require_reauth(ctx, request)  # تغيير سعر — إجراء حسّاس (DOC-20 §١.٣)
-        changes["doctor_price_sar"] = {"from": str(plan.seat_price_sar), "to": str(body.seat_price_sar)}
-        plan.seat_price_sar = body.seat_price_sar
+
+    new_monthly = plan.seat_price_sar
+    new_yearly = plan.seat_price_yearly_sar
+    if body.seat_price_sar is not None:
+        new_monthly = body.seat_price_sar
+    if body.seat_price_yearly_sar is not None:
+        new_yearly = body.seat_price_yearly_sar
+    if "monthly" in body.clear_prices:
+        new_monthly = None
+    if "yearly" in body.clear_prices:
+        new_yearly = None
+    if new_monthly is None and new_yearly is None:
+        raise MedifyError("MDF-4041", details={"reason": "plan_needs_at_least_one_price"})
+
+    for label, before, after, attr in (
+        ("doctor_price_sar", plan.seat_price_sar, new_monthly, "seat_price_sar"),
+        ("doctor_price_yearly_sar", plan.seat_price_yearly_sar, new_yearly, "seat_price_yearly_sar"),
+    ):
+        if before != after:
+            require_reauth(ctx, request)  # تغيير سعر — إجراء حسّاس (DOC-20 §١.٣)
+            changes[label] = {"from": str(before) if before is not None else None,
+                              "to": str(after) if after is not None else None}
+            setattr(plan, attr, after)
+
     if body.name_ar is not None:
         plan.name_ar = body.name_ar
     if body.name_en is not None:

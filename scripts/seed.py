@@ -153,11 +153,11 @@ def seed_platform(db: Session) -> None:
             is_active=True,
         ))
         print("seed: أُنشئ السوبر أدمن التطويري owner")
-    # الباقات: تكلفة الدكتور + ما تُظهره له (قرار مالك 2026-08-03).
-    # الشهرية/السنوية كاملتان (features=None ⇒ افتراضات الكتالوج)، و«الأساسية» عيّنة باقة مقلّصة
-    # لاختبار الإخفاء فعلياً — بلا سماع/رؤية للمحادثة ولا ملخص مريض ولا قوالب خاصة.
-    # تُبذَر **موقوفة**: البذر يجري على الإنتاج أيضاً، وباقة مسعّرة فعّالة لم يقررها المالك
-    # لا تظهر في كونسول التسعير من تلقائها — تفعيلها نقرة واحدة من /sa/plans.
+    # الباقات: الباقة نوع منتج بسعرين (شهري/سنوي) وخريطة مميزات واحدة (قرار مالك 2026-08-03).
+    # «قياسية» كاملة (features=None ⇒ افتراضات الكتالوج)، و«أساسية» عيّنة مقلّصة لاختبار
+    # الإخفاء فعلياً — بلا سماع/رؤية للمحادثة ولا ملخص مريض ولا قوالب خاصة.
+    # «أساسية» تُبذَر **موقوفة**: البذر يجري على الإنتاج أيضاً، وباقة مسعّرة فعّالة لم يقررها
+    # المالك لا تظهر في كونسول التسعير من تلقائها — تفعيلها نقرة واحدة من /sa/plans.
     basic_features = {
         "visit.transcript_view": False,
         "visit.audio_playback": False,
@@ -166,15 +166,15 @@ def seed_platform(db: Session) -> None:
         "templates.custom": False,
         "templates.reverse_build": False,
     }
-    for code, name_ar, name_en, price, cycle, features, active in [
-        ("monthly", "شهرية", "Monthly", Decimal("400.00"), "monthly", None, True),
-        ("yearly", "سنوية", "Yearly", Decimal("4080.00"), "yearly", None, True),
-        ("basic-monthly", "أساسية شهرية", "Basic monthly", Decimal("250.00"), "monthly", basic_features, False),
+    # (code, ar, en, شهري, سنوي, features, فعّالة)
+    for code, name_ar, name_en, monthly, yearly, features, active in [
+        ("standard", "قياسية", "Standard", Decimal("400.00"), Decimal("4080.00"), None, True),
+        ("basic", "أساسية", "Basic", Decimal("250.00"), Decimal("2550.00"), basic_features, False),
     ]:
         if not db.execute(select(Plan).where(Plan.code == code)).scalar_one_or_none():
             db.add(Plan(code=code, name_ar=name_ar, name_en=name_en,
-                        seat_price_sar=price, billing_cycle=cycle, is_active=active,
-                        features=features))
+                        seat_price_sar=monthly, seat_price_yearly_sar=yearly,
+                        is_active=active, features=features))
     db.flush()
 
 
@@ -294,7 +294,8 @@ def seed(db: Session) -> None:
         doctors[username] = doctor
     ahmad = doctors["dr.ahmad"]
 
-    subscription = Subscription(facility_id=fid, seats_total=6, plan="monthly", billing_ref="mock")
+    subscription = Subscription(facility_id=fid, seats_total=6, plan="standard",
+                                billing_cycle="monthly", billing_ref="mock")
     db.add(subscription)
     db.flush()
     for delta, reason, days in [(3, "expand", 72), (1, "expand", 41), (0, "activate_dr", 43),
@@ -597,7 +598,8 @@ def seed(db: Session) -> None:
                    specialty="قلب", clinic_id=clinic2.id, is_active=True,
                    email="dr_salem@alnukhba.example.sa")
     db.add(doctor2)
-    subscription2 = Subscription(facility_id=facility2.id, seats_total=3, plan="monthly")
+    subscription2 = Subscription(facility_id=facility2.id, seats_total=3, plan="standard",
+                                 billing_cycle="monthly")
     db.add(subscription2)
     db.flush()
     for system in ("ICD10AM", "ACHI", "SBS", "SFDA"):

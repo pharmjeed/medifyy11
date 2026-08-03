@@ -50,8 +50,8 @@ function PlanModal({ plan, onClose, onDone }: {
   const [code, setCode] = useState(plan?.code ?? "");
   const [nameAr, setNameAr] = useState(plan?.name_ar ?? "");
   const [nameEn, setNameEn] = useState(plan?.name_en ?? "");
-  const [price, setPrice] = useState(plan?.seat_price_sar ?? "");
-  const [cycle, setCycle] = useState<"monthly" | "yearly">(plan?.billing_cycle ?? "monthly");
+  const [monthly, setMonthly] = useState(plan?.seat_price_sar ?? "");
+  const [yearly, setYearly] = useState(plan?.seat_price_yearly_sar ?? "");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -59,19 +59,32 @@ function PlanModal({ plan, onClose, onDone }: {
     setBusy(true);
     setError(null);
     try {
+      if (monthly.trim() === "" && yearly.trim() === "") {
+        setError(L("باقة بلا سعر: حدّد السعر الشهري أو السنوي على الأقل",
+                   "A plan needs a price: set the monthly or the yearly cost at least"));
+        return;
+      }
+      const prices = {
+        seat_price_sar: monthly.trim() === "" ? null : monthly,
+        seat_price_yearly_sar: yearly.trim() === "" ? null : yearly,
+      };
       if (plan === null) {
         await saSensitive(L, "/plans", {
           method: "POST",
-          body: { code, name_ar: nameAr, name_en: nameEn, seat_price_sar: price, billing_cycle: cycle },
+          body: { code, name_ar: nameAr, name_en: nameEn, ...prices },
         });
-        toast(L(`أُنشئت دورة التسعير ${code}`, `Pricing cycle ${code} created`));
+        toast(L(`أُنشئت الباقة ${code}`, `Plan ${code} created`));
       } else {
+        // سعر مُفرَّغ = سحب الباقة من تلك الدورة — يُصرَّح به لأن PATCH لا يميّز null عن «لم يُذكر»
+        const clear: string[] = [];
+        if (prices.seat_price_sar === null) clear.push("monthly");
+        if (prices.seat_price_yearly_sar === null) clear.push("yearly");
         await saSensitive(L, `/plans/${plan.id}`, {
           method: "PATCH",
-          body: { name_ar: nameAr, name_en: nameEn, seat_price_sar: price },
+          body: { name_ar: nameAr, name_en: nameEn, ...prices, clear_prices: clear },
         });
-        toast(L(`حُدّثت تكلفة الدكتور في ${plan.code} — تسري على الفواتير اللاحقة فقط`,
-                `Doctor cost updated for ${plan.code} — applies to future invoices only`));
+        toast(L(`حُدّثت الباقة ${plan.code} — الأسعار تسري على الفواتير اللاحقة فقط`,
+                `Plan ${plan.code} updated — prices apply to future invoices only`));
       }
       await onDone();
     } catch (err) {
@@ -82,24 +95,23 @@ function PlanModal({ plan, onClose, onDone }: {
   };
 
   return (
-    <Modal title={plan === null ? L("دورة تسعير جديدة", "New pricing cycle") : L(`تعديل ${plan.code}`, `Edit ${plan.code}`)} onClose={onClose}>
+    <Modal title={plan === null ? L("باقة جديدة", "New plan") : L(`تعديل ${plan.code}`, `Edit ${plan.code}`)} onClose={onClose}>
       <form onSubmit={(event) => { event.preventDefault(); void submit(); }}>
         {plan === null ? (
-          <>
-            <Field label={L("الرمز (لاتيني — ثابت بعد الإنشاء)", "Code (latin — immutable after creation)")} ltr
-              placeholder="premium-monthly" value={code} pattern="[a-z0-9][a-z0-9\-_]*"
-              onChange={(event) => setCode(event.target.value)} required minLength={2} maxLength={40} />
-            <label className="field-label">{L("دورة الفوترة", "Billing cycle")}</label>
-            <select className="field" value={cycle} onChange={(event) => setCycle(event.target.value as "monthly" | "yearly")}>
-              <option value="monthly">{L("شهرية", "Monthly")}</option>
-              <option value="yearly">{L("سنوية", "Yearly")}</option>
-            </select>
-          </>
+          <Field label={L("الرمز (لاتيني — ثابت بعد الإنشاء)", "Code (latin — immutable after creation)")} ltr
+            placeholder="premium" value={code} pattern="[a-z0-9][a-z0-9\-_]*"
+            onChange={(event) => setCode(event.target.value)} required minLength={2} maxLength={40} />
         ) : null}
         <Field label={L("الاسم بالعربية", "Arabic name")} value={nameAr} onChange={(event) => setNameAr(event.target.value)} required minLength={2} />
         <Field label={L("الاسم بالإنجليزية", "English name")} ltr value={nameEn} onChange={(event) => setNameEn(event.target.value)} required minLength={2} />
-        <Field label={L("تكلفة الدكتور (SAR — قبل الضريبة)", "Cost per doctor (SAR — before VAT)")} ltr type="number" min={0} step="0.01"
-          value={price} onChange={(event) => setPrice(event.target.value)} required />
+        <Field label={L("تكلفة الدكتور شهرياً (SAR — قبل الضريبة)", "Cost per doctor, monthly (SAR — before VAT)")} ltr type="number" min={0} step="0.01"
+          value={monthly} onChange={(event) => setMonthly(event.target.value)} />
+        <Field label={L("تكلفة الدكتور سنوياً (SAR — قبل الضريبة)", "Cost per doctor, yearly (SAR — before VAT)")} ltr type="number" min={0} step="0.01"
+          value={yearly} onChange={(event) => setYearly(event.target.value)} />
+        <p style={{ fontSize: 12, color: "#5c7096", margin: "6px 0 0" }}>
+          {L("اترك خانة فارغة إن كانت الباقة لا تُباع بتلك الدورة — لا بد من سعر واحد على الأقل.",
+             "Leave a field empty if the plan is not sold on that cycle — at least one price is required.")}
+        </p>
         {error !== null ? <p style={{ color: "#d94b4b", fontSize: 12.5, fontWeight: 700, margin: "10px 0 0" }}>{error}</p> : null}
         <button type="submit" className="btn" style={{ width: "100%", marginTop: 14 }} disabled={busy}>
           {busy ? <span className="spinner" /> : null} {plan === null ? L("إنشاء الباقة", "Create plan") : L("حفظ التعديلات", "Save changes")}
@@ -260,12 +272,12 @@ function PlansInner() {
     <>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
         <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0, flex: 1 }}>{L("الباقات — تكلفة الدكتور وما تُظهره له", "Plans — cost per doctor and what it shows them")}</h2>
-        <button className="btn h40" onClick={() => setEditing("new")}>{L("+ دورة تسعير جديدة", "+ New pricing cycle")}</button>
+        <button className="btn h40" onClick={() => setEditing("new")}>{L("+ باقة جديدة", "+ New plan")}</button>
       </div>
       <div className="grid-table">
         <div className="grid-head" style={{ gridTemplateColumns: COLS }}>
           <div>{L("الرمز", "Code")}</div><div>{L("الاسم", "Name")}</div>
-          <div>{L("تكلفة الدكتور", "Cost / doctor")}</div><div>{L("الدورة", "Cycle")}</div>
+          <div>{L("شهرياً / دكتور", "Monthly / doctor")}</div><div>{L("سنوياً / دكتور", "Yearly / doctor")}</div>
           <div>{L("المميزات", "Features")}</div>
           <div>{L("منشآت عليها", "Facilities on it")}</div><div>{L("الحالة", "Status")}</div><div>{L("إجراءات", "Actions")}</div>
         </div>
@@ -278,8 +290,12 @@ function PlansInner() {
             <div key={plan.id} className={i % 2 ? "grid-row odd" : "grid-row"} style={{ gridTemplateColumns: COLS }}>
               <div><bdi className="num" style={{ fontWeight: 700 }}>{plan.code}</bdi></div>
               <div>{lang === "ar" ? plan.name_ar : plan.name_en}</div>
-              <div><bdi>{fmtSar(plan.seat_price_sar)} SAR</bdi></div>
-              <div>{plan.billing_cycle === "monthly" ? L("شهرية", "Monthly") : L("سنوية", "Yearly")}</div>
+              <div>{plan.seat_price_sar === null
+                ? <span style={{ color: "#5c7096" }}>—</span>
+                : <bdi>{fmtSar(plan.seat_price_sar)} SAR</bdi>}</div>
+              <div>{plan.seat_price_yearly_sar === null
+                ? <span style={{ color: "#5c7096" }}>—</span>
+                : <bdi>{fmtSar(plan.seat_price_yearly_sar)} SAR</bdi>}</div>
               <div>
                 <span className={plan.features_on === plan.features_total ? "badge success" : plan.features_on === 0 ? "badge neutral" : "badge"}
                   style={plan.features_on > 0 && plan.features_on < plan.features_total

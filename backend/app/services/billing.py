@@ -15,16 +15,24 @@ from ..config import get_settings
 from ..errors import MedifyError
 from ..models import Invoice, Plan, Subscription, User
 
-SEAT_PRICE_SAR = Decimal("400.00")  # احتياطي إن غابت الباقة — يُقفل وفق DOC-09 §٤ بعد التحقق الميداني
+SEAT_PRICE_SAR = Decimal("400.00")  # احتياطي شهري إن غابت الباقة — يُقفل وفق DOC-09 §٤
+SEAT_PRICE_YEARLY_SAR = Decimal("4080.00")  # احتياطي سنوي (شهران مجاناً)
 VAT_RATE = Decimal("0.15")
+CYCLE_DAYS = {"monthly": 30, "yearly": 365}
 
 
-def plan_seat_price(db: Session, plan_code: str) -> Decimal:
-    """سعر المقعد من كتالوج الباقات (هجرة 0002) — الاحتياطي الثابت إن غاب الرمز."""
-    price = db.execute(
-        select(Plan.seat_price_sar).where(Plan.code == plan_code)
-    ).scalar_one_or_none()
-    return price if price is not None else SEAT_PRICE_SAR
+def plan_seat_price(db: Session, plan_code: str, cycle: str = "monthly") -> Decimal:
+    """تكلفة الدكتور الواحد في الباقة لدورتها (هجرة 0022 — الباقة صف واحد بسعرين).
+
+    الاحتياطي عند غياب الرمز أو عدم بيع الباقة بهذه الدورة: ثابت الدورة — لا نُسقط
+    فاتورة سنوية إلى سعر شهري صامتاً.
+    """
+    plan = db.execute(select(Plan).where(Plan.code == plan_code)).scalar_one_or_none()
+    if plan is not None:
+        price = plan.seat_price_yearly_sar if cycle == "yearly" else plan.seat_price_sar
+        if price is not None:
+            return price
+    return SEAT_PRICE_YEARLY_SAR if cycle == "yearly" else SEAT_PRICE_SAR
 
 
 def seats_used(db: Session, facility_id: uuid.UUID) -> int:
@@ -53,7 +61,8 @@ def ensure_seat_available(db: Session, facility_id: uuid.UUID) -> None:
 
 
 def issue_invoice(db: Session, subscription: Subscription, seats: int, note: str = "") -> Invoice:
-    amount = plan_seat_price(db, subscription.plan) * seats
+    cycle = subscription.billing_cycle
+    amount = plan_seat_price(db, subscription.plan, cycle) * seats
     vat = (amount * VAT_RATE).quantize(Decimal("0.01"))
     now = dt.datetime.now(dt.timezone.utc)
     invoice = Invoice(
@@ -61,7 +70,8 @@ def issue_invoice(db: Session, subscription: Subscription, seats: int, note: str
         subscription_id=subscription.id,
         number=f"INV-{now.year}-{uuid.uuid4().hex[:6].upper()}",
         period_start=now,
-        period_end=now + dt.timedelta(days=30),
+        # الفترة تتبع دورة الاشتراك — اشتراك سنوي بفترة 30 يوماً كان خطأً كامناً قبل 0022
+        period_end=now + dt.timedelta(days=CYCLE_DAYS.get(cycle, 30)),
         amount_sar=amount,
         vat_sar=vat,
         status="due",

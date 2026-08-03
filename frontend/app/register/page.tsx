@@ -1,7 +1,8 @@
 "use client";
 
-/** الصفحة 2 — تسجيل منشأة جديدة W-002: معالج 3 خطوات (بيانات، أدمن، عدد الدكاترة) — FR-101.
- *  الاشتراك بعدد الدكاترة فقط، والتكلفة من كتالوج السوبر أدمن (تعديل مالك DOC-20 §٠.١). */
+/** الصفحة 2 — تسجيل منشأة جديدة W-002: معالج 3 خطوات (بيانات، أدمن، الباقة والعدد) — FR-101.
+ *  الاشتراك بعدد الدكاترة، وتكلفة الدكتور **حسب الباقة ودورتها** من كتالوج السوبر أدمن
+ *  (تعديل مالك DOC-20 §٠.١ + قرار 2026-08-03). */
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
@@ -10,18 +11,28 @@ import { LangToggle, useLang } from "@/lib/i18n";
 import { Logo } from "@/components/Shell";
 import { Field, SpecBadge, ToastProvider, useToast } from "@/components/ui";
 
+/** الباقة نوع منتج بسعرين وما تشمله (قرار مالك 2026-08-03) — سعر null = لا تُباع بتلك الدورة. */
 interface PublicPlan {
   code: string;
   name_ar: string;
   name_en: string;
-  doctor_price_sar: string;
-  billing_cycle: "monthly" | "yearly";
+  doctor_price_sar: string | null;
+  doctor_price_yearly_sar: string | null;
+  included: { key: string; name_ar: string; name_en: string; core: boolean }[];
+}
+
+type Cycle = "monthly" | "yearly";
+
+function planPrice(plan: PublicPlan | undefined, cycle: Cycle): number | null {
+  if (plan === undefined) return null;
+  const raw = cycle === "yearly" ? plan.doctor_price_yearly_sar : plan.doctor_price_sar;
+  return raw === null ? null : Number(raw);
 }
 
 const STEP_LABELS: readonly { ar: string; en: string }[] = [
   { ar: "بيانات المنشأة", en: "Facility details" },
   { ar: "حساب الأدمن", en: "Admin account" },
-  { ar: "عدد الدكاترة", en: "Doctors count" },
+  { ar: "الباقة وعدد الدكاترة", en: "Plan & doctors" },
 ];
 
 function fmt(value: number): string {
@@ -72,23 +83,27 @@ function RegisterInner() {
   const [adminPassword, setAdminPassword] = useState("");
   const [seats, setSeats] = useState(3);
   const [plans, setPlans] = useState<PublicPlan[]>([]);
-  const [planCode, setPlanCode] = useState("monthly");
+  const [planCode, setPlanCode] = useState("standard");
+  const [cycle, setCycle] = useState<Cycle>("monthly");
 
-  // تكلفة الدكتور من كتالوج السوبر أدمن — لا أسعار مثبّتة في الواجهة (DOC-20 §٠.١)
+  // الباقات وأسعارها من كتالوج السوبر أدمن — لا أسعار مثبّتة في الواجهة (DOC-20 §٠.١)
   useEffect(() => {
     void (async () => {
       try {
         const body = await api<PublicPlan[]>("/plans");
         setPlans(body.data);
-        if (body.data.length > 0 && !body.data.some((p) => p.code === "monthly")) {
+        if (body.data.length > 0 && !body.data.some((p) => p.code === "standard")) {
           setPlanCode(body.data[0]!.code);
         }
-      } catch { /* تُعرض البطاقات فارغة والتسجيل يستخدم monthly الافتراضي */ }
+      } catch { /* تُعرض البطاقات فارغة والتسجيل يستخدم standard الافتراضي */ }
     })();
   }, []);
 
   const selectedPlan = plans.find((p) => p.code === planCode);
-  const unit = selectedPlan ? Number(selectedPlan.doctor_price_sar) : 0;
+  // باقة لا تُباع بالدورة المختارة → ننتقل للدورة الأخرى بدل عرض سعر صفري كاذب
+  const cycleOffered = planPrice(selectedPlan, cycle) !== null;
+  const effectiveCycle: Cycle = cycleOffered ? cycle : cycle === "monthly" ? "yearly" : "monthly";
+  const unit = planPrice(selectedPlan, effectiveCycle) ?? 0;
   const subtotal = seats * unit;
   const vat = subtotal * 0.15;
 
@@ -106,6 +121,7 @@ function RegisterInner() {
           admin: { full_name: adminName, username: adminUsername, email: adminEmail, password: adminPassword },
           seats,
           plan: planCode,
+          billing_cycle: effectiveCycle,
         },
       });
       setDone(true);
@@ -175,21 +191,67 @@ function RegisterInner() {
                     style={{ width: 44, height: 44, border: "1.5px solid #00736d", borderRadius: 10, background: "#fff", color: "#005a55", fontSize: 18, fontWeight: 700, cursor: "pointer" }}>+</button>
                   <span style={{ fontSize: 12.5, color: "#5c7096" }}>{L("كل دكتور نشط يستهلك اشتراكاً (FR-202)", "Each active doctor consumes one subscription (FR-202)")}</span>
                 </div>
+                {/* الدورة أولاً — سعر الباقة يتبعها (قرار مالك 2026-08-03) */}
                 <label className="field-label">{L("دورة الفوترة", "Billing cycle")}</label>
+                <div style={{ display: "inline-flex", gap: 0, border: "1.5px solid #00736d", borderRadius: 10, overflow: "hidden" }}>
+                  {(["monthly", "yearly"] as Cycle[]).map((option) => (
+                    <button key={option} type="button" onClick={() => setCycle(option)}
+                      style={{
+                        padding: "8px 18px", border: "none", cursor: "pointer", fontSize: 13.5, fontWeight: 700,
+                        background: effectiveCycle === option ? "#00736d" : "#fff",
+                        color: effectiveCycle === option ? "#fff" : "#005a55",
+                      }}>
+                      {option === "monthly" ? L("شهرية", "Monthly") : L("سنوية", "Yearly")}
+                    </button>
+                  ))}
+                </div>
+
+                <label className="field-label" style={{ marginTop: 14 }}>{L("الباقة", "Plan")}</label>
                 {plans.length === 0 ? (
-                  <div className="grid-empty">{L("جارٍ تحميل التسعير…", "Loading pricing…")}</div>
+                  <div className="grid-empty">{L("جارٍ تحميل الباقات…", "Loading plans…")}</div>
                 ) : (
                   <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.min(plans.length, 2)}, 1fr)`, gap: 10 }}>
-                    {plans.map((p) => (
-                      <button key={p.code} type="button" className={planCode === p.code ? "select-card selected" : "select-card"}
-                        style={planCode === p.code ? { background: "#d6f5f2" } : undefined} onClick={() => setPlanCode(p.code)}>
-                        <strong>{lang === "ar" ? p.name_ar : p.name_en}</strong>
-                        <div style={{ fontSize: 12.5, color: "#5c7096", marginTop: 4 }}>
-                          <span className="num">{fmt(Number(p.doctor_price_sar))}</span>{" "}
-                          {p.billing_cycle === "yearly" ? L("ر.س / دكتور / سنة", "SAR / doctor / year") : L("ر.س / دكتور / شهر", "SAR / doctor / month")}
-                        </div>
-                      </button>
-                    ))}
+                    {plans.map((p) => {
+                      const price = planPrice(p, effectiveCycle);
+                      const selected = planCode === p.code;
+                      return (
+                        <button key={p.code} type="button" disabled={price === null}
+                          className={selected ? "select-card selected" : "select-card"}
+                          style={{
+                            ...(selected ? { background: "#d6f5f2" } : {}),
+                            ...(price === null ? { opacity: .5, cursor: "not-allowed" } : {}),
+                            textAlign: "start",
+                          }}
+                          onClick={() => setPlanCode(p.code)}>
+                          <strong>{lang === "ar" ? p.name_ar : p.name_en}</strong>
+                          <div style={{ fontSize: 12.5, color: "#5c7096", marginTop: 4 }}>
+                            {price === null ? (
+                              L("غير متاحة بهذه الدورة", "Not offered on this cycle")
+                            ) : (
+                              <>
+                                <span className="num">{fmt(price)}</span>{" "}
+                                {effectiveCycle === "yearly"
+                                  ? L("ر.س / دكتور / سنة", "SAR / doctor / year")
+                                  : L("ر.س / دكتور / شهر", "SAR / doctor / month")}
+                              </>
+                            )}
+                          </div>
+                          {/* ما تشمله الباقة من مصدر الإنفاذ نفسه — لا نص تسويقي يفترق عنه */}
+                          {p.included.length > 0 ? (
+                            <ul style={{ margin: "8px 0 0", paddingInlineStart: 16, fontSize: 12, color: "#5c7096", lineHeight: 1.7 }}>
+                              {p.included.slice(0, 6).map((item) => (
+                                <li key={item.key}>{lang === "ar" ? item.name_ar : item.name_en}</li>
+                              ))}
+                              {p.included.length > 6 ? (
+                                <li style={{ listStyle: "none", marginInlineStart: -16, fontWeight: 700 }}>
+                                  {L(`+ ${p.included.length - 6} ميزة أخرى`, `+ ${p.included.length - 6} more`)}
+                                </li>
+                              ) : null}
+                            </ul>
+                          ) : null}
+                        </button>
+                      );
+                    })}
                   </div>
                 )}
                 <div className="sub-box" style={{ marginTop: 14, fontSize: 14 }}>
@@ -207,8 +269,8 @@ function RegisterInner() {
                   </div>
                 </div>
                 <div className="info-box" style={{ marginTop: 12 }}>
-                  {L("الاشتراك بعدد الدكاترة فقط — التكلفة يحددها مالك المنصة وتظهر هنا لحظياً، وتقدر توسّع أو تقلّص العدد لاحقاً من لوحة الأدمن.",
-                     "Subscription is by doctor count only — pricing is set by the platform owner and shown here live; you can expand or reduce the count later from the admin panel.")}
+                  {L("الفاتورة = عدد الدكاترة × تكلفة الدكتور في الباقة المختارة — الأسعار وما تشمله كل باقة يحددها مالك المنصة وتظهر هنا لحظياً، وتقدر توسّع أو تقلّص العدد لاحقاً من لوحة الأدمن.",
+                     "Invoice = doctor count × the selected plan's cost per doctor — prices and what each plan includes are set by the platform owner and shown here live; you can expand or reduce the count later from the admin panel.")}
                 </div>
               </>
             ) : null}

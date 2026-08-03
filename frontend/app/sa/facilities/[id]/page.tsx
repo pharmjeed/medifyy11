@@ -70,13 +70,15 @@ function StatusSubscriptionTab({ detail, plans, reload }: {
   const facility = detail.facility;
   const sub = detail.subscription;
   const [planCode, setPlanCode] = useState(sub?.plan ?? "");
+  const [cycle, setCycle] = useState<"monthly" | "yearly">(sub?.billing_cycle ?? "monthly");
   const [seats, setSeats] = useState(sub?.seats_total ?? 1);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     setPlanCode(sub?.plan ?? "");
+    setCycle(sub?.billing_cycle ?? "monthly");
     setSeats(sub?.seats_total ?? 1);
-  }, [sub?.plan, sub?.seats_total]);
+  }, [sub?.plan, sub?.billing_cycle, sub?.seats_total]);
 
   const setStatus = async (status: FacilityStatus) => {
     setBusy(true);
@@ -97,6 +99,7 @@ function StatusSubscriptionTab({ detail, plans, reload }: {
     if (sub === null) return;
     const body: Record<string, unknown> = {};
     if (planCode !== sub.plan) body["plan_code"] = planCode;
+    if (cycle !== sub.billing_cycle) body["billing_cycle"] = cycle;
     if (seats !== sub.seats_total) body["seats_total"] = seats;
     if (Object.keys(body).length === 0) {
       toast(L("لا تغيير في الاشتراك", "No subscription change"));
@@ -156,11 +159,12 @@ function StatusSubscriptionTab({ detail, plans, reload }: {
           <div className="stat-value num">{sub?.seats_used ?? 0} / {sub?.seats_total ?? 0}</div>
         </div>
         <div className="card">
-          <div className="stat-label">{L("دورة الفوترة وتكلفة الدكتور", "Billing cycle & doctor cost")}</div>
+          <div className="stat-label">{L("الباقة وتكلفة الدكتور", "Plan & doctor cost")}</div>
           <div className="stat-value">{sub?.plan_info ? (lang === "ar" ? sub.plan_info.name_ar : sub.plan_info.name_en) : sub?.plan ?? "—"}</div>
-          {sub?.plan_info ? (
+          {sub !== null ? (
             <div style={{ fontSize: 12.5, color: "#5c7096", marginTop: 4 }}>
-              <bdi>{fmtSar(sub.plan_info.seat_price_sar)} SAR</bdi> {L("لكل دكتور /", "per doctor /")} {sub.plan_info.billing_cycle === "monthly" ? L("شهرياً", "month") : L("سنوياً", "year")}
+              <bdi>{fmtSar(sub.doctor_price_sar)} SAR</bdi> {L("لكل دكتور /", "per doctor /")}{" "}
+              {sub.billing_cycle === "monthly" ? L("شهرياً", "month") : L("سنوياً", "year")}
             </div>
           ) : null}
         </div>
@@ -171,13 +175,25 @@ function StatusSubscriptionTab({ detail, plans, reload }: {
           <h3 style={{ fontSize: 15, fontWeight: 700, margin: "0 0 12px" }}>{L("تعديل الاشتراك (فعل منصة)", "Edit subscription (platform action)")}</h3>
           <div style={{ display: "flex", gap: 18, flexWrap: "wrap", alignItems: "flex-end" }}>
             <div style={{ minWidth: 220 }}>
-              <label className="field-label">{L("دورة الفوترة (تكلفة الدكتور)", "Billing cycle (doctor cost)")}</label>
+              <label className="field-label">{L("الباقة", "Plan")}</label>
               <select className="field" style={{ margin: 0 }} value={planCode} onChange={(event) => setPlanCode(event.target.value)}>
                 {plans.filter((plan) => plan.is_active || plan.code === sub.plan).map((plan) => (
                   <option key={plan.code} value={plan.code}>
-                    {(lang === "ar" ? plan.name_ar : plan.name_en)} — {fmtSar(plan.seat_price_sar)} SAR/{plan.billing_cycle === "monthly" ? L("شهر", "mo") : L("سنة", "yr")}{plan.is_active ? "" : L(" (موقوفة)", " (inactive)")}
+                    {(lang === "ar" ? plan.name_ar : plan.name_en)}{plan.is_active ? "" : L(" (موقوفة)", " (inactive)")}
                   </option>
                 ))}
+              </select>
+            </div>
+            <div style={{ minWidth: 160 }}>
+              <label className="field-label">{L("دورة الفوترة", "Billing cycle")}</label>
+              <select className="field" style={{ margin: 0 }} value={cycle}
+                onChange={(event) => setCycle(event.target.value as "monthly" | "yearly")}>
+                <option value="monthly" disabled={selectedPlan?.seat_price_sar === null}>
+                  {L("شهرية", "Monthly")}{selectedPlan?.seat_price_sar === null ? L(" — غير متاحة", " — not offered") : ""}
+                </option>
+                <option value="yearly" disabled={selectedPlan?.seat_price_yearly_sar === null}>
+                  {L("سنوية", "Yearly")}{selectedPlan?.seat_price_yearly_sar === null ? L(" — غير متاحة", " — not offered") : ""}
+                </option>
               </select>
             </div>
             <div>
@@ -196,7 +212,9 @@ function StatusSubscriptionTab({ detail, plans, reload }: {
             {selectedPlan ? (
               <div style={{ fontSize: 12.5, color: "#5c7096" }}>
                 {L("تقدير الدورة حسب الدكاترة النشطين:", "Cycle estimate by active doctors:")}{" "}
-                <bdi style={{ fontWeight: 700 }}>{fmtSar(String(Number(selectedPlan.seat_price_sar) * (sub.seats_used || 0)))} SAR</bdi> + {L("ضريبة 15%", "VAT 15%")}
+                <bdi style={{ fontWeight: 700 }}>{fmtSar(String(
+                  Number((cycle === "yearly" ? selectedPlan.seat_price_yearly_sar : selectedPlan.seat_price_sar) ?? 0)
+                  * (sub.seats_used || 0)))} SAR</bdi> + {L("ضريبة 15%", "VAT 15%")}
               </div>
             ) : null}
           </div>

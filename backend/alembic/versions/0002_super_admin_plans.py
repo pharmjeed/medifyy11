@@ -4,7 +4,8 @@
 - plans: كتالوج الباقات (سعر المقعد لكل دورة) — قراءة فقط لدور التطبيق (الفوترة تقرأ السعر).
 - subscriptions.plan يبقى نصاً ويشير تطبيقياً إلى plans.code.
 - seat_events.actor_user_id يصبح NULL-able: NULL = فعل السوبر أدمن/النظام (كما audit_logs).
-- بذر الباقتين الافتراضيتين monthly/yearly — الأسعار توضيحية حتى القفل (DOC-09 §٤).
+- بذر الباقات الافتراضية — الأسعار توضيحية حتى القفل (DOC-09 §٤). الشكل يتبع ما أنشأته 0001:
+  قاعدة قديمة → monthly/yearly (صف لكل دورة)، قاعدة جديدة → standard بسعرين (ما بعد 0022).
 
 Revision ID: 0002
 """
@@ -34,12 +35,31 @@ CREATE POLICY plans_catalog_read ON plans FOR SELECT TO medify_app USING (true);
 -- ===== أفعال السوبر أدمن على المقاعد: NULL = المنصة (موازٍ لـ audit_logs.actor_user_id) =====
 ALTER TABLE seat_events ALTER COLUMN actor_user_id DROP NOT NULL;
 
--- ===== الباقتان الافتراضيتان (idempotent) =====
-INSERT INTO plans (id, code, name_ar, name_en, seat_price_sar, billing_cycle, is_active, created_at, updated_at)
-VALUES
-    (gen_random_uuid(), 'monthly', 'شهرية', 'Monthly', 400.00, 'monthly', true, now(), now()),
-    (gen_random_uuid(), 'yearly',  'سنوية', 'Yearly', 4080.00, 'yearly',  true, now(), now())
-ON CONFLICT (code) DO NOTHING;
+-- ===== الباقات الافتراضية (idempotent) =====
+-- الشكل يتبع ما أنشأته 0001: قاعدة قديمة بها plans.billing_cycle (صف لكل دورة)، وقاعدة
+-- جديدة بُنيت من نماذج ما بعد 0022 (باقة واحدة بسعرين) — فتُبذر بشكلها النهائي مباشرة
+-- وتصل إلى ما تصل إليه القاعدة القديمة بعد ترحيل 0022. الديناميكية ضرورية: PostgreSQL
+-- يحلّل الجملة كاملة، فلا يكفي شرط IF حول SQL ساكن يذكر عموداً غير موجود.
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.columns
+               WHERE table_name = 'plans' AND column_name = 'billing_cycle') THEN
+        EXECUTE $ins$
+            INSERT INTO plans (id, code, name_ar, name_en, seat_price_sar, billing_cycle,
+                               is_active, created_at, updated_at)
+            VALUES (gen_random_uuid(), 'monthly', 'شهرية', 'Monthly', 400.00, 'monthly', true, now(), now()),
+                   (gen_random_uuid(), 'yearly',  'سنوية', 'Yearly', 4080.00, 'yearly',  true, now(), now())
+            ON CONFLICT (code) DO NOTHING
+        $ins$;
+    ELSE
+        EXECUTE $ins$
+            INSERT INTO plans (id, code, name_ar, name_en, seat_price_sar, seat_price_yearly_sar,
+                               is_active, created_at, updated_at)
+            VALUES (gen_random_uuid(), 'standard', 'قياسية', 'Standard', 400.00, 4080.00, true, now(), now())
+            ON CONFLICT (code) DO NOTHING
+        $ins$;
+    END IF;
+END $$;
 """
 
 DOWNGRADE_SQL = """

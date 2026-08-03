@@ -65,14 +65,16 @@ def test_list_and_detail_facility(client, sa_token):
     rows = listing.json()["data"]
     assert len(rows) == 1
     fid = rows[0]["id"]
-    assert rows[0]["plan"] == "monthly"
+    assert rows[0]["plan"] == "standard"      # الباقة صارت نوع منتج (هجرة 0022)
+    assert rows[0]["billing_cycle"] == "monthly"
 
     detail = client.get(f"/api/v1/sa/facilities/{fid}", headers=auth(sa_token))
     assert detail.status_code == 200
     data = detail.json()["data"]
     assert data["facility"]["commercial_reg"] == "1010456789"
     assert data["subscription"]["seats_used"] >= 1
-    assert data["subscription"]["plan_info"]["code"] == "monthly"
+    assert data["subscription"]["plan_info"]["code"] == "standard"
+    assert data["subscription"]["billing_cycle"] == "monthly"
     roles = {user["role"] for user in data["users"]}
     assert roles == {"admin", "doctor"}
 
@@ -146,17 +148,17 @@ def test_plans_crud_and_pricing(client, sa_token):
     listing = client.get("/api/v1/sa/plans", headers=auth(sa_token))
     assert listing.status_code == 200
     codes = {plan["code"] for plan in listing.json()["data"]}
-    assert {"monthly", "yearly"} <= codes
+    assert "standard" in codes  # الزوج monthly/yearly اندمج في باقة واحدة بسعرين (0022)
 
     created = client.post("/api/v1/sa/plans", headers=auth(sa_token), json={
-        "code": "vip-monthly", "name_ar": "كبار المنشآت", "name_en": "VIP",
-        "seat_price_sar": "750.00", "billing_cycle": "monthly",
+        "code": "vip", "name_ar": "كبار المنشآت", "name_en": "VIP",
+        "seat_price_sar": "750.00", "seat_price_yearly_sar": "7650.00",
     })
     assert created.status_code == 201, created.text
     plan_id = created.json()["data"]["id"]
 
     dup = client.post("/api/v1/sa/plans", headers=auth(sa_token), json={
-        "code": "vip-monthly", "name_ar": "مكرر", "name_en": "Dup", "seat_price_sar": "10.00",
+        "code": "vip", "name_ar": "مكرر", "name_en": "Dup", "seat_price_sar": "10.00",
     })
     assert dup.status_code == 404
 
@@ -169,7 +171,7 @@ def test_plans_crud_and_pricing(client, sa_token):
     # الباقة الموقوفة لا تُسند لمنشأة
     fid = client.get("/api/v1/sa/facilities?q=الشفاء", headers=auth(sa_token)).json()["data"][0]["id"]
     assign = client.patch(f"/api/v1/sa/facilities/{fid}/subscription", headers=auth(sa_token),
-                          json={"plan_code": "vip-monthly"})
+                          json={"plan_code": "vip"})
     assert assign.status_code == 404
 
 
@@ -373,7 +375,7 @@ def test_2fa_full_lifecycle(client, sa_token):
 
     # إعادة المصادقة للإجراء الحساس: تغيير سعر بلا ترويسة → MDF-4015، بها → ينجح
     plan_id = next(p["id"] for p in client.get("/api/v1/sa/plans", headers=auth(token2)).json()["data"]
-                   if p["code"] == "monthly")
+                   if p["code"] == "standard")
     no_reauth = client.patch(f"/api/v1/sa/plans/{plan_id}", headers=auth(token2),
                              json={"seat_price_sar": "450.00"})
     assert no_reauth.status_code == 401

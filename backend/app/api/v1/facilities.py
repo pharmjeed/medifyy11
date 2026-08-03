@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import datetime as dt
 import uuid
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, EmailStr, Field
@@ -15,6 +15,7 @@ from ...db import get_db, get_system_db, set_rls_context
 from ...deps import AdminAuth, pagination
 from ...envelope import ok, paginated
 from ...errors import MedifyError
+from ...features import FEATURE_CATALOG
 from ...models import (
     CodingSystemConfig,
     Facility,
@@ -28,10 +29,12 @@ from ...models import (
 from ...notify import notify_admins
 from ...security import hash_password
 from ...services.default_templates import seed_default_templates
+from ...services.features import plan_features
 from ...services.billing import (
     create_payment_session,
     get_subscription,
     issue_invoice,
+    plan_seat_price,
     seats_used,
     verify_webhook_signature,
 )
@@ -53,12 +56,17 @@ class RegisterFacilityIn(BaseModel):
     commercial_reg: str = Field(min_length=4)
     admin: RegisterAdminIn
     seats: int = Field(ge=1, le=500)  # عدد الدكاترة المطلوبين (تعديل مالك DOC-20 §٠.١)
-    plan: str = "monthly"             # دورة الفوترة — التكلفة من كتالوج السوبر أدمن
+    plan: str = "standard"            # رمز الباقة — سعرها ومميزاتها من كتالوج السوبر أدمن
+    billing_cycle: Literal["monthly", "yearly"] = "monthly"
 
 
 @router.get("/plans")
 def list_public_plans(db: SystemDB):
-    """نقطة عامة للقراءة فقط — تكلفة الدكتور لكل دورة كما حدّدها السوبر أدمن (DOC-20 §٠.١ تعديل ٢)."""
+    """نقطة عامة للقراءة فقط — الباقات المعروضة بسعريها وما تشمله (قرار مالك 2026-08-03).
+
+    تُرسل المميزات المفعّلة بأسمائها كي تعرض صفحة التسجيل «ماذا تشمل الباقة» من مصدر واحد
+    بدل نص تسويقي يفترق عن الإنفاذ. لا محتوى سريرياً ولا شيء يخص منشأة بعينها.
+    """
     plans = db.execute(
         select(Plan).where(Plan.is_active == True).order_by(Plan.created_at)  # noqa: E712
     ).scalars().all()
@@ -67,8 +75,17 @@ def list_public_plans(db: SystemDB):
             "code": plan.code,
             "name_ar": plan.name_ar,
             "name_en": plan.name_en,
-            "doctor_price_sar": str(plan.seat_price_sar),
-            "billing_cycle": plan.billing_cycle,
+            # الشهري تحت الاسم القديم حفاظاً على المستهلكين، والسنوي بجواره
+            "doctor_price_sar": None if plan.seat_price_sar is None else str(plan.seat_price_sar),
+            "doctor_price_yearly_sar": (
+                None if plan.seat_price_yearly_sar is None else str(plan.seat_price_yearly_sar)
+            ),
+            "features": plan_features(plan),
+            "included": [
+                {"key": item.key, "name_ar": item.name_ar, "name_en": item.name_en, "core": item.core}
+                for item in FEATURE_CATALOG
+                if plan_features(plan)[item.key]
+            ],
         }
         for plan in plans
     ])
@@ -85,6 +102,10 @@ def register_facility(body: RegisterFacilityIn, db: SystemDB):
     plan = db.execute(select(Plan).where(Plan.code == body.plan)).scalar_one_or_none()
     if plan is None or not plan.is_active:
         raise MedifyError("MDF-4041", details={"reason": "plan_not_found_or_inactive"})
+    # الباقة قد لا تُباع بالدورة المطلوبة (سعرها NULL) — لا نُسقطها صامتاً على الدورة الأخرى
+    if (plan.seat_price_yearly_sar if body.billing_cycle == "yearly" else plan.seat_price_sar) is None:
+        raise MedifyError("MDF-4041", details={"reason": "cycle_not_offered_for_plan",
+                                               "plan": plan.code, "billing_cycle": body.billing_cycle})
 
     facility = Facility(name=body.name, commercial_reg=body.commercial_reg, status="active")
     db.add(facility)
@@ -99,7 +120,8 @@ def register_facility(body: RegisterFacilityIn, db: SystemDB):
         is_active=True,
     )
     db.add(admin)
-    subscription = Subscription(facility_id=facility.id, seats_total=body.seats, plan=plan.code)
+    subscription = Subscription(facility_id=facility.id, seats_total=body.seats,
+                                plan=plan.code, billing_cycle=body.billing_cycle)
     db.add(subscription)
     db.flush()
     db.add(SeatEvent(subscription_id=subscription.id, delta=body.seats, reason="expand", actor_user_id=admin.id))
@@ -121,8 +143,14 @@ def subscription_status(ctx: AdminAuth, db: DB):
     events = db.execute(
         select(SeatEvent).where(SeatEvent.subscription_id == subscription.id).order_by(SeatEvent.created_at.desc()).limit(50)
     ).scalars().all()
+    # اسم الباقة وسعرها للدورة الجارية — الأدمن يرى ما يدفعه لا رمزاً خاماً (2026-08-03)
+    plan = db.execute(select(Plan).where(Plan.code == subscription.plan)).scalar_one_or_none()
     return ok({
         "plan": subscription.plan,
+        "plan_name_ar": plan.name_ar if plan else subscription.plan,
+        "plan_name_en": plan.name_en if plan else subscription.plan,
+        "billing_cycle": subscription.billing_cycle,
+        "doctor_price_sar": str(plan_seat_price(db, subscription.plan, subscription.billing_cycle)),
         "seats_total": subscription.seats_total,
         "seats_used": used,
         "seats_available": subscription.seats_total - used,

@@ -23,6 +23,8 @@ from sqlalchemy.orm import Mapped, mapped_column
 from ..crypto import EncryptedText
 from .base import Base, TimestampMixin, pk
 
+# دورة الفوترة — صارت خاصية اشتراك بعد هجرة 0022 (كانت على plans قبلها)
+BILLING_CYCLE = Enum("monthly", "yearly", name="billing_cycle")
 FACILITY_STATUS = Enum("active", "suspended", "archived", name="facility_status")
 USER_ROLE = Enum("admin", "doctor", name="user_role")
 SEAT_EVENT_REASON = Enum("expand", "reduce", "activate_dr", "deactivate_dr", name="seat_event_reason")
@@ -75,7 +77,10 @@ class Subscription(Base, TimestampMixin):
     id: Mapped[uuid.UUID] = pk()
     facility_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("facilities.id"), nullable=False)
     seats_total: Mapped[int] = mapped_column(Integer, nullable=False)
-    plan: Mapped[str] = mapped_column(Text, nullable=False, default="monthly")
+    # رمز الباقة (plans.code) — كان يحمل الدورة قبل هجرة 0022 وصار يحمل نوع الباقة
+    plan: Mapped[str] = mapped_column(Text, nullable=False, default="standard")
+    # الدورة صارت خاصية اشتراك: الباقة الواحدة تُباع شهرياً أو سنوياً (قرار مالك 2026-08-03)
+    billing_cycle: Mapped[str] = mapped_column(BILLING_CYCLE, nullable=False, default="monthly")
     billing_ref: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 

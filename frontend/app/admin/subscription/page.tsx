@@ -106,8 +106,14 @@ function SeatsTab({ info, reload }: { info: SubscriptionInfo; reload: () => Prom
           <div className="stat-value num" style={{ color: "#12a594" }}>{info.seats_available}</div>
         </div>
         <div className="card">
-          <div className="stat-label">{L("دورة الفوترة", "Billing cycle")}</div>
-          <div className="stat-value">{info.plan === "monthly" ? L("شهرية", "Monthly") : info.plan === "yearly" ? L("سنوية", "Yearly") : info.plan}</div>
+          <div className="stat-label">{L("الباقة", "Plan")}</div>
+          <div className="stat-value" style={{ fontSize: 20 }}>{lang === "ar" ? info.plan_name_ar : info.plan_name_en}</div>
+          <div style={{ fontSize: 12.5, color: "#5c7096", marginTop: 2 }}>
+            <bdi>{info.doctor_price_sar}</bdi>{" "}
+            {info.billing_cycle === "yearly"
+              ? L("ر.س / دكتور / سنة", "SAR / doctor / year")
+              : L("ر.س / دكتور / شهر", "SAR / doctor / month")}
+          </div>
         </div>
       </div>
 

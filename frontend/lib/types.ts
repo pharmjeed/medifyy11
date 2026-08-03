@@ -66,7 +66,13 @@ export interface Doctor {
 }
 
 export interface SubscriptionInfo {
+  /** رمز الباقة — صار نوع منتج لا دورة فوترة (قرار مالك 2026-08-03) */
   plan: string;
+  plan_name_ar: string;
+  plan_name_en: string;
+  billing_cycle: "monthly" | "yearly";
+  /** تكلفة الدكتور الواحد في هذه الباقة لهذه الدورة */
+  doctor_price_sar: string;
   seats_total: number;
   seats_used: number;
   seats_available: number;
@@ -494,8 +500,9 @@ export interface SaPlan {
   code: string;
   name_ar: string;
   name_en: string;
-  seat_price_sar: string;
-  billing_cycle: "monthly" | "yearly";
+  /** تكلفة الدكتور — null = الباقة لا تُباع بهذه الدورة (قرار مالك 2026-08-03) */
+  seat_price_sar: string | null;
+  seat_price_yearly_sar: string | null;
   is_active: boolean;
   facilities_count: number;
   /** ما تُظهره الباقة للدكتور (قرار مالك 2026-08-03) — الخريطة الفعّالة بعد الافتراضات */
@@ -558,6 +565,8 @@ export interface SaFacilityDetail {
     seats_total: number;
     seats_used: number;
     seats_available: number;
+    billing_cycle: "monthly" | "yearly";
+    doctor_price_sar: string;
     plan_info: SaPlan | null;
   } | null;
   clinics: { id: string; name: string }[];
