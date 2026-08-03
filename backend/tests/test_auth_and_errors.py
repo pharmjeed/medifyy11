@@ -86,6 +86,8 @@ def test_me_returns_profile(client, doctor_token):
     assert data["role"] == "doctor"
     assert data["clinic_name"] == "عيادة الباطنة"
     assert data["specialty"] == "باطنة"
+    # رقم المنشأة المسجل = ما يُدخل في حقل «المنشأة» عند الدخول
+    assert data["facility_commercial_reg"] == "1010456789"
 
 
 def test_refresh_flow(client):

@@ -139,6 +139,8 @@ def me(ctx: Auth, db: SystemDB):
         "facility_id": str(ctx.facility_id),
         "facility_name": facility.name,
         "facility_status": facility.status,
+        # السجل التجاري = ما يُدخله المستخدم في حقل «المنشأة» عند الدخول (_find_facility أعلاه)
+        "facility_commercial_reg": facility.commercial_reg,
     })
 
 

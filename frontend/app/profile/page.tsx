@@ -69,6 +69,16 @@ function ProfileInner() {
     }
   };
 
+  const copyReg = async () => {
+    if (me === null) return;
+    try {
+      await navigator.clipboard.writeText(me.facility_commercial_reg);
+      toast(L("نُسخ رقم المنشأة", "Facility registration number copied"));
+    } catch {
+      toast(L("تعذر النسخ — انسخ الرقم يدوياً", "Could not copy — copy the number manually"));
+    }
+  };
+
   const roleLabel = me === null ? "" : me.role === "admin" ? L("أدمن المنشأة", "Facility admin") : L("دكتور", "Doctor");
 
   return (
@@ -94,6 +104,19 @@ function ProfileInner() {
             </div>
 
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 10, marginTop: 16 }}>
+              <div className="sub-box">
+                <div className="stat-label">{L("رقم المنشأة المسجل", "Facility registration no.")}</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <bdi className="num" style={{ fontWeight: 700 }}>{me.facility_commercial_reg}</bdi>
+                  <button type="button" className="btn-neutral" style={{ height: 28, padding: "0 10px", fontSize: 12 }}
+                    onClick={() => void copyReg()}>
+                    {L("نسخ", "Copy")}
+                  </button>
+                </div>
+                <div style={{ fontSize: 11.5, color: "#5c7096", marginTop: 4 }}>
+                  {L("يُدخل في حقل «المنشأة» عند تسجيل الدخول", "Enter it in the “Facility” field when signing in")}
+                </div>
+              </div>
               <div className="sub-box">
                 <div className="stat-label">{L("اسم المستخدم", "Username")}</div>
                 <bdi style={{ color: "#00736d", fontWeight: 700 }}>{me.username}</bdi>
