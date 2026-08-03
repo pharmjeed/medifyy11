@@ -144,6 +144,12 @@ class ExportBundle:
     def version_number(self) -> int | None:
         return self.version_row.version_number if self.version_row is not None else None
 
+    def included_patient_summary(self) -> dict[str, Any] | None:
+        """ملخص المريض إن قرّر الطبيب تضمينه في مخارج هذه النسخة (م14) — وإلا None."""
+        if self.version_row is None or not self.version_row.patient_summary_included:
+            return None
+        return self.version_row.patient_summary_json or None
+
     def version_footer(self) -> tuple[str, str] | None:
         """تذييل النسخة (م6) — يظهر في كل مخرج لنسخة منقولة."""
         if self.version_row is None or self.version_row.uploaded_at is None:
@@ -226,6 +232,18 @@ def note_text(db: Session, visit: Visit, version: int | None = None) -> str:
         lines.append(f"Codes approved (gate 2) / اعتماد الأكواد: {_fmt(data.approval.approved_at)}"
                      f" · SHA-256 {data.approval.codes_hash[:16]}")
     lines.append("Reviewed and approved by the treating clinician — روجعت واعتُمدت من الطبيب المعالج.")
+    # م14: ملخص المريض يظهر في مخارج النسخة فقط إذا قرر الطبيب تضمينه (toggle)
+    patient_summary = data.included_patient_summary()
+    if patient_summary is not None:
+        lines.append("")
+        lines.append("-" * 68)
+        lines.append("PATIENT SUMMARY (Arabic) — ملخص المريض")
+        for key, title in (("diagnosis", "التشخيص"), ("medications", "الأدوية وكيفية الاستخدام"),
+                           ("instructions", "التعليمات"), ("follow_up", "موعد المراجعة"),
+                           ("red_flags", "علامات الخطر — الطوارئ")):
+            value = str(patient_summary.get(key, "") or "").strip()
+            if value:
+                lines.append(f"{title}: {value}")
     version_footer = data.version_footer()
     if version_footer is not None:
         lines.append(version_footer[0])
@@ -472,6 +490,41 @@ def note_pdf(db: Session, visit: Visit, version: int | None = None) -> bytes:
         label_row("Gate 2 / بوابة ②",
                   f"{_fmt(data.approval.approved_at)}   ·   SHA-256 {data.approval.codes_hash[:24]}")
         label_row("Approved by / اعتمدها", approver.full_name if approver else "—")
+    # م14: ملخص المريض المُضمَّن — صفحة عربية RTL داخل مخرج النسخة
+    patient_summary = data.included_patient_summary()
+    if patient_summary is not None:
+        ensure(20 * mm)
+        state["y"] -= 3 * mm
+        pdf.setFillColor(teal_dark)
+        pdf.setFont(bold, 10.5)
+        pdf.drawString(left, state["y"], "PATIENT SUMMARY (Arabic)")
+        pdf.setFillColor(muted)
+        pdf.setFont(regular, 9)
+        pdf.drawRightString(right, state["y"], arabic("ملخص المريض"))
+        state["y"] -= 2 * mm
+        pdf.setStrokeColor(line)
+        pdf.line(left, state["y"], right, state["y"])
+        state["y"] -= 6 * mm
+        for key, title in (("diagnosis", "التشخيص"), ("medications", "الأدوية وكيفية الاستخدام"),
+                           ("instructions", "التعليمات"), ("follow_up", "موعد المراجعة"),
+                           ("red_flags", "علامات الخطر — الطوارئ")):
+            value = str(patient_summary.get(key, "") or "").strip()
+            if not value:
+                continue
+            ensure(8 * mm)
+            pdf.setFillColor(ink)
+            pdf.setFont(bold, 9)
+            pdf.drawRightString(right, state["y"], arabic(title))
+            state["y"] -= 4.8 * mm
+            pdf.setFont(regular, 9)
+            for row in wrap(value, regular, 9, right - left - 6 * mm):
+                ensure(5 * mm)
+                pdf.setFillColor(ink)
+                pdf.setFont(regular, 9)
+                pdf.drawRightString(right, state["y"], arabic(row))
+                state["y"] -= 4.6 * mm
+            state["y"] -= 2 * mm
+
     version_footer = data.version_footer()
     if version_footer is not None:
         # تذييل النسخة (م6) — إلزامي على كل مخرج لنسخة منقولة

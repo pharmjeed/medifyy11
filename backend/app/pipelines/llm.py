@@ -170,6 +170,7 @@ class MockLLMEngine(LLMEngine):
             "P3-guidance": self._guidance,
             "P4-reverse-template": self._reverse,
             "P5-edit-chat": self._chat,
+            "P6-patient-summary": self._patient_summary,
         }[prompt_id]
         return handler(variables), model_ref
 
@@ -305,6 +306,37 @@ class MockLLMEngine(LLMEngine):
             },
         ]
         return {"items": items}
+
+    def _patient_summary(self, variables: dict[str, Any]) -> dict[str, Any]:
+        """عيّنة ملخص المريض (م14) — عربية بسيطة مشتقة من أقسام المذكرة المعطاة.
+
+        تعكس المصدر: قسم غائب في المذكرة → نص فارغ (لا اختراع)، وأسماء الأدوية
+        التجارية تبقى لاتينية داخل النص العربي.
+        """
+        sections = {
+            str(section.get("section_key")): str(section.get("content", ""))
+            for section in (variables.get("note_sections") or [])
+            if isinstance(section, dict)
+        }
+        codes = variables.get("approved_codes") or []
+        medications = [c for c in codes if isinstance(c, dict) and c.get("kind") == "clinical_rx"]
+
+        assessment = sections.get("A", "")
+        plan = sections.get("P", "")
+        education = sections.get("E", "")
+        return {
+            "diagnosis": ("ضغط الدم لديك مرتفع ولم يكن منضبطاً، والصداع على الأغلب بسببه."
+                          if assessment else ""),
+            "medications": ("\n".join(
+                f"{med.get('text', '')} — كما شرح لك الطبيب." for med in medications
+            ) or ("خذ دواء الضغط amlodipine حبة واحدة كل يوم في نفس الوقت." if plan else "")),
+            "instructions": ("قِس الضغط في البيت مرتين يومياً وسجّل القراءات."
+                             if plan else ""),
+            "follow_up": ("راجع العيادة بعد أسبوعين ومعك سجل قراءات الضغط."
+                          if plan else ""),
+            "red_flags": ("إذا صار عندك صداع شديد جداً أو تغيّر في النظر — روح الطوارئ فوراً."
+                          if (plan or education) else ""),
+        }
 
     def _reverse(self, variables: dict[str, Any]) -> dict[str, Any]:
         return {

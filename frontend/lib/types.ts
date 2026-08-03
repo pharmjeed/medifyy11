@@ -245,6 +245,22 @@ export interface SttConfidence {
   thresholds: { low: number; medium: number };
 }
 
+/** م14: ملخص المريض بالعربي — يُولَّد بعد البوابة ① ويُخزَّن مع النسخة */
+export interface PatientSummaryText {
+  diagnosis: string;
+  medications: string;
+  instructions: string;
+  follow_up: string;
+  red_flags: string;
+}
+
+export interface PatientSummaryState {
+  summary: PatientSummaryText;
+  included: boolean;
+  stale: boolean;
+  version_number: number;
+}
+
 /** م12: جاهزية المطالبة — القواعد بيانات YAML على الخادم */
 export interface ClaimFinding {
   rule_id: string;

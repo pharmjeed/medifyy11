@@ -10,8 +10,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, api, apiWithHeaders, getToken } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
 import type {
-  ChatPatch, ClaimReadiness, CodeSearchResult, EvidenceSentence, GuidanceItem, SummarySection,
-  TranscriptSegment, UploadStatus, VisitSummary,
+  ChatPatch, ClaimReadiness, CodeSearchResult, EvidenceSentence, GuidanceItem,
+  PatientSummaryState, PatientSummaryText, SummarySection, TranscriptSegment, UploadStatus, VisitSummary,
 } from "@/lib/types";
 import { ProgressBar7 } from "@/components/ProgressBar7";
 import { Shell } from "@/components/Shell";
@@ -126,6 +126,11 @@ export default function ReviewPage() {
   // م13: رفض المتبقي دفعة واحدة
   const [rejectAllOpen, setRejectAllOpen] = useState(false);
   const [rejectAllBusy, setRejectAllBusy] = useState(false);
+  // م14: ملخص المريض بالعربي — بعد البوابة ① حصراً
+  const [patientSummary, setPatientSummary] = useState<PatientSummaryState | null>(null);
+  const [psBusy, setPsBusy] = useState(false);
+  const [psEditing, setPsEditing] = useState<keyof PatientSummaryText | null>(null);
+  const [psDraft, setPsDraft] = useState("");
   const chatRef = useRef<HTMLDivElement | null>(null);
   const dictTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -144,6 +149,13 @@ export default function ReviewPage() {
         setClaim(readiness.data);
       } else {
         setClaim(null);
+      }
+      // م14: ملخص المريض إن وُجد (404 = لم يُولَّد بعد — حالة طبيعية)
+      try {
+        const stored = await api<PatientSummaryState>(`/visits/${visitId}/patient-summary`);
+        setPatientSummary(stored.data);
+      } catch {
+        setPatientSummary(null);
       }
     } catch (err) {
       showError(err);
@@ -271,6 +283,69 @@ export default function ReviewPage() {
       void load();
     } catch (err) {
       handleMutationError(err);
+    }
+  };
+
+  // م14: توليد/تحديث ملخص المريض
+  const generatePatientSummary = async () => {
+    setPsBusy(true);
+    try {
+      const result = await api<PatientSummaryState>(`/visits/${visitId}/patient-summary`, { method: "POST" });
+      setPatientSummary(result.data);
+      toast(L("وُلِّد ملخص المريض — عاينه وعدّله قبل قرار التضمين",
+              "Patient summary generated — review and edit it before deciding on inclusion"));
+    } catch (err) {
+      handleMutationError(err);
+    } finally {
+      setPsBusy(false);
+    }
+  };
+
+  const savePatientSummaryField = async (field: keyof PatientSummaryText, value: string) => {
+    try {
+      const result = await api<PatientSummaryState>(`/visits/${visitId}/patient-summary`, {
+        method: "PATCH", body: { summary: { [field]: value } },
+      });
+      setPatientSummary(result.data);
+      setPsEditing(null);
+    } catch (err) {
+      handleMutationError(err);
+    }
+  };
+
+  const togglePatientSummaryInclusion = async (included: boolean) => {
+    try {
+      const result = await api<PatientSummaryState>(`/visits/${visitId}/patient-summary`, {
+        method: "PATCH", body: { included },
+      });
+      setPatientSummary(result.data);
+      toast(included
+        ? L("سيُضمَّن الملخص في مخارج هذه النسخة", "The summary will be included in this version's outputs")
+        : L("لن يُضمَّن الملخص في المخارج", "The summary will not be included in the outputs"));
+    } catch (err) {
+      handleMutationError(err);
+    }
+  };
+
+  const downloadPatientSummaryPdf = async () => {
+    try {
+      const token = getToken();
+      const response = await fetch(`/api/v1/visits/${visitId}/patient-summary/pdf`, {
+        headers: token !== null ? { Authorization: `Bearer ${token}` } : {},
+        credentials: "include",
+      });
+      if (!response.ok) { toast(L("تعذّر توليد PDF", "Could not generate the PDF")); return; }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `medify-patient-summary-${visitId.slice(0, 8)}.pdf`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      toast(L("تعذّر توليد PDF", "Could not generate the PDF"));
     }
   };
 
@@ -975,6 +1050,88 @@ export default function ReviewPage() {
             </section>
           );
         })}
+
+        {/* م14: ملخص المريض بالعربي — بعد البوابة ① حصراً */}
+        {noteApproved && !voided ? (
+          <section className="card" style={{ marginTop: 14 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <strong style={{ fontSize: 16, flex: 1 }}>{L("ملخص المريض بالعربي", "Patient summary (Arabic)")}</strong>
+              {patientSummary === null ? (
+                <button className="btn-secondary" disabled={psBusy} onClick={() => void generatePatientSummary()}>
+                  {psBusy ? L("جارٍ التوليد…", "Generating…") : L("توليد ملخص المريض", "Generate patient summary")}
+                </button>
+              ) : (
+                <>
+                  {patientSummary.stale ? (
+                    <span className="badge warn">{L("تغيّر النص — أعد التوليد", "Note changed — regenerate")}</span>
+                  ) : null}
+                  <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13 }}>
+                    <input type="checkbox" checked={patientSummary.included}
+                      disabled={approvedLocked}
+                      onChange={(event) => void togglePatientSummaryInclusion(event.target.checked)} />
+                    {L("تضمينه في مخارج هذه النسخة", "Include it in this version's outputs")}
+                  </label>
+                  {!approvedLocked ? (
+                    <button className="btn-row" disabled={psBusy} onClick={() => void generatePatientSummary()}>
+                      {L("إعادة التوليد", "Regenerate")}
+                    </button>
+                  ) : null}
+                  <button className="btn-row" onClick={() => void downloadPatientSummaryPdf()}>
+                    {L("تنزيل PDF عربي", "Download Arabic PDF")}
+                  </button>
+                </>
+              )}
+            </div>
+            <p style={{ fontSize: 12.5, color: "#5c7096", margin: "6px 0 0" }}>
+              {L("يُولَّد من المذكرة المعتمدة حصراً — لا يضيف أي معلومة طبية جديدة. عاينه وعدّله قبل قرار التضمين.",
+                 "Generated strictly from the approved note — it adds no new medical information. Review and edit it before deciding on inclusion.")}
+            </p>
+            {patientSummary !== null ? (
+              <div style={{ marginTop: 10 }}>
+                {([
+                  ["diagnosis", L("التشخيص بلغة مفهومة", "Diagnosis in plain language")],
+                  ["medications", L("الأدوية وكيفية الاستخدام", "Medications and how to use them")],
+                  ["instructions", L("التعليمات", "Instructions")],
+                  ["follow_up", L("موعد المراجعة", "Follow-up appointment")],
+                  ["red_flags", L("علامات الخطر — الطوارئ", "Red flags — emergency")],
+                ] as [keyof PatientSummaryText, string][]).map(([field, title]) => (
+                  <div key={field} style={{ borderTop: "1px dashed #c7d1e0", padding: "8px 0" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <strong style={{ fontSize: 13, color: field === "red_flags" ? "var(--m-danger)" : "#005a55", flex: 1 }}>
+                        {title}
+                      </strong>
+                      {!approvedLocked && psEditing !== field ? (
+                        <button className="btn-row" onClick={() => {
+                          setPsEditing(field);
+                          setPsDraft(patientSummary.summary[field]);
+                        }}>{L("✏ تعديل", "✏ Edit")}</button>
+                      ) : null}
+                    </div>
+                    {psEditing === field ? (
+                      <div style={{ marginTop: 6 }}>
+                        <textarea className="field" rows={3} value={psDraft}
+                          onChange={(event) => setPsDraft(event.target.value)} />
+                        <div style={{ display: "flex", gap: 8 }}>
+                          <button className="btn-success" style={{ height: 34 }}
+                            onClick={() => void savePatientSummaryField(field, psDraft)}>
+                            {L("حفظ", "Save")}
+                          </button>
+                          <button className="btn-neutral" style={{ height: 34 }}
+                            onClick={() => setPsEditing(null)}>{L("إلغاء", "Cancel")}</button>
+                        </div>
+                      </div>
+                    ) : (
+                      <p style={{ margin: "4px 0 0", fontSize: 13.5, lineHeight: 1.9,
+                                  color: patientSummary.summary[field] ? "var(--m-ink)" : "#5c7096" }}>
+                        {patientSummary.summary[field] || L("— لا محتوى لهذا القسم في المذكرة —", "— no content for this section in the note —")}
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </section>
+        ) : null}
 
         {/* محادثة AI الختامية W-217 */}
         <section id="ai-chat" className="card" style={{ marginTop: 14 }}>

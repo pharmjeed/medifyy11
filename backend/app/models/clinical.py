@@ -380,6 +380,10 @@ class NoteVersion(Base, TimestampMixin):
     codes_approved_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     uploaded_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     upload_status: Mapped[str] = mapped_column(Text, nullable=False, default="draft")  # draft|pending|uploaded|upload_failed
+    # م14: ملخص المريض بالعربي — جزء من مخرجات النسخة (reopen يعيد توليده)
+    patient_summary_json: Mapped[Any | None] = mapped_column(EncryptedJSON, nullable=True)
+    patient_summary_included: Mapped[bool] = mapped_column(default=False, nullable=False, server_default="false")
+    patient_summary_note_hash: Mapped[str | None] = mapped_column(Text, nullable=True)  # stale detection
     # سبب إعادة الفتح الذي أنتج هذه النسخة (v≥2) — محتوى سريري محتمل، مشفر
     reopen_reason: Mapped[str | None] = mapped_column(EncryptedText, nullable=True)
     # diff نصي + أكواد عن النسخة السابقة (v≥2) — {sections: [...], codes: {...}, counts: {...}}
