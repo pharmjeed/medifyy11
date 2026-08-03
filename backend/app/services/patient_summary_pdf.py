@@ -24,6 +24,23 @@ SECTION_TITLES = [
 ]
 
 
+def _version_footer_line(db: Session, visit: Visit, version_number: int) -> str | None:
+    """تذييل النسخة (م6) — إلزامي على كل قالب تصدير بما فيه ملخص المريض (م19 §5)."""
+    from ..models import NoteVersion
+
+    row = db.execute(
+        select(NoteVersion).where(
+            NoteVersion.visit_id == visit.id,
+            NoteVersion.version_number == version_number,
+        )
+    ).scalar_one_or_none()
+    if row is None or row.uploaded_at is None:
+        return None
+    stamp = _fmt(row.uploaded_at)
+    return (f"النسخة {row.version_number} — اعتُمدت ونُقلت بتاريخ {stamp} — "
+            "يُرجع لملف المريض في نظام المستشفى للنسخة السارية")
+
+
 def patient_summary_pdf(db: Session, visit: Visit, stored: dict[str, Any]) -> bytes:
     from reportlab.lib.colors import HexColor
     from reportlab.lib.pagesizes import A4
@@ -149,6 +166,21 @@ def patient_summary_pdf(db: Session, visit: Visit, stored: dict[str, Any]) -> by
             pdf.drawRightString(right - 2 * mm, state["y"], arabic(row))
             state["y"] -= 5.6 * mm
         state["y"] -= 4 * mm
+
+    # م19 §5: تذييل النسخة إلزامي على كل قالب — بما فيه ملخص المريض
+    version_line = _version_footer_line(db, visit, stored.get("version_number", visit.cycle))
+    if version_line is not None:
+        ensure(10 * mm)
+        pdf.setStrokeColor(line)
+        pdf.setLineWidth(0.5)
+        pdf.line(left, state["y"], right, state["y"])
+        state["y"] -= 5 * mm
+        pdf.setFillColor(muted)
+        pdf.setFont(regular, 8)
+        for row in wrap_ar(version_line, regular, 8, right - left - 4 * mm):
+            ensure(5 * mm)
+            pdf.drawRightString(right - 2 * mm, state["y"], arabic(row))
+            state["y"] -= 4.4 * mm
 
     footer()
     pdf.save()

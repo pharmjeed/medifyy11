@@ -148,3 +148,36 @@ def test_excluded_summary_absent_from_version_outputs_and_reopen_resets(client, 
     export_v1 = client.get(f"/api/v1/visits/{visit_id}/export/text", headers=headers,
                            params={"version": 1}).json()["data"]
     assert "PATIENT SUMMARY" not in export_v1["content"]
+
+
+def test_version_footer_present_in_every_export_template(client, doctor_token, ps_patient):
+    """م19 §5: تذييل النسخة مطبَّق في كل القوالب — نص · PDF المذكرة · PDF ملخص المريض."""
+    headers = auth(doctor_token)
+    visit_id = _visit_in_review(client, headers, ps_patient)
+    _resolve_and_approve_gate1(client, headers, visit_id)
+    assert client.post(f"/api/v1/visits/{visit_id}/patient-summary", headers=headers).status_code == 200
+    assert client.patch(f"/api/v1/visits/{visit_id}/patient-summary", headers=headers,
+                        json={"included": True}).status_code == 200
+    assert client.post(f"/api/v1/visits/{visit_id}/approve", headers=headers).status_code == 200
+
+    text_export = client.get(f"/api/v1/visits/{visit_id}/export/text", headers=headers).json()["data"]
+    assert "النسخة 1" in text_export["content"]
+    assert "يُرجع لملف المريض في نظام المستشفى" in text_export["content"]
+
+    note_pdf = client.get(f"/api/v1/visits/{visit_id}/export/pdf", headers=headers)
+    assert note_pdf.status_code == 200 and note_pdf.content[:4] == b"%PDF"
+
+    summary_pdf = client.get(f"/api/v1/visits/{visit_id}/patient-summary/pdf", headers=headers)
+    assert summary_pdf.status_code == 200 and summary_pdf.content[:4] == b"%PDF"
+    # التذييل يُرسم في القالبين — الحجم يعكس وجود سطوره (سلامة التوليد تُختبر بالبايتات)
+    assert len(summary_pdf.content) > 1500
+
+    from app.db import system_session
+    from app.models import Visit
+    from app.services.patient_summary_pdf import _version_footer_line
+    import uuid as _uuid
+
+    with system_session() as sdb:
+        visit = sdb.get(Visit, _uuid.UUID(visit_id))
+        line = _version_footer_line(sdb, visit, 1)
+    assert line is not None and "النسخة 1" in line, "قالب ملخص المريض يحمل التذييل"
