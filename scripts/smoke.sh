@@ -82,7 +82,9 @@ PENDING=$(echo "$SUMMARY" | JQ "d['data']['pending_guidance_count']")
 # 8) الاعتماد يُرفض مع إرشادات معلقة (MDF-4222)
 if [[ "$PENDING" != "0" ]]; then
     BLOCKED=$(curl -sS -X POST "${AUTH[@]}" "$API/visits/$VISIT_ID/approve")
-    echo "$BLOCKED" | grep -q 'MDF-422'; check "بوابة الاعتماد ترفض المعلق" $?
+    # البوابة ① تُفحص قبل ② (توجيه المالك 2026-07-22): بلا اعتماد نص → MDF-4231،
+    # ومعه وإرشادات معلقة → MDF-4222. كلاهما رفضٌ صحيح في هذه النقطة.
+    echo "$BLOCKED" | grep -qE 'MDF-4222|MDF-4231'; check "بوابة الاعتماد ترفض المعلق" $?
     # حسم الإرشادات: تشخيصٌ واحد يُقبل (جاهزية المطالبة تشترط تشخيصاً أولياً —
     # التحصين م12/MDF-4237) والباقي يُرفض. القبول الانتقائي يتجنّب التعليق على كود
     # ناقص/ملغى (MDF-4222 دون العتبة أو MDF-4233 من السجل المرجعي).
@@ -118,6 +120,7 @@ READY=$(curl -fsS "${AUTH[@]}" "$API/visits/$VISIT_ID/claim-readiness")
 if ! echo "$READY" | grep -q '"ready": *true'; then
     SECTION_KEY=$(curl -fsS "${AUTH[@]}" "$API/visits/$VISIT_ID/summary" \
         | JQ "d['data']['sections'][0]['section_key']")
+    SECTION_KEY="${SECTION_KEY%$'\r'}"   # CRLF على ويندوز يفسد جسم JSON (كما في حسم الإرشادات)
     curl -fsS -X POST "${AUTH[@]}" -H 'Content-Type: application/json' \
         "$API/visits/$VISIT_ID/guidance-items" \
         -d "{\"section_key\":\"$SECTION_KEY\",\"kind\":\"clinical_dx\",\"suggestion_text\":\"Essential hypertension — clinician documented\",\"code_system\":\"ICD10AM\",\"code_value\":\"I10\"}" \
