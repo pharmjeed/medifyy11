@@ -30,7 +30,7 @@ from .clinical import (
 )
 from .platform import Plan, PlatformAdmin, PlatformAuditLog, PlatformDefaultPrompt, PlatformSetting
 from .reference import RegistryCode
-from .system import AuditLog, Notification
+from .system import AuditLog, DailyMetric, MetricEvent, Notification
 from .tenancy import (
     Clinic,
     CodingSystemConfig,

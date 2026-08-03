@@ -40,6 +40,7 @@ from ...services.processing import (
     process_visit_pipeline,
     queue_mode_enabled,
 )
+from ...services.metrics import record_reopen
 from ...services.patient_summary import regenerate_for_new_version
 from ...services.retention import resolve_retention_days
 from ...services.versions import start_reopen_draft
@@ -486,6 +487,7 @@ def reopen_visit(visit_id: uuid.UUID, body: ReopenIn, ctx: DoctorAuth, db: DB):
     db.flush()
     draft = start_reopen_draft(db, visit, reason)
     regenerate_for_new_version(db, visit)  # م14: النسخة الجديدة بلا ملخص حتى بوابتها ①
+    record_reopen(db, visit, draft.version_number)  # م15: reopen_rate
     transition(db, visit, "in_review", ctx.user_id)
     # السبب محتوى سريري محتمل — مكانه note_versions المشفّر؛ التدقيق يحمل المرجع والأرقام
     audit(db, ctx.facility_id, "visit.reopened", "visit", visit.id, ctx.user_id,

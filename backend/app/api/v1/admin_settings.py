@@ -28,11 +28,27 @@ from ...models import (
     User,
     Visit,
 )
+from ...services.metrics import metrics_summary
 from ...services.retention import DEFAULTS as RETENTION_DEFAULTS
 from ...services.retention import effective_policies, retention_status
 from ...services.uploader import process_upload_job
 
 router = APIRouter()
+
+
+# ===== لوحة المقاييس المجمّعة (م15) =====
+
+@router.get("/admin/metrics/summary")
+def admin_metrics_summary(ctx: AdminAuth, db: DB, date_from: str | None = None,
+                          date_to: str | None = None, group_by: str = "facility"):
+    """المقاييس من التجميع الليلي حصراً — أرقام فقط بلا أي محتوى سريري (RBAC أدمن)."""
+    today = dt.date.today()
+    try:
+        start = dt.date.fromisoformat(date_from) if date_from else today - dt.timedelta(days=30)
+        end = dt.date.fromisoformat(date_to) if date_to else today
+    except ValueError:
+        raise MedifyError("MDF-4041", details={"from": date_from, "to": date_to})
+    return ok(metrics_summary(db, ctx.facility_id, start, end, group_by))
 
 
 # ===== سياسة الاحتفاظ الموحّدة (م8) =====

@@ -21,7 +21,7 @@
 | 12 | محرك جاهزية المطالبة | ✅ أُنجزت | `services/claim_readiness.py` مستقل + `backend/rules/*.yaml` بأربعة أنواع declarative (medical_necessity · mds_completeness · code_composition · prior_auth) موثّقة بأمثلة في `rules/README.md` — إضافة قاعدة بلا deploy (يُعاد التحميل بتغيّر mtime) · MDF-4237 الجديد يمنع البوابة ② على أي block · واجهة الربط: `PATCH /guidance-items/{id}/link-diagnosis` (يقبل تشخيصات الزيارة فقط) + قائمة اختيار ذكية · `GET /visits/{id}/claim-readiness` يعمل مع كل تحميل/تغيير أكواد · نسبة العبور الأول في telemetry · 5 اختبارات (186 passed) |
 | 13 | رفض المتبقي دفعة واحدة | ✅ أُنجزت | `POST /visits/{id}/guidance/reject-remaining` — كل إرشاد سطر Audit فردي مستقل (`guidance.rejected`) بـ`bulk_action_id` مشترك + حدث telemetry لكل بند · صفر معلّق = لا فعل ولا معرّف · الرد يحمل جاهزية المطالبة المحدَّثة · الواجهة: زر يظهر عند معلّق>0 فقط + مودال يعرض القائمة قبل التأكيد · 3 اختبارات (189 passed) |
 | 14 | ملخص المريض بالعربي | ✅ أُنجزت | برومبت `P6-patient-summary@1.0` بخمسة أقسام ثابتة + تعليمة «لا تضف أي معلومة غير موجودة في المصدر» · هجرة 0018: يُخزَّن مع النسخة (`note_versions`) بقرار تضمين وبصمة نص · لا توليد قبل البوابة ① (MDF-4231 في طبقة الخدمة) · unlock/تعديل → `stale` حتى إعادة التوليد · reopen → النسخة الجديدة تبدأ بلا ملخص · PDF عربي RTL كامل بخط IBM Plex (endpoint مستقل) + ظهوره في مخارج النسخة عند التضمين فقط · واجهة: لوحة معاينة/تعديل لكل قسم + toggle · 4 اختبارات (193 passed) |
-| 15 | القياس الآلي | ⬜ لم تبدأ | `metric_events` + edit_distance + `daily_metrics` + تجميع ليلي |
+| 15 | القياس الآلي | ✅ أُنجزت | هجرة 0019: `metric_events` (أرقام حصراً — الحارس التطبيقي يرفض النص والبوليان) + `daily_metrics` · edit_distance بـLevenshtein على مستوى الكلمات منسّبة 0–1 إجمالية ولكل قسم (الـdiff يُحسب بالذاكرة ويُرمى) · الأزمنة (stop→اعتماد نهائي، وقت المراجعة) · نسب P3 · reopen · claim_readiness_first_pass · تجميع ليلي (cron 03:00 + سكربت) واللوحات تقرأ من المجمَّع · `GET /admin/metrics/summary` بـRBAC أدمن · 7 اختبارات منها فحص آلي لغياب أي حقل نصي (200 passed) |
 | 16 | طابور المذكرات المعلّقة | ⬜ لم تبدأ | «بانتظارك» 4 مجموعات + تذكير يومي + تقرير مدير طبي |
 | 17 | سحب سياق المريض | ⬜ لم تبدأ | خلف feature flag — البنية جزئياً قائمة (`patient_context_snapshots`) |
 | 18 | جاهزية Streaming | ⬜ لم تبدأ | refactor P1 لواجهة مقاطع + اختبار تكافؤ بمرجع محفوظ مسبقاً |
@@ -39,6 +39,7 @@
 | 0016_retention_unified | 8 | `retention_policies` + `visits.legal_hold` + `transcripts.deleted_at` + صمام retention في `forbid_mutation` (audit_logs حصراً) و`forbid_uploaded_version_mutation` | يعيد الدوال الصارمة ويسقط الجدول والأعمدة |
 | 0017_evidence_links | 10 | `summary_sections.evidence_json` (نص مشفّر تطبيقياً — سند الجمل) | يسقط العمود |
 | 0018_patient_summary | 14 | `note_versions`: `patient_summary_json` (مشفّر) + `patient_summary_included` + `patient_summary_note_hash` | يسقط الأعمدة الثلاثة |
+| 0019_metric_events | 15 | `metric_events` (إلحاقي: REVOKE UPDATE/DELETE) + `daily_metrics` + RLS قياسي | يسقط الجدولين |
 
 ## أكواد MDF الجديدة
 

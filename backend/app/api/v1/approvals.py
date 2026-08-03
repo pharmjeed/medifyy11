@@ -26,6 +26,7 @@ from ...models import (
 from ...services.claim_readiness import blocking_findings
 from ...services.code_registry import check_code, registry_systems
 from ...services.fhir import build_bundle, store_bundle
+from ...services.metrics import record_approval_metrics
 from ...services.uploader import process_upload_job
 from ...services.versions import finalize_version
 from ...services.visits import active_note_approval, get_visit_for_doctor, summary_hashes, transition
@@ -266,6 +267,8 @@ def approve_visit(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB):
     ).scalar_one()
     track("visit.approved", ctx.facility_id, "doctor", visit.id, review_ms=review_ms,
           edits_count=edits_count, claim_readiness_first_pass=1 if first_pass else 0)
+    # م15: مقاييس الزيارة المعمَّرة (edit_distance/الأزمنة/نسب P3/الجاهزية) — أرقام فقط
+    record_approval_metrics(db, visit, review_ms=review_ms, claim_readiness_first_pass=first_pass)
 
     # الرفع الفوري (FR-802) — محاولات آلية ثم إشعارات فشل نهائي
     process_upload_job(db, job.id)

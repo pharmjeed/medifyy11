@@ -63,11 +63,26 @@ def _redis_settings():
     return RedisSettings.from_dsn(url)
 
 
+def _metrics_sync() -> None:
+    from .services.metrics import aggregate_daily_metrics
+
+    with system_session() as db:
+        aggregate_daily_metrics(db)
+
+
+async def metrics_nightly(ctx: dict) -> None:
+    """التجميع الليلي (م15): أحداث الأمس → daily_metrics الذي تقرأ منه اللوحات."""
+    await asyncio.to_thread(_metrics_sync)
+
+
 def _cron_jobs():
     from arq import cron
 
-    # 02:30 UTC ليلاً — الكنس الاحتفاظي الموحّد (م8)
-    return [cron(retention_nightly, hour=2, minute=30)]
+    # 02:30 UTC الكنس الاحتفاظي (م8) · 03:00 تجميع المقاييس (م15)
+    return [
+        cron(retention_nightly, hour=2, minute=30),
+        cron(metrics_nightly, hour=3, minute=0),
+    ]
 
 
 class WorkerSettings:
