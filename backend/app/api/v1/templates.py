@@ -18,8 +18,19 @@ from ...errors import MedifyError
 from ...models import DoctorTemplate, Template
 from ...pipelines.llm import get_llm
 from ...pipelines.run import PROMPT_VERSIONS, run_reverse_template
+from ...services.features import require_feature
 
 router = APIRouter()
+
+
+def _require_custom_templates(db, ctx: Auth) -> None:
+    """ميزة «قوالب خاصة بالدكتور» (قرار مالك 2026-08-03) — على الدكتور وحده.
+
+    قوالب المنشأة العامة فعل إداري لا يخص باقة عرض الدكتور، فلا تُحجب بإطفائها:
+    بإطفاء الميزة يبقى الدكتور على الجاهزة وما يعيّنه له الأدمن.
+    """
+    if ctx.role == "doctor":
+        require_feature(db, ctx.facility_id, "templates.custom")
 
 
 def _template_out(template: Template) -> dict[str, Any]:
@@ -112,6 +123,7 @@ class ReverseBuildIn(BaseModel):
 @router.post("/templates/reverse-build")
 def reverse_build(body: ReverseBuildIn, ctx: DoctorAuth, db: DB):
     """P4 — يولّد البنية من نص أو من صورة/PDF مرفق، ولا يحفظ تلقائياً (FR-502)."""
+    require_feature(db, ctx.facility_id, "templates.reverse_build")
     attachment = None
     if body.sample_file is not None:
         attachment = {"media_type": body.sample_file.media_type, "data": body.sample_file.data}
@@ -158,6 +170,7 @@ class TemplateSaveIn(BaseModel):
 
 @router.post("/templates", status_code=201)
 def save_template(body: TemplateSaveIn, ctx: Auth, db: DB):
+    _require_custom_templates(db, ctx)
     _validate_structure(body.structure)
     if body.origin not in ("system", "reverse_built"):
         raise MedifyError("MDF-4225", details={"origin": body.origin})
@@ -206,6 +219,7 @@ def _get_owned_template(db, ctx, template_id: uuid.UUID) -> Template:
 
 @router.patch("/templates/{template_id}")
 def update_template(template_id: uuid.UUID, body: TemplatePatchIn, ctx: Auth, db: DB):
+    _require_custom_templates(db, ctx)
     template = _get_owned_template(db, ctx, template_id)
     if body.structure is not None:
         _validate_structure(body.structure)
@@ -222,6 +236,7 @@ def update_template(template_id: uuid.UUID, body: TemplatePatchIn, ctx: Auth, db
 @router.delete("/templates/{template_id}")
 def delete_template(template_id: uuid.UUID, ctx: Auth, db: DB):
     """حذف = أرشفة ناعمة (FR-504) — يبقى مرجعاً للزيارات السابقة."""
+    _require_custom_templates(db, ctx)
     template = _get_owned_template(db, ctx, template_id)
     template.archived_at = dt.datetime.now(dt.timezone.utc)
     return ok({"archived": True})

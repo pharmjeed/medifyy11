@@ -12,6 +12,23 @@ export interface MdfError {
   details: Record<string, unknown>;
 }
 
+/** مميزات باقة المنشأة (قرار مالك 2026-08-03) — `{مفتاح: مفعّل}`، ومفتاح غائب = مفتوح. */
+export type FeatureMap = Record<string, boolean>;
+
+export interface FeatureCatalogItem {
+  key: string;
+  group: string;
+  group_name_ar: string;
+  group_name_en: string;
+  name_ar: string;
+  name_en: string;
+  desc_ar: string;
+  desc_en: string;
+  default: boolean;
+  /** عمود المنتج — يُعرض للعلم ولا يُطفأ */
+  core: boolean;
+}
+
 export interface SessionUser {
   id: string;
   full_name: string;
@@ -330,6 +347,8 @@ export interface VisitSummary {
   versions: NoteVersionInfo[];
   /** م11: جودة التفريغ والعتبات */
   stt_confidence: SttConfidence;
+  /** هل التُقط كلام أصلاً — واقعة لا محتوى، تصل حتى مع إطفاء ميزة عرض نص المحادثة */
+  has_transcript: boolean;
   /** م17: سياق المريض (null لزيارات بلا لقطة) */
   patient_context: ReviewPatientContext | null;
 }
@@ -479,6 +498,15 @@ export interface SaPlan {
   billing_cycle: "monthly" | "yearly";
   is_active: boolean;
   facilities_count: number;
+  /** ما تُظهره الباقة للدكتور (قرار مالك 2026-08-03) — الخريطة الفعّالة بعد الافتراضات */
+  features: FeatureMap;
+  features_on: number;
+  features_total: number;
+}
+
+export interface SaFeatureCatalog {
+  groups: { code: string; name_ar: string; name_en: string }[];
+  features: FeatureCatalogItem[];
 }
 
 export interface SaGoogleModel {

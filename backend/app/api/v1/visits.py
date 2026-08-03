@@ -33,6 +33,7 @@ from ...models import (
 )
 from ...services.audio_integrity import verify_finalized_audio
 from ...services.consent import consent_document
+from ...services.features import require_feature
 from ...services.his_context import fetch_his_context, merge_context
 from ...services.history import build_context
 from ...services.processing import (
@@ -452,6 +453,7 @@ def void_visit(visit_id: uuid.UUID, body: VoidIn, ctx: Auth, db: DB):
     واقعة الإبطال (الفاعل/السبب/الوقت) تُدوَّن في سجل التدقيق الإلحاقي وتبقى.
     الصوت لا يُمس هنا — يتبع سياسة الاحتفاظ (المُبطلة على أقصر مدة — م8).
     """
+    require_feature(db, ctx.facility_id, "visit.void")
     visit = get_visit_for_doctor(db, visit_id)
     reason = "test_recording" if body.reason == "test" else body.reason  # توافق عكسي للاسم القديم
     note = body.note.strip()
@@ -489,6 +491,7 @@ def reopen_visit(visit_id: uuid.UUID, body: ReopenIn, ctx: DoctorAuth, db: DB):
     ① بنقرة إن لم يتغيّر النص (مقارنة hash — م5)، و② كاملة دائماً.
     يقابله /upload-retry: نفس النسخة بلا بوابات (عطل تقني لا قرار سريري).
     """
+    require_feature(db, ctx.facility_id, "visit.reopen")
     visit = get_visit_for_doctor(db, visit_id)
     reason = body.reason.strip()
     if not reason:
@@ -532,6 +535,8 @@ def visit_audio(visit_id: uuid.UUID, request: Request, token: str = ""):
         raise MedifyError("MDF-4031")
 
     with rls_session(payload["facility_id"], payload["sub"], "doctor") as adb:
+        # ميزة باقة (قرار مالك 2026-08-03) — الحارس قبل أي كشف عن وجود التسجيل
+        require_feature(adb, uuid.UUID(payload["facility_id"]), "visit.audio_playback")
         visit = adb.execute(select(Visit).where(Visit.id == visit_id)).scalar_one_or_none()
         if visit is None:
             raise MedifyError("MDF-4041")
@@ -582,7 +587,8 @@ def visit_audio(visit_id: uuid.UUID, request: Request, token: str = ""):
 
 @router.get("/visits/{visit_id}/transcript")
 def get_transcript(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB):
-    """نص المحادثة الكامل (FR-604)."""
+    """نص المحادثة الكامل (FR-604) — ميزة باقة (قرار مالك 2026-08-03)."""
+    require_feature(db, ctx.facility_id, "visit.transcript_view")
     visit = get_visit_for_doctor(db, visit_id)
     transcript = db.execute(select(Transcript).where(Transcript.visit_id == visit.id)).scalar_one_or_none()
     if transcript is None:

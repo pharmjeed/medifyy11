@@ -8,6 +8,7 @@
 import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, api, apiWithHeaders, getToken } from "@/lib/api";
+import { useFeatures } from "@/lib/features";
 import { useLang } from "@/lib/i18n";
 import type {
   ChatPatch, ClaimReadiness, CodeSearchResult, EvidenceSentence, GuidanceItem,
@@ -42,7 +43,10 @@ const STATUS_META: Record<GuidanceItem["status"], { label: { ar: string; en: str
   modified: { label: { ar: "مقبول — معدّل", en: "Accepted — modified" }, bg: "#e6f7f4", fg: "#12a594" },
 };
 
-const PENDING_TEXT = /\[[^\]]*\]/;
+/* عنصر معلق = نص بين قوسين مربعين لم يُحسم.
+ * [Not discussed] مستثناة — هي إقرار P2 بعدم الذكر لا فراغاً ينتظر الطبيب (P2-summary §قواعد التلخيص). */
+const NOT_DISCUSSED = /\[\s*not\s+discussed\s*\]/gi;
+const hasPendingText = (content: string): boolean => /\[[^\]]*\]/.test(content.replace(NOT_DISCUSSED, ""));
 
 /* أسباب الإبطال (قرار مالك 2026-08-03) — القائمة نفسها في POST /visits/{id}/void */
 const VOID_REASONS: { key: string; ar: string; en: string }[] = [
@@ -57,20 +61,27 @@ interface ChatMessage { who: "doctor" | "ai"; text: string; patches?: ChatPatch[
 
 type UploadView = { phase: "idle" } | { phase: "uploading" } | { phase: "done"; status: UploadStatus };
 
+/** كل مخرج ميزة باقة مستقلة (قرار مالك 2026-08-03) — تُخفى وحدها ولا تُخفي البوابة. */
 function ExportButtons(props: {
   L: (ar: string, en: string) => string;
+  pdf: boolean;
+  text: boolean;
   onPdf: () => void;
   onCopy: () => void;
 }) {
-  const { L, onPdf, onCopy } = props;
+  const { L, pdf, text, onPdf, onCopy } = props;
   return (
     <span style={{ display: "inline-flex", gap: 8 }}>
-      <button className="btn-secondary" onClick={onCopy} title={L("نسخ نصي نظيف للصقه في الـ EMR", "Clean text copy to paste into the EMR")}>
-        {L("⧉ نسخ للـ EMR", "⧉ Copy for EMR")}
-      </button>
-      <button className="btn" onClick={onPdf} title={L("PDF بترويسة المنشأة ثنائية اللغة", "PDF with the bilingual facility letterhead")}>
-        {L("⭳ PDF", "⭳ PDF")}
-      </button>
+      {text ? (
+        <button className="btn-secondary" onClick={onCopy} title={L("نسخ نصي نظيف للصقه في الـ EMR", "Clean text copy to paste into the EMR")}>
+          {L("⧉ نسخ للـ EMR", "⧉ Copy for EMR")}
+        </button>
+      ) : null}
+      {pdf ? (
+        <button className="btn" onClick={onPdf} title={L("PDF بترويسة المنشأة ثنائية اللغة", "PDF with the bilingual facility letterhead")}>
+          {L("⭳ PDF", "⭳ PDF")}
+        </button>
+      ) : null}
     </span>
   );
 }
@@ -82,6 +93,20 @@ export default function ReviewPage() {
   const toast = useToast();
   const showError = useErrorScreen();
   const { L, lang } = useLang();
+  // مميزات باقة المنشأة (قرار مالك 2026-08-03) — الإخفاء تجربة استخدام، والمنع على الخادم
+  const { features } = useFeatures();
+  const on = (key: string) => features[key] !== false;
+  const canSeeTranscript = on("visit.transcript_view");
+  const canHearAudio = on("visit.audio_playback");
+  const canAiChat = on("visit.ai_chat");
+  const canDictate = on("visit.dictate");
+  const canCheckClaim = on("visit.claim_readiness");
+  const canExportPdf = on("visit.export_pdf");
+  const canExportText = on("visit.export_text");
+  const canPatientSummary = on("visit.patient_summary");
+  const canUnlock = on("visit.note_unlock");
+  const canReopen = on("visit.reopen");
+  const canVoid = on("visit.void");
 
   const [summary, setSummary] = useState<VisitSummary | null>(null);
   const [etag, setEtag] = useState("");
@@ -144,23 +169,27 @@ export default function ReviewPage() {
         setUpload({ phase: "done", status: status.data });
       }
       // م12: الفحص يعمل تلقائياً مع كل تحميل/تغيير أكواد — البوابة ② تقرأ منه
-      if (result.body.data.state === "in_review") {
+      if (result.body.data.state === "in_review" && canCheckClaim) {
         const readiness = await api<ClaimReadiness>(`/visits/${visitId}/claim-readiness`);
         setClaim(readiness.data);
       } else {
         setClaim(null);
       }
       // م14: ملخص المريض إن وُجد (404 = لم يُولَّد بعد — حالة طبيعية)
-      try {
-        const stored = await api<PatientSummaryState>(`/visits/${visitId}/patient-summary`);
-        setPatientSummary(stored.data);
-      } catch {
-        setPatientSummary(null);
+      if (canPatientSummary) {
+        try {
+          const stored = await api<PatientSummaryState>(`/visits/${visitId}/patient-summary`);
+          setPatientSummary(stored.data);
+        } catch {
+          setPatientSummary(null);
+        }
       }
     } catch (err) {
       showError(err);
     }
-    // نص المحادثة يُجلب مع التحميل: تفريغ فارغ = «لم يُلتقط صوت» — تمييزه عن فشل التحليل (W-224)
+    // نص المحادثة يُجلب مع التحميل: تفريغ فارغ = «لم يُلتقط صوت» — تمييزه عن فشل التحليل (W-224).
+    // خارج الباقة: لا نطلبه أصلاً، وتمييز «لم يُلتقط صوت» يأتي من summary.has_transcript.
+    if (!canSeeTranscript) return;
     try {
       const transcriptBody = await api<{ content: { segments: TranscriptSegment[] } }>(`/visits/${visitId}/transcript`);
       setTranscript(transcriptBody.data.content.segments ?? []);
@@ -168,7 +197,7 @@ export default function ReviewPage() {
     } catch (err) {
       if (err instanceof ApiError && err.code === "MDF-4041") setTranscriptLoaded(true); // لا تفريغ لهذه الزيارة إطلاقاً
     }
-  }, [visitId, showError]);
+  }, [visitId, showError, canCheckClaim, canPatientSummary, canSeeTranscript]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -189,8 +218,11 @@ export default function ReviewPage() {
   const claimBlocked = claim?.blocking_count ?? 0;
   // نص المذكرة يُحرَّر حتى البوابة ① فقط
   const noteEditable = summary !== null && !locked && !noteApproved;
-  // تفريغ فارغ = الميكروفون لم يلتقط كلاماً — سببٌ أدق من «فشل التحليل» ويُعرض بدله
-  const noAudio = summary !== null && transcriptLoaded && transcript.length === 0;
+  // تفريغ فارغ = الميكروفون لم يلتقط كلاماً — سببٌ أدق من «فشل التحليل» ويُعرض بدله.
+  // خارج باقة عرض النص لا نجلب المقاطع، فالواقعة تأتي من الملخص نفسه (has_transcript).
+  const noAudio = summary !== null && (canSeeTranscript
+    ? transcriptLoaded && transcript.length === 0
+    : !summary.has_transcript);
   const analysisFailed = summary !== null && allGuidance.length === 0 && summary.state === "in_review" && !noAudio;
 
   const handleMutationError = (err: unknown, sectionId?: string, mine?: string) => {
@@ -436,7 +468,7 @@ export default function ReviewPage() {
       document.querySelector(".guidance-card.pending")?.scrollIntoView({ behavior: "smooth", block: "center" });
       return;
     }
-    const withPendingText = summary.sections.find((section) => PENDING_TEXT.test(section.content_current));
+    const withPendingText = summary.sections.find((section) => hasPendingText(section.content_current));
     if (withPendingText !== undefined) {
       toast(L(`عنصر معلق [ ] في قسم ${withPendingText.section_key} — عالجه قبل الاعتماد`,
               `Pending item [ ] in section ${withPendingText.section_key} — resolve it before approval`));
@@ -466,7 +498,7 @@ export default function ReviewPage() {
   // البوابة ① — اعتماد نص المذكرة (يجمّد النص، ويفتح حسم الأكواد)
   const approveNote = async () => {
     if (summary === null) return;
-    const withPendingText = summary.sections.find((section) => PENDING_TEXT.test(section.content_current));
+    const withPendingText = summary.sections.find((section) => hasPendingText(section.content_current));
     if (withPendingText !== undefined) {
       toast(L(`عنصر معلق [ ] في قسم ${withPendingText.section_key} — عالجه قبل اعتماد النص`,
               `Pending item [ ] in section ${withPendingText.section_key} — resolve it before note approval`));
@@ -588,6 +620,7 @@ export default function ReviewPage() {
 
   // م10: تشغيل سند جملة — بسياق ثانية قبل البداية وثانية بعد النهاية
   const playEvidence = (sectionId: string, index: number, sentence: EvidenceSentence) => {
+    if (!canHearAudio) return;  // خارج الباقة — والخادم يمنع البث كذلك (MDF-4032)
     if (sentence.audio_start_ms === null || sentence.audio_end_ms === null) return;
     setPlayer({
       sectionId, index,
@@ -663,7 +696,9 @@ export default function ReviewPage() {
           <span className="badge warn">{L("معلق", "Pending")} <span className="num">{counters.pending}</span></span>
           <span className="badge success">{L("مقبول", "Accepted")} <span className="num">{counters.accepted}</span></span>
           <span className="badge danger">{L("مرفوض", "Rejected")} <span className="num">{counters.rejected}</span></span>
-          <button className="btn-row" onClick={() => void openTranscript()}>{L("نص المحادثة الكامل", "Full transcript")}</button>
+          {canSeeTranscript ? (
+            <button className="btn-row" onClick={() => void openTranscript()}>{L("نص المحادثة الكامل", "Full transcript")}</button>
+          ) : null}
           {/* م13: يظهر فقط عند وجود معلّق — وحسم آخر بند يحلّ شرط MDF-4222 فوراً */}
           {!locked && counters.pending > 0 ? (
             <button className="btn-row" onClick={() => setRejectAllOpen(true)}
@@ -676,7 +711,7 @@ export default function ReviewPage() {
             <span className="badge success">{L("🔒 معتمدة — قراءة فقط (MDF-4226)", "🔒 Approved — read-only (MDF-4226)")}</span>
           ) : voided ? (
             <span className="badge" style={{ background: "#fbeaea", color: "#a13333" }}>{L("⊘ مُبطلة — قراءة فقط", "⊘ Voided — read-only")}</span>
-          ) : ["summarized", "in_review", "approved"].includes(summary.state) ? (
+          ) : canVoid && ["summarized", "in_review", "approved"].includes(summary.state) ? (
             // مصادر الإبطال الموسّعة (م4): قبل النقل — بعد النقل المسار reopen
             <button className="btn-danger-outline" style={{ height: 34 }} onClick={() => setVoidOpen(true)}
               title={L("زيارة لا يصح اعتمادها (مريض خطأ / مكررة / تجريبية / سحب موافقة) — إبطال بسبب مدوَّن في التدقيق",
@@ -869,7 +904,7 @@ export default function ReviewPage() {
 
         {/* بطاقات الأقسام — ديناميكياً من القالب */}
         {summary.sections.map((section) => {
-          const pendingText = PENDING_TEXT.test(section.content_current);
+          const pendingText = hasPendingText(section.content_current);
           const titlePair = SECTION_TITLES[section.section_key];
           const title = titlePair !== undefined ? L(titlePair.ar, titlePair.en) : section.section_key;
           return (
@@ -890,8 +925,12 @@ export default function ReviewPage() {
                 {noteEditable && editing !== section.id && dictating !== section.id ? (
                   <span style={{ display: "inline-flex", gap: 6 }}>
                     <button className="btn-row" onClick={() => { setEditing(section.id); setEditText(section.content_current); }}>{L("✏ كتابة", "✏ Type")}</button>
-                    <button className="btn-row" onClick={() => startDictation(section)}>{L("🎤 إملاء صوتي", "🎤 Voice dictation")}</button>
-                    <button className="btn-row" onClick={() => document.getElementById("ai-chat")?.scrollIntoView({ behavior: "smooth" })}>{L("💬 محادثة AI", "💬 AI chat")}</button>
+                    {canDictate ? (
+                      <button className="btn-row" onClick={() => startDictation(section)}>{L("🎤 إملاء صوتي", "🎤 Voice dictation")}</button>
+                    ) : null}
+                    {canAiChat ? (
+                      <button className="btn-row" onClick={() => document.getElementById("ai-chat")?.scrollIntoView({ behavior: "smooth" })}>{L("💬 محادثة AI", "💬 AI chat")}</button>
+                    ) : null}
                   </span>
                 ) : null}
               </div>
@@ -931,7 +970,9 @@ export default function ReviewPage() {
                 // م10: عرض جملةً بجملة — نقرة الجملة المسنودة تشغّل مقطعها الصوتي (±1ث)
                 <p className="clinical" style={{ margin: "10px 0 0", lineHeight: 2.1 }}>
                   {section.evidence.map((sentence, index) => {
-                    const hasAudio = sentence.audio_start_ms !== null && sentence.segment_ids.length > 0;
+                    // «سند مسموع» = للجملة مقطع صوتي **وباقة المنشأة تُتيح سماعه**
+                    const hasAudio = canHearAudio
+                      && sentence.audio_start_ms !== null && sentence.segment_ids.length > 0;
                     const isActive = player !== null && player.sectionId === section.id && player.index === index;
                     // م11: درجتان بصريتان — دون low إبراز قوي، وبينها وbين medium إبراز خفيف
                     const conf = sentence.confidence;
@@ -943,14 +984,17 @@ export default function ReviewPage() {
                       <span key={index}
                         className={`ev-sentence${hasAudio ? " has-audio" : ""}${isActive ? " active" : ""}${confClass}`}
                         onClick={hasAudio ? () => playEvidence(section.id, index, sentence) : undefined}
-                        title={confClass !== ""
+                        title={confClass !== "" && canHearAudio
                           ? L("ثقة تفريغ منخفضة — اسمع المصدر", "Low transcription confidence — listen to the source")
+                          : confClass !== ""
+                          ? L("ثقة تفريغ منخفضة — راجع الصياغة", "Low transcription confidence — review the wording")
                           : hasAudio
                             ? L("اسمع المقطع المصدر من المحادثة (±1 ثانية سياق)", "Play the source segment from the conversation (±1s context)")
                             : undefined}>
                         {sentence.text}
                         {hasAudio ? <span className="ev-icon" aria-hidden>🎧</span> : null}
-                        {!hasAudio && sentence.origin === "ai" ? (
+                        {/* «بلا مصدر صوتي» وسم عن الجملة نفسها — لا يُطلق حين المنع من الباقة */}
+                        {!hasAudio && canHearAudio && sentence.origin === "ai" ? (
                           <span className="ev-tag">{L("بلا مصدر صوتي", "No audio source")}</span>
                         ) : null}
                         {sentence.origin === "doctor" ? (
@@ -972,7 +1016,9 @@ export default function ReviewPage() {
                     src={`/api/v1/visits/${visitId}/audio?token=${encodeURIComponent(getToken() ?? "")}`}
                     style={{ flex: 1, height: 34 }} />
                   <span style={{ fontSize: 11.5, color: "#5c7096" }}>
-                    {L("المقطع المصدر مُبرز في نص المحادثة الكامل", "The source segment is highlighted in the full transcript")}
+                    {canSeeTranscript
+                      ? L("المقطع المصدر مُبرز في نص المحادثة الكامل", "The source segment is highlighted in the full transcript")
+                      : L("يُشغَّل مقطع الجملة المصدر (±1 ثانية سياق)", "Playing the sentence's source segment (±1s context)")}
                   </span>
                   <button className="btn-row" onClick={() => { audioRef.current?.pause(); setPlayer(null); }}>
                     {L("إغلاق", "Close")}
@@ -1109,8 +1155,8 @@ export default function ReviewPage() {
           );
         })}
 
-        {/* م14: ملخص المريض بالعربي — بعد البوابة ① حصراً */}
-        {noteApproved && !voided ? (
+        {/* م14: ملخص المريض بالعربي — بعد البوابة ① حصراً، وميزة باقة (2026-08-03) */}
+        {noteApproved && !voided && canPatientSummary ? (
           <section className="card" style={{ marginTop: 14 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
               <strong style={{ fontSize: 16, flex: 1 }}>{L("ملخص المريض بالعربي", "Patient summary (Arabic)")}</strong>
@@ -1191,7 +1237,8 @@ export default function ReviewPage() {
           </section>
         ) : null}
 
-        {/* محادثة AI الختامية W-217 */}
+        {/* محادثة AI الختامية W-217 — ميزة باقة (2026-08-03) */}
+        {canAiChat ? (
         <section id="ai-chat" className="card" style={{ marginTop: 14 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <strong style={{ fontSize: 16, flex: 1 }}>{L("محادثة AI الختامية", "Final AI chat")}</strong>
@@ -1255,17 +1302,20 @@ export default function ReviewPage() {
                    "🔒 Note approved (gate ①) — editing is closed. Code resolution remains available below.")}
               </span>
               {/* حلقة CDI: كود يحتاج سنداً ناقصاً في النص؟ فتح بسبب مسجّل بدل كود بلا سند */}
+              {canUnlock ? (
               <button className="btn-secondary" style={{ height: 30, padding: "0 12px", fontSize: 12.5 }} onClick={() => setUnlockOpen(true)}
                 title={L("الكود المقترح يتطلب تفصيلاً لا يذكره النص المجمّد؟ افتح المذكرة بسبب مسجّل، عدّل، ثم أعد الاعتماد",
                          "The suggested code needs a detail the frozen text lacks? Unlock with an audited reason, edit, then re-approve")}>
                 {L("🔓 فتح المذكرة", "🔓 Unlock note")}
               </button>
+              ) : null}
             </p>
           ) : null}
           <p style={{ fontSize: 12.5, color: "#5c7096", margin: "10px 0 0" }}>
             {L("كل تعديل يسجّل", "Every edit logs an")} <bdi>edit_event</bdi> {L("بقناته — كتابة / صوت / محادثة (DOC-04 §٥).", "with its channel — typing / voice / chat (DOC-04 §5).")}
           </p>
         </section>
+        ) : null}
       </main>
 
       {/* شريط الاعتماد الثابت — بوابتان ①② (توجيه المالك 2026-07-22) + حالة الرفع W-219 */}
@@ -1295,11 +1345,12 @@ export default function ReviewPage() {
                     : L("معتمدة — بانتظار الرفع", "Approved — awaiting upload")}
               </span>
               <span style={{ flex: 1 }} />
-              {canExport ? <ExportButtons L={L} onPdf={() => void downloadPdf()} onCopy={() => void copyForEmr()} /> : null}
+              {canExport ? <ExportButtons L={L} pdf={canExportPdf} text={canExportText}
+                onPdf={() => void downloadPdf()} onCopy={() => void copyForEmr()} /> : null}
               {summary.state === "upload_failed" ? (
                 <button className="btn" onClick={() => void retryUpload()}>{L("إعادة محاولة الرفع", "Retry upload")}</button>
               ) : null}
-              {summary.state === "uploaded" ? (
+              {summary.state === "uploaded" && canReopen ? (
                 <button className="btn-secondary" onClick={() => setReopenOpen(true)}
                   title={L("تعديل بعد النقل؟ نسخة جديدة ببوابتين تستبدل السابقة لدى المستشفى (replace) — السابقة تبقى مجمّدة",
                            "Editing after transfer? A new version with both gates replaces the previous one at the hospital — the old version stays frozen")}>
@@ -1359,11 +1410,13 @@ export default function ReviewPage() {
                           "Ready for code approval · Approval uploads the visit (FHIR/NPHIES) and unlocks export (FR-802)")}
               </span>
               {/* مسار Unlock: متاح فقط في مرحلة ② قبل إتمامها — بعد الاعتماد النهائي المسار Addendum */}
-              <button className="btn-secondary" onClick={() => setUnlockOpen(true)}
-                title={L("كود يتطلب تفصيلاً لا يذكره النص المجمّد (جهة، مع/بدون مضاعفات…)؟ افتح المذكرة بسبب مسجّل",
-                         "A code needs a detail the frozen text lacks (laterality, with/without complications…)? Unlock with an audited reason")}>
-                {L("🔓 فتح المذكرة", "🔓 Unlock note")}
-              </button>
+              {canUnlock ? (
+                <button className="btn-secondary" onClick={() => setUnlockOpen(true)}
+                  title={L("كود يتطلب تفصيلاً لا يذكره النص المجمّد (جهة، مع/بدون مضاعفات…)؟ افتح المذكرة بسبب مسجّل",
+                           "A code needs a detail the frozen text lacks (laterality, with/without complications…)? Unlock with an audited reason")}>
+                  {L("🔓 فتح المذكرة", "🔓 Unlock note")}
+                </button>
+              ) : null}
               <button className="btn-success btn-approve"
                 disabled={counters.pending > 0 || awaitingInput > 0 || claimBlocked > 0}
                 onClick={() => void approve()}>
@@ -1384,7 +1437,8 @@ export default function ReviewPage() {
                   {L("المحاولات:", "Attempts:")} <span className="num">{upload.status.attempts_count}</span> {L("· التحقق البنيوي NPHIES: مجتاز ✓", "· NPHIES structural validation: passed ✓")}
                 </span>
                 <span style={{ flex: 1 }} />
-                {canExport ? <ExportButtons L={L} onPdf={() => void downloadPdf()} onCopy={() => void copyForEmr()} /> : null}
+                {canExport ? <ExportButtons L={L} pdf={canExportPdf} text={canExportText}
+                onPdf={() => void downloadPdf()} onCopy={() => void copyForEmr()} /> : null}
                 <button className="btn-secondary" onClick={() => router.push("/doctor/visits")}>{L("سجل الزيارات", "Visit log")}</button>
               </span>
             ) : (
@@ -1396,17 +1450,24 @@ export default function ReviewPage() {
                 </span>
                 <span style={{ flex: 1 }} />
                 {/* وضع الجسر: حتى لو فشل الرفع للمستشفى، التصدير متاح بعد البوابة ② */}
-                {canExport ? <ExportButtons L={L} onPdf={() => void downloadPdf()} onCopy={() => void copyForEmr()} /> : null}
+                {canExport ? <ExportButtons L={L} pdf={canExportPdf} text={canExportText}
+                onPdf={() => void downloadPdf()} onCopy={() => void copyForEmr()} /> : null}
                 <button className="btn" onClick={() => void retryUpload()}>{L("إعادة المحاولة", "Retry")}</button>
               </span>
             )
           ) : null}
         </div>
         {/* شريط التصدير — وضع الجسر: مخرجات يوم-واحد قبل اكتمال التكامل (A3) */}
-        {canExport ? (
+        {canExport && (canExportPdf || canExportText) ? (
           <div style={{ maxWidth: 960, margin: "0 auto", padding: "0 20px 10px", fontSize: 11.5, color: "#5c7096" }}>
-            {L("التصدير متاح بعد البوابة ② — PDF بترويسة المنشأة أو نسخ نصي نظيف للـ EMR (وضع الجسر قبل اكتمال التكامل).",
-               "Export available after gate ② — PDF with the facility letterhead or a clean text copy for the EMR (bridge mode before full integration).")}
+            {canExportPdf && canExportText
+              ? L("التصدير متاح بعد البوابة ② — PDF بترويسة المنشأة أو نسخ نصي نظيف للـ EMR (وضع الجسر قبل اكتمال التكامل).",
+                  "Export available after gate ② — PDF with the facility letterhead or a clean text copy for the EMR (bridge mode before full integration).")
+              : canExportPdf
+                ? L("التصدير متاح بعد البوابة ② — PDF بترويسة المنشأة (وضع الجسر قبل اكتمال التكامل).",
+                    "Export available after gate ② — PDF with the facility letterhead (bridge mode before full integration).")
+                : L("التصدير متاح بعد البوابة ② — نسخ نصي نظيف للـ EMR (وضع الجسر قبل اكتمال التكامل).",
+                    "Export available after gate ② — a clean text copy for the EMR (bridge mode before full integration).")}
           </div>
         ) : null}
       </div>

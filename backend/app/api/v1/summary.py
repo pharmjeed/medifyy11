@@ -33,11 +33,23 @@ from ...pipelines.stt import get_stt
 from ...services.claim_readiness import diagnosis_options, evaluate_visit, unlinked_items
 from ...services.code_registry import check_code, registry_systems
 from ...services.evidence import refresh_section_evidence
+from ...services.features import feature_enabled, require_feature
 from ...services.history import previous_visits
 from ...services.stt_confidence import resolve_thresholds
 from ...services.visits import active_note_approval, get_visit_for_doctor, summary_etag, summary_hashes
 
 router = APIRouter()
+
+
+def _readiness_or_none(db, facility_id, visit: Visit):
+    """جاهزية المطالبة ميزة باقة (قرار مالك 2026-08-03).
+
+    في الردود المركّبة تُحذف بإطفائها (`null`) بدل رفض النقطة كلها — الفعل الأصلي
+    (إضافة كود/ربط تشخيص/رفض جماعي) ليس هو الميزة، والفاحص وحده هو المشمول.
+    """
+    if not feature_enabled(db, facility_id, "visit.claim_readiness"):
+        return None
+    return evaluate_visit(db, visit)
 
 
 def _get_summary(db, visit: Visit) -> Summary:
@@ -251,6 +263,12 @@ def get_summary(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB, response: Response
         "min": transcript_stats.get("confidence_min"),
         "thresholds": resolve_thresholds(),
     }
+    # «هل التُقط كلام أصلاً» — واقعة لا محتوى، فلا تُحجب بميزة عرض النص (قرار مالك 2026-08-03).
+    # بدونها تُخطئ الواجهة الرسالة: «فشل التحليل» (W-224) بدل «الميكروفون لم يلتقط شيئاً».
+    transcript_row = db.execute(
+        select(Transcript.content_json).where(Transcript.visit_id == visit.id)
+    ).scalar_one_or_none()
+    has_transcript = bool((transcript_row or {}).get("segments"))
     return ok({
         "visit_id": str(visit.id),
         "state": visit.state,
@@ -269,6 +287,7 @@ def get_summary(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB, response: Response
         "version": visit.cycle,
         "versions": versions_out,
         "stt_confidence": stt_confidence,
+        "has_transcript": has_transcript,
         "patient_context": patient_context,
         "previous_visits": history,
     })
@@ -303,6 +322,7 @@ def claim_readiness(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB):
 
     القواعد بيانات في backend/rules/*.yaml — إضافة قاعدة لا تتطلب deploy.
     """
+    require_feature(db, ctx.facility_id, "visit.claim_readiness")
     visit = get_visit_for_doctor(db, visit_id)
     result = evaluate_visit(db, visit)
     result["diagnosis_options"] = diagnosis_options(db, visit)
@@ -386,7 +406,7 @@ def add_clinician_code(visit_id: uuid.UUID, body: ClinicianCodeIn, ctx: DoctorAu
         "code_system": item.code_system,
         "code_value": item.code_value,
         "status": item.status,
-        "claim_readiness": evaluate_visit(db, visit),
+        "claim_readiness": _readiness_or_none(db, ctx.facility_id, visit),
     })
 
 
@@ -418,7 +438,7 @@ def link_diagnosis(item_id: uuid.UUID, body: GuidanceLinkIn, ctx: DoctorAuth, db
     item.linked_dx_code = body.linked_dx_code
     db.flush()
     return ok({"item_id": str(item.id), "linked_dx_code": item.linked_dx_code,
-               "claim_readiness": evaluate_visit(db, visit)})
+               "claim_readiness": _readiness_or_none(db, ctx.facility_id, visit)})
 
 
 class SectionPatchIn(BaseModel):
@@ -464,6 +484,7 @@ class DictateIn(BaseModel):
 @router.post("/summary-sections/{section_id}/dictate")
 def dictate_section(section_id: uuid.UUID, body: DictateIn, ctx: DoctorAuth, db: DB, request: Request, response: Response):
     """تحرير صوتي (FR-706): إملاء قصير → دمج في الفقرة — نفس نموذج P1."""
+    require_feature(db, ctx.facility_id, "visit.dictate")
     section = db.execute(select(SummarySection).where(SummarySection.id == section_id)).scalar_one_or_none()
     if section is None:
         raise MedifyError("MDF-4041")
@@ -601,7 +622,7 @@ def reject_remaining_guidance(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB):
     return ok({
         "rejected_count": len(pending),
         "bulk_action_id": bulk_action_id,
-        "claim_readiness": evaluate_visit(db, visit),
+        "claim_readiness": _readiness_or_none(db, ctx.facility_id, visit),
     })
 
 
@@ -613,6 +634,7 @@ class AiChatIn(BaseModel):
 @router.post("/visits/{visit_id}/ai-chat")
 def ai_chat(visit_id: uuid.UUID, body: AiChatIn, ctx: DoctorAuth, db: DB, response: Response):
     """محادثة التعديل الختامية (FR-707) — رد + فروقات مطبقة، يسجل edit_event(ai_chat)."""
+    require_feature(db, ctx.facility_id, "visit.ai_chat")
     visit = get_visit_for_doctor(db, visit_id)
     _guard_note_open(db, visit)
     result = run_edit_chat(db, visit, body.message, body.history)

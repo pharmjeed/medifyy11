@@ -28,6 +28,7 @@ from ...db import get_system_db
 from ...deps import SuperAdminContext, SuperAuth, pagination, require_cap, require_reauth
 from ...envelope import ok, paginated
 from ...errors import MedifyError
+from ...features import CORE_KEYS, FEATURE_BY_KEY, FEATURE_GROUPS, catalog_out
 from ...models import (
     Clinic,
     CodingSystemConfig,
@@ -52,6 +53,7 @@ from ...security import (
 )
 from ...services.billing import issue_invoice, plan_seat_price, seats_used
 from ...services.default_templates import seed_default_templates
+from ...services.features import plan_features
 from ...totp import (
     generate_recovery_codes,
     generate_secret,
@@ -877,12 +879,13 @@ def sa_reset_user_password(user_id: uuid.UUID, ctx: SuperAuth, db: SystemDB):
     return ok({"temporary_password": temp_password})
 
 
-# ════════════════ التسعير — تكلفة الدكتور لكل دورة (تعديل مالك §٠.١) ════════════════
+# ════════ الباقات — تكلفة الدكتور لكل دورة (تعديل مالك §٠.١) + مميزاتها (قرار مالك 2026-08-03) ════════
 
 def _plan_out(db: Session, plan: Plan) -> dict:
     facilities_count = db.execute(
         select(func.count(Subscription.id)).where(Subscription.plan == plan.code)
     ).scalar_one()
+    features = plan_features(plan)
     return {
         "id": str(plan.id),
         "code": plan.code,
@@ -892,7 +895,50 @@ def _plan_out(db: Session, plan: Plan) -> dict:
         "billing_cycle": plan.billing_cycle,
         "is_active": plan.is_active,
         "facilities_count": facilities_count,
+        "features": features,
+        # عدّاد الاختيارية المفعّلة (الأساسية خارج العدّ — ليست خياراً)
+        "features_on": sum(1 for key, on in features.items() if on and key not in CORE_KEYS),
+        "features_total": len(features) - len(CORE_KEYS),
     }
+
+
+@router.get("/features")
+def sa_feature_catalog(ctx: SuperAuth, db: SystemDB):
+    """كتالوج المميزات القابلة للضم للباقات — مصدره الكود (`app/features.py`)."""
+    return ok({"groups": [{"code": c, "name_ar": ar, "name_en": en} for c, ar, en in FEATURE_GROUPS],
+               "features": catalog_out()})
+
+
+class SaPlanFeaturesIn(BaseModel):
+    features: dict[str, bool]
+
+
+@router.put("/plans/{plan_id}/features")
+def sa_set_plan_features(plan_id: uuid.UUID, body: SaPlanFeaturesIn, ctx: SuperAuth, request: Request, db: SystemDB):
+    """ضبط ما تُظهره الباقة للدكتور — تسري فوراً على كل منشأة عليها (مبدأ الترابط، DOC-20 تعديل ١).
+
+    الخريطة تُستبدل كاملة (PUT لا PATCH): ما لم يُذكر يعود لافتراض الكتالوج، فلا تُخزَّن
+    مفاتيح ميتة. الأساسية تُتجاهل إن أُرسلت — لا تُطفأ بأي حال.
+    """
+    require_cap(ctx, "plans.write")  # owner حصراً (DOC-20 §١.٢)
+    require_reauth(ctx, request)     # تغيير ما يراه الأطباء — إجراء حسّاس كتغيير السعر
+    plan = db.execute(select(Plan).where(Plan.id == plan_id)).scalar_one_or_none()
+    if plan is None:
+        raise MedifyError("MDF-4041")
+
+    unknown = sorted(set(body.features) - set(FEATURE_BY_KEY))
+    if unknown:
+        raise MedifyError("MDF-4041", details={"reason": "unknown_feature_keys", "keys": unknown})
+
+    before = plan_features(plan)
+    stored = {key: value for key, value in body.features.items() if key not in CORE_KEYS}
+    plan.features = stored
+    after = plan_features(plan)
+    changed = {key: {"from": before[key], "to": after[key]} for key in after if before[key] != after[key]}
+    if changed:
+        sa_audit(db, ctx, "sa.plan_features_updated", "plan", plan.id,
+                 meta={"code": plan.code, "changed": changed})
+    return ok(_plan_out(db, plan))
 
 
 @router.get("/plans")

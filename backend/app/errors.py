@@ -12,6 +12,7 @@ MDF_CATALOG: dict[str, tuple[int, str, str]] = {
     "MDF-4011": (401, "بيانات الدخول غير صحيحة.", "Invalid credentials."),
     "MDF-4012": (401, "انتهت الجلسة — يلزم تسجيل الدخول من جديد.", "Session expired — please sign in again."),
     "MDF-4031": (403, "هذا الإجراء خارج صلاحيات دورك.", "Action outside your role permissions."),
+    "MDF-4032": (403, "هذه الميزة غير مشمولة في باقة منشأتك.", "This feature is not included in your facility's plan."),
     "MDF-4041": (404, "المورد غير موجود أو خارج نطاق رؤيتك.", "Resource not found or outside your visibility scope."),
     "MDF-4013": (403, "الحساب معطّل أو المنشأة معلّقة — تواصل مع الأدمن أو سدد الفواتير المستحقة.", "Account disabled or facility suspended — contact your admin or settle due invoices."),
     "MDF-4014": (401, "رابط استعادة كلمة المرور غير صالح أو منتهٍ أو مستخدم.", "Password reset link is invalid, expired, or already used."),
@@ -45,12 +46,13 @@ MDF_CATALOG: dict[str, tuple[int, str, str]] = {
     "MDF-5001": (500, "خطأ داخلي غير مصنّف.", "Unclassified internal error."),
 }
 
-assert len(MDF_CATALOG) == 32, (
-    "32 رمزاً لا غير: 22 (DOC-13 v1.2) + MDF-4015/4229 (DOC-20) "
+assert len(MDF_CATALOG) == 33, (
+    "33 رمزاً لا غير: 22 (DOC-13 v1.2) + MDF-4015/4229 (DOC-20) "
     "+ MDF-4230/4231/4232 (بوابتا الاعتماد وموافقة المريض — توجيه المالك 2026-07-22) "
     "+ MDF-4233 (السجل المرجعي للأكواد — قرار مالك 2026-08-02) "
     "+ MDF-4234/4235/4236/4237 (سلامة الصوت · مخارج المُبطلة · حواجز Unlock · "
-    "جاهزية المطالبة — التحصين م2/م4/م5/م12)"
+    "جاهزية المطالبة — التحصين م2/م4/م5/م12) "
+    "+ MDF-4032 (ميزة خارج باقة المنشأة — قرار مالك 2026-08-03)"
 )
 
 

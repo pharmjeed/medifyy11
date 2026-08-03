@@ -48,7 +48,7 @@ class PlatformAdmin(Base, TimestampMixin):
 
 
 class Plan(Base, TimestampMixin):
-    """دورة فوترة بتكلفة للدكتور (تعديل مالك 2026-07-16: الاشتراك بعدد الدكاترة فقط).
+    """باقة = تكلفة الدكتور لدورة فوترة + ما تُظهره للدكتور (قرار مالك 2026-08-03).
 
     subscriptions.plan يشير تطبيقياً إلى code — يُتحقق عند الإسناد.
     """
@@ -63,6 +63,9 @@ class Plan(Base, TimestampMixin):
     seat_price_sar: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)  # تكلفة الدكتور
     billing_cycle: Mapped[str] = mapped_column(BILLING_CYCLE, nullable=False, default="monthly")
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # مميزات الباقة (هجرة 0021) — {feature_key: bool} لمفاتيح app.features حصراً.
+    # NULL أو مفتاح غائب = افتراض الكتالوج، فالباقات القائمة لا تفقد شيئاً بالترقية.
+    features: Mapped[Any | None] = mapped_column(JSONB, nullable=True)
 
 
 class PlatformSetting(Base, TimestampMixin):

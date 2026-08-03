@@ -4,6 +4,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { ApiError, api } from "@/lib/api";
+import { useFeature } from "@/lib/features";
 import { useLang } from "@/lib/i18n";
 import type { Template, TemplateSection } from "@/lib/types";
 import { Shell } from "@/components/Shell";
@@ -49,6 +50,9 @@ function TemplatesInner() {
   const toast = useToast();
   const showError = useErrorScreen();
   const { L, lang } = useLang();
+  // مميزات الباقة (قرار مالك 2026-08-03): بإطفائها يبقى الاختيار من الجاهزة بلا إنشاء/حذف
+  const canCustomTemplates = useFeature("templates.custom");
+  const canReverseBuild = useFeature("templates.reverse_build");
 
   const [view, setView] = useState<View>("list");
   const [templates, setTemplates] = useState<Template[] | null>(null);
@@ -254,7 +258,7 @@ function TemplatesInner() {
       </div>
       <div style={{ display: "flex", gap: 8, marginTop: "auto" }}>
         <button className="btn-row" onClick={() => setStructureTpl(tpl)}>{L("معاينة البنية", "Preview structure")}</button>
-        {tpl.is_personal ? (
+        {tpl.is_personal && canCustomTemplates ? (
           <button className="btn-row neutral" onClick={() => void removeTpl(tpl)}>{L("حذف", "Delete")}</button>
         ) : null}
       </div>
@@ -271,7 +275,9 @@ function TemplatesInner() {
             <h1 className="page-title" style={{ marginBottom: 2 }}>{L("قوالب التلخيص", "Summary templates")}</h1>
             <p className="page-desc" style={{ margin: 0 }}>{L("الاختيار إلزامي قبل بدء أي تسجيل (FR-501)", "Selecting a template is required before starting any recording (FR-501)")}</p>
           </div>
-          <button className="btn" onClick={() => setView("builder")}>{L("+ قالب جديد عكسي", "+ New reverse-built template")}</button>
+          {canCustomTemplates && canReverseBuild ? (
+            <button className="btn" onClick={() => setView("builder")}>{L("+ قالب جديد عكسي", "+ New reverse-built template")}</button>
+          ) : null}
         </div>
 
         <h2 style={{ fontSize: 16, fontWeight: 800, margin: "0 0 10px" }}>{L("قوالب المنشأة الجاهزة", "Facility preset templates")}</h2>
@@ -288,7 +294,10 @@ function TemplatesInner() {
         <h2 style={{ fontSize: 16, fontWeight: 800, margin: "22px 0 10px" }}>{L("قوالبي الشخصية", "My personal templates")}</h2>
         {templates === null ? null : personalTemplates.length === 0 ? (
           <div className="card" style={{ textAlign: "center", color: "#5c7096" }}>
-            {L("لا قوالب شخصية بعد — أنشئ أول قالب بالمنشئ العكسي", "No personal templates yet — create your first with the reverse builder")}
+            {canCustomTemplates && canReverseBuild
+              ? L("لا قوالب شخصية بعد — أنشئ أول قالب بالمنشئ العكسي", "No personal templates yet — create your first with the reverse builder")
+              : L("القوالب الشخصية غير مشمولة في باقة منشأتك — اختر من قوالب المنشأة الجاهزة أعلاه.",
+                  "Personal templates are not included in your facility's plan — pick from the facility presets above.")}
           </div>
         ) : (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 14 }}>

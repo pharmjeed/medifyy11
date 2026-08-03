@@ -11,7 +11,7 @@ import { useLang } from "@/lib/i18n";
 import type { Lang } from "@/lib/i18n";
 import { saApi } from "@/lib/sa";
 import type { SaApiOptions } from "@/lib/sa";
-import type { SaPlan } from "@/lib/types";
+import type { FeatureCatalogItem, FeatureMap, SaFeatureCatalog, SaPlan } from "@/lib/types";
 
 type LFn = (ar: string, en: string) => string;
 
@@ -28,7 +28,7 @@ async function saSensitive<T>(L: LFn, path: string, options: SaApiOptions) {
   }
 }
 
-const COLS = ".9fr 1.2fr 1fr .9fr .9fr .7fr .9fr";
+const COLS = ".85fr 1.1fr .9fr .7fr .8fr .8fr .65fr 1.15fr";
 
 function fmtSar(value: string): string {
   const num = Number(value);
@@ -109,12 +109,113 @@ function PlanModal({ plan, onClose, onDone }: {
   );
 }
 
+/** ما تُظهره الباقة للدكتور (W-SA-05 — قرار مالك 2026-08-03).
+ *  الترتيب والتجميع من كتالوج الخادم (`app/features.py`)؛ الأساسية معروضة مقفولة لتكتمل الصورة. */
+function FeaturesModal({ plan, catalog, onClose, onDone }: {
+  plan: SaPlan;
+  catalog: SaFeatureCatalog;
+  onClose: () => void;
+  onDone: () => Promise<void>;
+}) {
+  const toast = useToast();
+  const { L, lang } = useLang();
+  const [draft, setDraft] = useState<FeatureMap>({ ...plan.features });
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const optional = catalog.features.filter((item) => !item.core);
+  const onCount = optional.filter((item) => draft[item.key] !== false).length;
+  const dirty = optional.some((item) => (draft[item.key] !== false) !== (plan.features[item.key] !== false));
+
+  const setAll = (value: boolean) => {
+    const next: FeatureMap = { ...draft };
+    for (const item of optional) next[item.key] = value;
+    setDraft(next);
+  };
+
+  const submit = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const body: FeatureMap = {};
+      for (const item of optional) body[item.key] = draft[item.key] !== false;
+      await saSensitive(L, `/plans/${plan.id}/features`, { method: "PUT", body: { features: body } });
+      toast(L(`حُدّثت مميزات ${plan.code} — تسري فوراً على ${plan.facilities_count} منشأة`,
+              `${plan.code} features updated — effective immediately for ${plan.facilities_count} facility/ies`));
+      await onDone();
+    } catch (err) {
+      setError(apiErrorText(err, lang, L));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const row = (item: FeatureCatalogItem) => {
+    const enabled = item.core || draft[item.key] !== false;
+    return (
+      <label key={item.key} style={{
+        display: "flex", gap: 10, alignItems: "flex-start", padding: "9px 10px", borderRadius: 8,
+        cursor: item.core ? "default" : "pointer", background: enabled ? "rgba(0,115,109,.05)" : "transparent",
+        border: "1px solid", borderColor: enabled ? "#d6f5f2" : "transparent",
+      }}>
+        <input type="checkbox" checked={enabled} disabled={item.core} style={{ marginTop: 3 }}
+          onChange={(event) => setDraft({ ...draft, [item.key]: event.target.checked })} />
+        <span style={{ flex: 1, minWidth: 0 }}>
+          <span style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+            <strong style={{ fontSize: 13.5 }}>{lang === "ar" ? item.name_ar : item.name_en}</strong>
+            {item.core ? <span className="badge neutral">{L("أساسية — لا تُطفأ", "Core — always on")}</span> : null}
+            <bdi className="tech-badge" style={{ fontSize: 11 }}>{item.key}</bdi>
+          </span>
+          <span style={{ display: "block", fontSize: 12, color: "#5c7096", marginTop: 2 }}>
+            {lang === "ar" ? item.desc_ar : item.desc_en}
+          </span>
+        </span>
+      </label>
+    );
+  };
+
+  return (
+    <Modal title={L(`مميزات ${plan.code} — ما يراه الدكتور`, `${plan.code} features — what the doctor sees`)} onClose={onClose} wide>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+        <span className="badge success"><span className="num">{onCount}</span> / <span className="num">{optional.length}</span> {L("مفعّلة", "enabled")}</span>
+        <span style={{ flex: 1 }} />
+        <button type="button" className="btn-row" onClick={() => setAll(true)}>{L("تفعيل الكل", "Enable all")}</button>
+        <button type="button" className="btn-row" onClick={() => setAll(false)}>{L("إطفاء الكل", "Disable all")}</button>
+      </div>
+      <div style={{ maxHeight: "58vh", overflowY: "auto", paddingInlineEnd: 4 }}>
+        {catalog.groups.map((group) => {
+          const items = catalog.features.filter((item) => item.group === group.code);
+          if (items.length === 0) return null;
+          return (
+            <div key={group.code} style={{ marginBottom: 12 }}>
+              <div style={{ fontSize: 12.5, fontWeight: 800, color: "#005a55", margin: "6px 0 4px" }}>
+                {lang === "ar" ? group.name_ar : group.name_en}
+              </div>
+              {items.map(row)}
+            </div>
+          );
+        })}
+      </div>
+      {error !== null ? <p style={{ color: "#d94b4b", fontSize: 12.5, fontWeight: 700, margin: "10px 0 0" }}>{error}</p> : null}
+      <p style={{ fontSize: 12, color: "#5c7096", margin: "10px 0 0" }}>
+        {L("التغيير يسري فوراً على كل منشأة على هذه الباقة (بلا إعادة دخول)، ولا يمس التسعير ولا الفواتير الصادرة. المنع يُفرض في الخادم لا في الواجهة.",
+           "Changes take effect immediately for every facility on this plan (no re-login), and never touch pricing or issued invoices. Enforcement is server-side, not in the UI.")}
+      </p>
+      <button type="button" className="btn" style={{ width: "100%", marginTop: 12 }} disabled={busy || !dirty} onClick={() => void submit()}>
+        {busy ? <span className="spinner" /> : null} {L("حفظ المميزات", "Save features")}
+      </button>
+    </Modal>
+  );
+}
+
 function PlansInner() {
   const toast = useToast();
   const { L, lang } = useLang();
   const [rows, setRows] = useState<SaPlan[]>([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<SaPlan | null | "new">(null);
+  const [featuresOf, setFeaturesOf] = useState<SaPlan | null>(null);
+  const [catalog, setCatalog] = useState<SaFeatureCatalog | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -127,6 +228,16 @@ function PlansInner() {
       setLoading(false);
     }
   }, [toast, lang, L]);
+
+  // كتالوج المميزات مصدره الكود — يُجلب مرة ويُشارَك بين كل الباقات
+  useEffect(() => {
+    void (async () => {
+      try {
+        const body = await saApi<SaFeatureCatalog>("/features");
+        setCatalog(body.data);
+      } catch { /* بلا كتالوج تبقى الصفحة تسعيراً فقط */ }
+    })();
+  }, []);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -148,13 +259,14 @@ function PlansInner() {
   return (
     <>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-        <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0, flex: 1 }}>{L("تكلفة الدكتور لكل دورة فوترة", "Cost per doctor by billing cycle")}</h2>
+        <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0, flex: 1 }}>{L("الباقات — تكلفة الدكتور وما تُظهره له", "Plans — cost per doctor and what it shows them")}</h2>
         <button className="btn h40" onClick={() => setEditing("new")}>{L("+ دورة تسعير جديدة", "+ New pricing cycle")}</button>
       </div>
       <div className="grid-table">
         <div className="grid-head" style={{ gridTemplateColumns: COLS }}>
           <div>{L("الرمز", "Code")}</div><div>{L("الاسم", "Name")}</div>
           <div>{L("تكلفة الدكتور", "Cost / doctor")}</div><div>{L("الدورة", "Cycle")}</div>
+          <div>{L("المميزات", "Features")}</div>
           <div>{L("منشآت عليها", "Facilities on it")}</div><div>{L("الحالة", "Status")}</div><div>{L("إجراءات", "Actions")}</div>
         </div>
         {loading ? (
@@ -168,6 +280,13 @@ function PlansInner() {
               <div>{lang === "ar" ? plan.name_ar : plan.name_en}</div>
               <div><bdi>{fmtSar(plan.seat_price_sar)} SAR</bdi></div>
               <div>{plan.billing_cycle === "monthly" ? L("شهرية", "Monthly") : L("سنوية", "Yearly")}</div>
+              <div>
+                <span className={plan.features_on === plan.features_total ? "badge success" : plan.features_on === 0 ? "badge neutral" : "badge"}
+                  style={plan.features_on > 0 && plan.features_on < plan.features_total
+                    ? { background: "rgba(42,111,151,.12)", color: "#3b82c4" } : undefined}>
+                  <span className="num">{plan.features_on}</span>/<span className="num">{plan.features_total}</span>
+                </span>
+              </div>
               <div className="num">{plan.facilities_count}</div>
               <div>
                 <span className={plan.is_active ? "badge success" : "badge neutral"}>
@@ -176,6 +295,10 @@ function PlansInner() {
               </div>
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                 <button className="btn-row" disabled={busy === plan.id} onClick={() => setEditing(plan)}>{L("تعديل", "Edit")}</button>
+                <button className="btn-row" disabled={busy === plan.id || catalog === null} onClick={() => setFeaturesOf(plan)}
+                  title={L("اختر ما تُظهره هذه الباقة للدكتور", "Choose what this plan shows the doctor")}>
+                  {L("المميزات", "Features")}
+                </button>
                 <button className={plan.is_active ? "btn-row warn" : "btn-row"} disabled={busy === plan.id} onClick={() => void toggleActive(plan)}>
                   {plan.is_active ? L("إيقاف", "Deactivate") : L("تفعيل", "Activate")}
                 </button>
@@ -188,9 +311,17 @@ function PlansInner() {
         {L("الفاتورة = عدد الدكاترة النشطين × تكلفة الدكتور + ضريبة 15% مفصولة · تعديل التكلفة لا يمس الفواتير الصادرة ويظهر فوراً في صفحة تسجيل المنشآت.",
            "Invoice = active doctors × cost per doctor + itemized 15% VAT · cost changes never touch issued invoices and appear immediately on the facility signup page.")}
       </p>
+      <p style={{ fontSize: 12.5, color: "#5c7096", margin: "6px 0 0" }}>
+        {L("«المميزات» تحدد ما يظهر للدكتور في هذه الباقة — الأساسية (تسجيل، مذكرة، بوابتان، نقل) مضمّنة دائماً ولا تُطفأ.",
+           "“Features” controls what the doctor sees on this plan — the core (recording, note, both gates, upload) is always included and cannot be turned off.")}
+      </p>
       {editing !== null ? (
         <PlanModal plan={editing === "new" ? null : editing} onClose={() => setEditing(null)}
           onDone={async () => { setEditing(null); await load(); }} />
+      ) : null}
+      {featuresOf !== null && catalog !== null ? (
+        <FeaturesModal plan={featuresOf} catalog={catalog} onClose={() => setFeaturesOf(null)}
+          onDone={async () => { setFeaturesOf(null); await load(); }} />
       ) : null}
     </>
   );

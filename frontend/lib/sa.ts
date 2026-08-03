@@ -99,7 +99,7 @@ async function trySaRefresh(): Promise<boolean> {
 }
 
 export interface SaApiOptions {
-  method?: "GET" | "POST" | "PATCH" | "DELETE";
+  method?: "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
   body?: unknown;
   /** رمز TOTP حي للإجراءات الحسّاسة — يُرسل بترويسة X-SA-Reauth (DOC-20 §١.٣) */
   reauthCode?: string;

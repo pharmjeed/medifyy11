@@ -7,6 +7,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { api, clearSession, getSessionUser, getToken } from "@/lib/api";
+import { FeaturesProvider, clearStoredFeatures } from "@/lib/features";
 import { LangToggle, useLang } from "@/lib/i18n";
 import type { NotificationRow, SessionUser } from "@/lib/types";
 import { ErrorScreenProvider, SpecBadge, ToastProvider, fmtDateTime, initials, useToast } from "./ui";
@@ -229,11 +230,13 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
   const logout = async () => {
     try { await api("/auth/logout", { method: "POST" }); } catch { /* تجاهل */ }
     clearSession();
+    clearStoredFeatures();  // باقة المستخدم التالي قد تختلف — لا نرث خريطته
     router.push("/login");
   };
 
   return (
     <ToastProvider>
+      <FeaturesProvider>
       <ErrorScreenProvider>
         <header className="topbar">
           <div className="topbar-inner">
@@ -293,6 +296,7 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
         <NotificationCenter open={notifOpen} onClose={() => setNotifOpen(false)} onUnreadChange={setUnread} />
         {children}
       </ErrorScreenProvider>
+      </FeaturesProvider>
     </ToastProvider>
   );
 }

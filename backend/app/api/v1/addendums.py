@@ -24,6 +24,7 @@ from ...deps import DoctorAuth, DB
 from ...envelope import ok
 from ...errors import MedifyError
 from ...models import Addendum, NoteApproval
+from ...services.features import require_feature
 from ...services.visits import get_visit_for_doctor
 from ...notify import notify
 
@@ -73,6 +74,7 @@ async def create_addendum(
     - Addendum جديد بحالة pending
     - إشعار للدكتور بضرورة موافقته
     """
+    require_feature(db, auth.facility_id, "visit.addendum")
     visit = get_visit_for_doctor(db, visit_id)
     if visit.state not in ("approved", "uploaded"):
         # الملحق لمذكرة معتمدة نهائياً فقط — قبلها التحرير المباشر/Unlock هو المسار

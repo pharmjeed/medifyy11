@@ -15,6 +15,7 @@ from ...audit import audit
 from ...deps import DoctorAuth, DB
 from ...envelope import ok
 from ...errors import MedifyError
+from ...services.features import require_feature
 from ...services.patient_summary import (
     generate_patient_summary,
     get_patient_summary,
@@ -25,10 +26,14 @@ from ...services.visits import get_visit_for_doctor
 
 router = APIRouter()
 
+# ملخص المريض ميزة باقة (قرار مالك 2026-08-03) — الحارس على النقاط الأربع كلها
+FEATURE = "visit.patient_summary"
+
 
 @router.post("/visits/{visit_id}/patient-summary")
 def create_patient_summary(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB):
     """توليد الملخص — بعد البوابة ① حصراً (MDF-4231 قبلها)."""
+    require_feature(db, ctx.facility_id, FEATURE)
     visit = get_visit_for_doctor(db, visit_id)
     summary = generate_patient_summary(db, visit)
     audit(db, ctx.facility_id, "patient_summary.generated", "visit", visit.id, ctx.user_id,
@@ -40,6 +45,7 @@ def create_patient_summary(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB):
 
 @router.get("/visits/{visit_id}/patient-summary")
 def read_patient_summary(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB):
+    require_feature(db, ctx.facility_id, FEATURE)
     visit = get_visit_for_doctor(db, visit_id)
     result = get_patient_summary(db, visit)
     if result is None:
@@ -55,6 +61,7 @@ class PatientSummaryPatchIn(BaseModel):
 @router.patch("/visits/{visit_id}/patient-summary")
 def patch_patient_summary(visit_id: uuid.UUID, body: PatientSummaryPatchIn, ctx: DoctorAuth, db: DB):
     """تعديل الطبيب و/أو قرار التضمين (toggle) قبل النقل."""
+    require_feature(db, ctx.facility_id, FEATURE)
     visit = get_visit_for_doctor(db, visit_id)
     result = update_patient_summary(db, visit, summary=body.summary, included=body.included)
     audit(db, ctx.facility_id, "patient_summary.updated", "visit", visit.id, ctx.user_id,
@@ -66,6 +73,7 @@ def patch_patient_summary(visit_id: uuid.UUID, body: PatientSummaryPatchIn, ctx:
 @router.get("/visits/{visit_id}/patient-summary/pdf")
 def export_patient_summary_pdf(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB):
     """PDF عربي RTL بخط IBM Plex Sans Arabic — endpoint تصدير مستقل."""
+    require_feature(db, ctx.facility_id, FEATURE)
     visit = get_visit_for_doctor(db, visit_id)
     if visit.state == "voided":
         raise MedifyError("MDF-4235", details={"visit_id": str(visit.id)})

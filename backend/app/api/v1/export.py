@@ -17,6 +17,7 @@ from ...envelope import ok
 from ...errors import MedifyError
 from ...models import Approval, Visit
 from ...services.export import export_filename, export_meta, note_pdf, note_text
+from ...services.features import require_feature
 from ...services.versions import latest_uploaded_version
 from ...services.visits import get_visit_for_doctor
 
@@ -41,6 +42,7 @@ def _require_exportable(db, visit: Visit) -> None:
 @router.get("/visits/{visit_id}/export/text")
 def export_text(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB, version: int | None = None):
     """نص نظيف يُلصق في الـ EMR (F-086) — ?version=N لقطة مجمّدة، الافتراضي آخر منقولة."""
+    require_feature(db, ctx.facility_id, "visit.export_text")
     visit = get_visit_for_doctor(db, visit_id)
     _require_exportable(db, visit)
     content = note_text(db, visit, version)
@@ -53,6 +55,7 @@ def export_text(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB, version: int | Non
 @router.get("/visits/{visit_id}/export/pdf")
 def export_pdf(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB, version: int | None = None):
     """PDF بترويسة وتذييل ثنائيي اللغة (F-038/F-084) — ?version=N لقطة مجمّدة (م6)."""
+    require_feature(db, ctx.facility_id, "visit.export_pdf")
     visit = get_visit_for_doctor(db, visit_id)
     _require_exportable(db, visit)
     payload = note_pdf(db, visit, version)

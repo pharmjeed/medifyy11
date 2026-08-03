@@ -25,6 +25,7 @@ from ...models import (
 )
 from ...services.claim_readiness import blocking_findings
 from ...services.code_registry import check_code, registry_systems
+from ...services.features import feature_enabled, require_feature
 from ...services.fhir import build_bundle, store_bundle
 from ...services.metrics import record_approval_metrics
 from ...services.uploader import process_upload_job
@@ -99,6 +100,7 @@ def note_unlock_visit(visit_id: uuid.UUID, body: NoteUnlockIn, ctx: DoctorAuth, 
     قرارات الأكواد المحسومة تبقى كما هي. بعد البوابة ② المسار Addendum حصراً (trigger القاعدة
     يرفض النقض بعدها حتى لو تجاوز التطبيق).
     """
+    require_feature(db, ctx.facility_id, "visit.note_unlock")
     visit = get_visit_for_doctor(db, visit_id)
     reason = body.reason.strip()
     if not reason:
@@ -214,8 +216,9 @@ def approve_visit(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB):
         if invalid_codes:
             raise MedifyError("MDF-4233", details={"items": invalid_codes})
 
-    # م12: محرك جاهزية المطالبة — أي block غير محسوم يمنع الاعتماد (نمط MDF-4222)
-    blocks = blocking_findings(db, visit)
+    # م12: محرك جاهزية المطالبة — أي block غير محسوم يمنع الاعتماد (نمط MDF-4222).
+    # ميزة باقة (قرار مالك 2026-08-03): بإطفائها لا فحص ولا حجب — البوابة ② نفسها تبقى إلزامية.
+    blocks = blocking_findings(db, visit) if feature_enabled(db, ctx.facility_id, "visit.claim_readiness") else []
     first_pass = not blocks  # نسبة العبور من أول فحص → telemetry
     if blocks:
         raise MedifyError("MDF-4237", details={"findings": blocks})

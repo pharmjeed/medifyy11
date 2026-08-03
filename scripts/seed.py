@@ -153,13 +153,28 @@ def seed_platform(db: Session) -> None:
             is_active=True,
         ))
         print("seed: أُنشئ السوبر أدمن التطويري owner")
-    for code, name_ar, name_en, price, cycle in [
-        ("monthly", "شهرية", "Monthly", Decimal("400.00"), "monthly"),
-        ("yearly", "سنوية", "Yearly", Decimal("4080.00"), "yearly"),
+    # الباقات: تكلفة الدكتور + ما تُظهره له (قرار مالك 2026-08-03).
+    # الشهرية/السنوية كاملتان (features=None ⇒ افتراضات الكتالوج)، و«الأساسية» عيّنة باقة مقلّصة
+    # لاختبار الإخفاء فعلياً — بلا سماع/رؤية للمحادثة ولا ملخص مريض ولا قوالب خاصة.
+    # تُبذَر **موقوفة**: البذر يجري على الإنتاج أيضاً، وباقة مسعّرة فعّالة لم يقررها المالك
+    # لا تظهر في كونسول التسعير من تلقائها — تفعيلها نقرة واحدة من /sa/plans.
+    basic_features = {
+        "visit.transcript_view": False,
+        "visit.audio_playback": False,
+        "visit.patient_summary": False,
+        "visit.ai_chat": False,
+        "templates.custom": False,
+        "templates.reverse_build": False,
+    }
+    for code, name_ar, name_en, price, cycle, features, active in [
+        ("monthly", "شهرية", "Monthly", Decimal("400.00"), "monthly", None, True),
+        ("yearly", "سنوية", "Yearly", Decimal("4080.00"), "yearly", None, True),
+        ("basic-monthly", "أساسية شهرية", "Basic monthly", Decimal("250.00"), "monthly", basic_features, False),
     ]:
         if not db.execute(select(Plan).where(Plan.code == code)).scalar_one_or_none():
             db.add(Plan(code=code, name_ar=name_ar, name_en=name_en,
-                        seat_price_sar=price, billing_cycle=cycle, is_active=True))
+                        seat_price_sar=price, billing_cycle=cycle, is_active=active,
+                        features=features))
     db.flush()
 
 
@@ -485,20 +500,26 @@ def seed(db: Session) -> None:
     add_transcript(v_review)
     review_sections = add_summary(v_review, SOAP0, "pt1")
     guidance_data = [
+        # نص الإرشاد كله بالإنجليزية مثل المذكرة — لغة واحدة في الشاشة (P3-guidance@1.3)
         ("A", "coding_match", "ICD10AM", "I10", "Essential (primary) hypertension", "pending", False,
-         "current_visit", "قياس العيادة 150/95", "التشخيص الأول موثّق كارتفاع ضغط أساسي غير منضبط — الصياغة مطابقة للتقييم."),
+         "current_visit", "Clinic reading 150/95",
+         "First diagnosis is documented as uncontrolled essential hypertension — the wording matches the assessment."),
         ("A", "coding_match", "ICD10AM", "E11.9", "Type 2 diabetes mellitus without complication", "accepted", False,
-         "patient_file", "تشخيص مسجل منذ 2018", "متابعة سكري نوع 2 دون مضاعفات موثقة في هذه الزيارة."),
+         "patient_file", "Diagnosis on file since 2018",
+         "Type 2 diabetes follow-up with no complications documented in this visit."),
         ("A", "clinical_dx", "ICD10AM", "G43.9", "Consider migraine as differential for recurrent morning headache", "rejected", False,
-         "current_visit", "«صداع خصوصاً الصبح»", "صداع صباحي متكرر — قُدّم كتشخيص تفريقي، والأرجح سريرياً أنه ثانوي لارتفاع الضغط."),
+         "current_visit", "Patient reports “headache, especially in the morning”",
+         "Recurrent morning headache — offered as a differential; clinically most likely secondary to the raised blood pressure."),
         ("P", "clinical_rx", None, None,
          "Amlodipine 10 mg is the maximum recommended dose — counsel on peripheral edema and reassess within 2 weeks.",
-         "pending", True, "current_visit", "قرار رفع الجرعة في الخطة",
-         "رفع الجرعة إلى الحد الأقصى لدى مريض 58 عاماً يستلزم توثيق التثقيف والمتابعة. فحص التعارض: لا تعارض مع Metformin، والحساسية المسجلة (Penicillin) لا تمس الخطة."),
+         "pending", True, "current_visit", "Dose escalation decided in the plan",
+         "Escalating to the maximum dose in a 58-year-old requires documented counselling and follow-up. Interaction check: no conflict with metformin, and the recorded allergy (penicillin) does not affect the plan."),
         ("P", "coding_match", "ACHI", "66551-00", "Glycated haemoglobin (HbA1c) — pathology order", "pending", False,
-         "current_visit", "«نطلب تحليل التراكمي والدهون»", "طلب تحليل التراكمي يتطلب رمز إجراء مخبرياً مطابقاً قبل الرفع."),
+         "current_visit", "Clinician states: “we will order HbA1c and a lipid panel”",
+         "The HbA1c order needs a matching pathology procedure code before upload."),
         ("P", "coding_match", "SFDA", "GTIN 6285074001122", "Amlodipine besylate 10 mg tablet", "accepted", False,
-         "current_visit", "الخطة الدوائية المعدلة", "توحيد وصف الدواء برمز سجل SFDA المعتمد لدى المنشأة."),
+         "current_visit", "Updated medication plan",
+         "Aligns the medication description with the SFDA registry code adopted by the facility."),
     ]
     for key, kind, code_system, code_value, text, status, safety, source, ref, rationale in guidance_data:
         item = GuidanceItem(section_id=review_sections[key].id, facility_id=fid, kind=kind,
