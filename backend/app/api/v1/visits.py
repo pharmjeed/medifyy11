@@ -33,6 +33,7 @@ from ...models import (
 )
 from ...services.audio_integrity import verify_finalized_audio
 from ...services.consent import consent_document
+from ...services.his_context import fetch_his_context, merge_context
 from ...services.history import build_context
 from ...services.processing import (
     attempts_total,
@@ -188,11 +189,15 @@ def create_visit(body: VisitCreateIn, ctx: DoctorAuth, db: DB):
         raise MedifyError("MDF-4031", details={"reason": "doctor_without_clinic"})
 
     # لقطة الملف التاريخي — مدخل الإرشاد المدمج (FR-701). تُبنى من مراجعات المريض السابقة
-    # الفعلية عند هذا الطبيب (تعديل مالك 2026-07-26)؛ في الربط الحي تُدمج معها بيانات المستشفى.
+    # الفعلية عند هذا الطبيب (تعديل مالك 2026-07-26)، ويُدمج معها سياق HIS الحي خلف
+    # feature flag (م17): تعذّره لا يعطّل إنشاء الزيارة — context_unavailable=true فقط.
+    context = build_context(db, patient.id, ctx.user_id)
+    his = fetch_his_context(db, patient, ctx.facility_id)
+    context = merge_context(context, his)
     snapshot = PatientContextSnapshot(
         patient_id=patient.id,
         facility_id=ctx.facility_id,
-        content_json=build_context(db, patient.id, ctx.user_id),
+        content_json=context,
         fetched_at=dt.datetime.now(dt.timezone.utc),
     )
     db.add(snapshot)

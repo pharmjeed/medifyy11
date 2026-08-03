@@ -22,6 +22,7 @@ from ...models import (
     NoteApproval,
     NoteUnlock,
     NoteVersion,
+    PatientContextSnapshot,
     Summary,
     SummarySection,
     Transcript,
@@ -210,6 +211,21 @@ def get_summary(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB, response: Response
     )
     # المراجعات السابقة لهذا المريض — سياق المراجعة نفسه الذي رآه الإرشاد (تعديل مالك 2026-07-26)
     history = previous_visits(db, visit.patient_id, visit.doctor_id, exclude_visit_id=visit.id)
+    # م17: لوحة سياق المريض للقراءة — من لقطة الزيارة (تشمل HIS إن توفّر)
+    patient_context = None
+    if visit.context_snapshot_id:
+        snapshot = db.execute(
+            select(PatientContextSnapshot).where(PatientContextSnapshot.id == visit.context_snapshot_id)
+        ).scalar_one_or_none()
+        if snapshot is not None:
+            content = snapshot.content_json or {}
+            patient_context = {
+                "problems": content.get("problems", []),
+                "medications": content.get("medications", []),
+                "allergies": content.get("allergies", []),
+                "context_unavailable": bool(content.get("context_unavailable", True)),
+                "his_available": bool((content.get("his") or {}).get("available", False)),
+            }
     # م6: تاريخ النسخ — للواجهة (لافتة النسخة + قائمة التصدير ?version=)
     version_rows = db.execute(
         select(NoteVersion).where(NoteVersion.visit_id == visit.id)
@@ -253,6 +269,7 @@ def get_summary(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB, response: Response
         "version": visit.cycle,
         "versions": versions_out,
         "stt_confidence": stt_confidence,
+        "patient_context": patient_context,
         "previous_visits": history,
     })
 

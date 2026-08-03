@@ -717,6 +717,64 @@ export default function ReviewPage() {
           </div>
         ) : null}
 
+        {/* م17: لوحة سياق المريض — قابلة للطي، للقراءة فقط، الحساسيات بارزة */}
+        {summary.patient_context !== null ? (
+          <details className="card" style={{ marginTop: 12 }}
+                   open={summary.patient_context.allergies.length > 0}>
+            <summary style={{ cursor: "pointer", fontWeight: 700, fontSize: 14 }}>
+              {L("سياق المريض", "Patient context")}
+              {summary.patient_context.allergies.length > 0 ? (
+                <span className="badge danger" style={{ marginInlineStart: 8 }}>
+                  {L(`حساسيات: ${summary.patient_context.allergies.length}`,
+                     `Allergies: ${summary.patient_context.allergies.length}`)}
+                </span>
+              ) : null}
+              {summary.patient_context.context_unavailable ? (
+                <span className="badge" style={{ marginInlineStart: 8, background: "#eef2f7", color: "#5c7096" }}>
+                  {L("سجل المستشفى غير متاح", "Hospital record unavailable")}
+                </span>
+              ) : summary.patient_context.his_available ? (
+                <span className="badge success" style={{ marginInlineStart: 8 }}>
+                  {L("مُحدَّث من سجل المستشفى", "Synced from hospital record")}
+                </span>
+              ) : null}
+            </summary>
+            <div style={{ marginTop: 10, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
+              {summary.patient_context.allergies.length > 0 ? (
+                <div style={{ border: "1.5px solid var(--m-danger)", background: "var(--m-danger-bg)",
+                              borderRadius: 10, padding: "8px 12px" }}>
+                  <strong style={{ fontSize: 13, color: "var(--m-danger)" }}>{L("الحساسيات", "Allergies")}</strong>
+                  <ul style={{ margin: "4px 0 0", paddingInlineStart: 18, fontSize: 13 }}>
+                    {summary.patient_context.allergies.map((entry, index) => <li key={index}>{entry}</li>)}
+                  </ul>
+                </div>
+              ) : null}
+              {([["problems", L("المشاكل النشطة", "Active problems")],
+                 ["medications", L("الأدوية الحالية", "Current medications")]] as const).map(([key, title]) => {
+                const values = summary.patient_context?.[key] ?? [];
+                return (
+                  <div key={key} className="sub-box">
+                    <strong style={{ fontSize: 13 }}>{title}</strong>
+                    {values.length > 0 ? (
+                      <ul style={{ margin: "4px 0 0", paddingInlineStart: 18, fontSize: 13 }}>
+                        {values.map((entry, index) => <li key={index}>{entry}</li>)}
+                      </ul>
+                    ) : (
+                      <p style={{ margin: "4px 0 0", fontSize: 12.5, color: "#5c7096" }}>
+                        {L("— لا شيء مسجَّل —", "— nothing on record —")}
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            <p style={{ fontSize: 12, color: "#5c7096", margin: "8px 0 0" }}>
+              {L("للقراءة فقط — سياق من السجل لا يُدرج في المذكرة إلا إن ذُكر في المحادثة.",
+                 "Read-only — record context is not added to the note unless it was said in the conversation.")}
+            </p>
+          </details>
+        ) : null}
+
         {/* م12: لوحة جاهزية المطالبة — تظهر عند وجود حجب/تحذير، مع واجهة الربط */}
         {claim !== null && (claim.blocking_count > 0 || claim.warning_count > 0) ? (
           <div className="card" style={{ marginTop: 12,

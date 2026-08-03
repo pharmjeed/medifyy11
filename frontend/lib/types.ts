@@ -245,6 +245,15 @@ export interface SttConfidence {
   thresholds: { low: number; medium: number };
 }
 
+/** م17: لوحة سياق المريض في المراجعة (للقراءة) — من لقطة الزيارة */
+export interface ReviewPatientContext {
+  problems: string[];
+  medications: string[];
+  allergies: string[];
+  context_unavailable: boolean;
+  his_available: boolean;
+}
+
 /** م14: ملخص المريض بالعربي — يُولَّد بعد البوابة ① ويُخزَّن مع النسخة */
 export interface PatientSummaryText {
   diagnosis: string;
@@ -321,6 +330,8 @@ export interface VisitSummary {
   versions: NoteVersionInfo[];
   /** م11: جودة التفريغ والعتبات */
   stt_confidence: SttConfidence;
+  /** م17: سياق المريض (null لزيارات بلا لقطة) */
+  patient_context: ReviewPatientContext | null;
 }
 
 export interface NoteVersionInfo {

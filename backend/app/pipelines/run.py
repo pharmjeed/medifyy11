@@ -207,12 +207,21 @@ def run_summary(db: Session, visit: Visit) -> Summary:
     # تحميل البرومبت من قاعدة البيانات (مخصص أو افتراضي أو من الملفات)
     custom_prompt = _load_prompt_content(db, template)
 
+    # م17: سياق المريض (بما فيه HIS إن توفّر) يُحقن مع تعليمة «لا تخترع منه وقائع»
+    context_snapshot = None
+    if visit.context_snapshot_id:
+        context_snapshot = db.execute(
+            select(PatientContextSnapshot).where(PatientContextSnapshot.id == visit.context_snapshot_id)
+        ).scalar_one_or_none()
+    context_json = (context_snapshot.content_json if context_snapshot else {}) or {}
+
     # الاستثناءات خام — التصنيف/الإعادة وتغليف MDF-5032 في services/processing (المرحلة 3)
     output, model_ref = get_llm().complete_json(
         "P2-summary",
         version,
         {
             "transcript": transcript_scrubbed,
+            "patient_context": deid.scrub(json.dumps(context_json, ensure_ascii=False)),
             "template_structure": template.structure_json,
             "specialty": template.specialty or "",
             "visit_type": template.visit_type or "",

@@ -57,6 +57,10 @@ class Settings(BaseSettings):
     # المرحلة 16 — ساعة التذكير اليومي بطابور «بانتظارك» (UTC، قابلة للضبط)
     pending_reminder_hour: int = 5
 
+    # المرحلة 17 — سحب سياق المريض من HIS: مطفأ افتراضياً (feature flag)
+    his_context_enabled: bool = False
+    his_context_timeout_seconds: float = 5.0
+
     # حصر المعدل (DOC-05 §١) — طلب/دقيقة
     rate_limit_default: int = 240
     rate_limit_ai: int = 20
