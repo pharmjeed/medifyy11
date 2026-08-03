@@ -14,6 +14,7 @@ from ..analytics import track
 from ..config import get_settings
 from ..errors import MedifyError
 from ..models import (
+    AudioChunk,
     CodingSystemConfig,
     GuidanceItem,
     Patient,
@@ -33,7 +34,7 @@ from ..services.history import previous_visits
 from .deidentify import build_map
 from .llm import get_llm
 from .speaker import attribute_segments
-from .stt import get_stt
+from .streaming import IncrementalTranscript, stream_from_ledger
 
 logger = logging.getLogger("medify.pipelines")
 
@@ -120,15 +121,25 @@ def run_transcription(db: Session, visit: Visit) -> Transcript:
     """
     recording = db.execute(select(Recording).where(Recording.visit_id == visit.id)).scalar_one_or_none()
     audio_path = recording.storage_uri if recording is not None else ""
-    # الاستثناءات تُرفع خاماً — التصنيف والإعادة (30ث/2د/5د على العابر) وتغليف MDF-5031
-    # في services/processing (المرحلة 3)
-    segments = get_stt().transcribe_visit(audio_path)
+    # م18: التفريغ عبر واجهة التدفق — الوضع الحالي (batch) حالة خاصة منها: تغذية
+    # مقاطع السجل (وحدة م2 نفسها) ثم finalize بنتيجة مطابقة حرفياً للمسار القديم.
+    # الاستثناءات تُرفع خاماً — التصنيف والإعادة وتغليف MDF-5031 في services/processing (م3).
+    chunks = db.execute(
+        select(AudioChunk).where(AudioChunk.visit_id == visit.id).order_by(AudioChunk.chunk_index)
+    ).scalars().all()
+    segments = stream_from_ledger(
+        audio_path,
+        [{"chunk_index": chunk.chunk_index, "byte_length": chunk.byte_length} for chunk in chunks],
+    )
 
     # المحرك الذي لا يميّز المتحدث صوتياً → إسناد لغوي على المحادثة كاملة (سياق تبادل الأدوار كله)
     if segments and not all(segment.get("speaker") in ("doctor", "patient") for segment in segments):
         attribute_segments(segments)
 
-    content = {"segments": segments}
+    # م18: التفريغ المتزايد بنقطة finalize — P2 يقرأ من هنا (يُستدعى مباشرةً اليوم)
+    incremental = IncrementalTranscript()
+    incremental.extend(segments)
+    content = incremental.finalize()
     stats: dict[str, Any] = {"segments": len(segments)}
     # م11: إحصاء ثقة التفريغ (whisper يوفرها؛ gemini بلا ثقة ASR فتغيب الإحصاءات)
     confidences = [s["confidence"] for s in segments if isinstance(s.get("confidence"), (int, float))]

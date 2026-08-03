@@ -77,7 +77,8 @@ def test_transient_timeouts_then_success_no_mdf5031(client, doctor_token, retry_
     headers = auth(doctor_token)
     visit_id = _recording_visit(client, headers, retry_patient)
     engine = _FlakySTT(2, lambda: TimeoutError("request timed out"))
-    monkeypatch.setattr("app.pipelines.run.get_stt", lambda: engine)
+    # م18: مقبس المحرك انتقل إلى واجهة التدفق — نفس السلوك المختبَر
+    monkeypatch.setattr("app.pipelines.stt.get_stt", lambda: engine)
 
     stopped = client.post(f"/api/v1/visits/{visit_id}/recording/stop", headers=headers,
                           json={"duration_sec": 20})
@@ -98,7 +99,8 @@ def test_exhausted_retries_mdf5031_with_full_log_and_notification(client, doctor
     headers = auth(doctor_token)
     visit_id = _recording_visit(client, headers, retry_patient)
     engine = _FlakySTT(99, lambda: ConnectionError("connection reset by peer"))
-    monkeypatch.setattr("app.pipelines.run.get_stt", lambda: engine)
+    # م18: مقبس المحرك انتقل إلى واجهة التدفق — نفس السلوك المختبَر
+    monkeypatch.setattr("app.pipelines.stt.get_stt", lambda: engine)
 
     stopped = client.post(f"/api/v1/visits/{visit_id}/recording/stop", headers=headers,
                           json={"duration_sec": 20})
@@ -123,7 +125,8 @@ def test_corrupt_file_fails_fast_single_attempt(client, doctor_token, retry_pati
     headers = auth(doctor_token)
     visit_id = _recording_visit(client, headers, retry_patient)
     engine = _FlakySTT(99, lambda: wave.Error("file does not start with RIFF id"))
-    monkeypatch.setattr("app.pipelines.run.get_stt", lambda: engine)
+    # م18: مقبس المحرك انتقل إلى واجهة التدفق — نفس السلوك المختبَر
+    monkeypatch.setattr("app.pipelines.stt.get_stt", lambda: engine)
 
     stopped = client.post(f"/api/v1/visits/{visit_id}/recording/stop", headers=headers,
                           json={"duration_sec": 20})
