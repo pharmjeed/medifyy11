@@ -57,7 +57,22 @@ check "توثيق موافقة المريض" $?
 curl -fsS -X POST "${AUTH[@]}" "$API/visits/$VISIT_ID/recording/start" >/dev/null; check "بدء التسجيل" $?
 STOPPED=$(curl -fsS -X POST "${AUTH[@]}" -H 'Content-Type: application/json' \
     "$API/visits/$VISIT_ID/recording/stop" -d '{"duration_sec":30}')
-echo "$STOPPED" | grep -q 'in_review'; check "إيقاف → ملخص + إرشاد → in_review" $?
+# وضعان (التحصين م3): inline يعيد in_review فوراً · queue يعيد transcribed ويعالج
+# في عامل arq — والواجهة تستطلع processing-status حتى الاكتمال. الدخاني يفعل مثلها.
+if echo "$STOPPED" | grep -q 'in_review'; then
+    check "إيقاف → ملخص + إرشاد → in_review (inline)" 0
+else
+    STATE=""
+    for _ in $(seq 1 40); do
+        STATUS=$(curl -fsS "${AUTH[@]}" "$API/visits/$VISIT_ID/processing-status")
+        STATE=$(echo "$STATUS" | JQ "d['data']['state']")
+        if [[ "$STATE" == "in_review" ]]; then break; fi
+        if echo "$STATUS" | grep -q '"failed_final": *true'; then break; fi
+        sleep 3
+    done
+    [[ "$STATE" == "in_review" ]]
+    check "إيقاف → معالجة بالطابور → in_review (queue)" $?
+fi
 
 # 7) الملخص بأقسام القالب + الإرشادات
 SUMMARY=$(curl -fsS "${AUTH[@]}" "$API/visits/$VISIT_ID/summary")
@@ -68,24 +83,49 @@ PENDING=$(echo "$SUMMARY" | JQ "d['data']['pending_guidance_count']")
 if [[ "$PENDING" != "0" ]]; then
     BLOCKED=$(curl -sS -X POST "${AUTH[@]}" "$API/visits/$VISIT_ID/approve")
     echo "$BLOCKED" | grep -q 'MDF-422'; check "بوابة الاعتماد ترفض المعلق" $?
-    # حسم كل الإرشادات بالرفض — القرار الآمن دخانياً: القبول قد يعلق على كود ناقص/ملغى
-    # (MDF-4222 دون العتبة أو MDF-4233 من السجل المرجعي) وهذا صواب وظيفياً لا فشل دخاني
+    # حسم الإرشادات: تشخيصٌ واحد يُقبل (جاهزية المطالبة تشترط تشخيصاً أولياً —
+    # التحصين م12/MDF-4237) والباقي يُرفض. القبول الانتقائي يتجنّب التعليق على كود
+    # ناقص/ملغى (MDF-4222 دون العتبة أو MDF-4233 من السجل المرجعي).
     "$PY" - "$SUMMARY" <<'PYEOF' > /tmp/medify_guidance_ids
 import json, sys
 data = json.loads(sys.argv[1])
+accepted_dx = False
 for section in data["data"]["sections"]:
     for item in section["guidance"]:
-        if item["status"] == "pending":
-            print(item["id"])
+        if item["status"] != "pending":
+            continue
+        is_dx = item["kind"] in ("clinical_dx", "coding_match") and not item["requires_doctor_input"]
+        if is_dx and not accepted_dx:
+            accepted_dx = True
+            print(f"{item['id']} accepted")
+        else:
+            print(f"{item['id']} rejected")
 PYEOF
-    while read -r GID; do
-        GID="${GID%$'\r'}"
-        [[ -z "$GID" ]] && continue
+    while read -r LINE; do
+        LINE="${LINE%$'\r'}"
+        [[ -z "$LINE" ]] && continue
+        GID="${LINE%% *}"; DECISION="${LINE##* }"
         curl -fsS -X PATCH "${AUTH[@]}" -H 'Content-Type: application/json' \
-            "$API/guidance-items/$GID" -d '{"status":"rejected"}' >/dev/null
+            "$API/guidance-items/$GID" -d "{\"status\":\"$DECISION\"}" >/dev/null
     done < /tmp/medify_guidance_ids
     check "حسم الإرشادات المعلقة" 0
 fi
+
+# 8-ب) جاهزية المطالبة (التحصين م12) — تشخيص أولي شرط للاعتماد. إن لم يُنتج P3
+# بنداً تشخيصياً (أو أنتج صفر بنود — W-224) يسلك الدخاني مسار الطبيب نفسه:
+# إدخال تشخيص بوعي عبر /guidance-items.
+READY=$(curl -fsS "${AUTH[@]}" "$API/visits/$VISIT_ID/claim-readiness")
+if ! echo "$READY" | grep -q '"ready": *true'; then
+    SECTION_KEY=$(curl -fsS "${AUTH[@]}" "$API/visits/$VISIT_ID/summary" \
+        | JQ "d['data']['sections'][0]['section_key']")
+    curl -fsS -X POST "${AUTH[@]}" -H 'Content-Type: application/json' \
+        "$API/visits/$VISIT_ID/guidance-items" \
+        -d "{\"section_key\":\"$SECTION_KEY\",\"kind\":\"clinical_dx\",\"suggestion_text\":\"Essential hypertension — clinician documented\",\"code_system\":\"ICD10AM\",\"code_value\":\"I10\"}" \
+        >/dev/null
+    check "إدخال تشخيص من الطبيب (لا طريق مسدود)" $?
+    READY=$(curl -fsS "${AUTH[@]}" "$API/visits/$VISIT_ID/claim-readiness")
+fi
+echo "$READY" | grep -q '"ready": *true'; check "جاهزية المطالبة بلا بنود حاجبة" $?
 
 # 9) البوابة ① (نص المذكرة) ثم ② (الأكواد) → رفع (وهمي) → uploaded
 curl -fsS -X POST "${AUTH[@]}" "$API/visits/$VISIT_ID/note-approve" >/dev/null

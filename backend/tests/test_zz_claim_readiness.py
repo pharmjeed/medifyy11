@@ -165,6 +165,53 @@ def test_new_yaml_rule_works_without_deploy(client, doctor_token, claim_patient)
         new_rule.unlink(missing_ok=True)
 
 
+def test_clinician_can_add_diagnosis_when_p3_produced_none(client, doctor_token, claim_patient):
+    """لا طريق مسدود: P3 بلا إرشادات → الطبيب يُدخل تشخيصاً بنفسه فتُرفع الحجب.
+
+    وقع فعلاً في الإنتاج (Gemini أعاد صفر بنود) — MDS كان يحجب بلا مخرج.
+    """
+    headers = auth(doctor_token)
+    visit_id = _visit_in_review(client, headers, claim_patient)
+    _resolve_all(client, headers, visit_id)  # رفض الكل → لا تشخيص أولي
+
+    readiness = client.get(f"/api/v1/visits/{visit_id}/claim-readiness", headers=headers).json()["data"]
+    assert readiness["ready"] is False, "بلا تشخيص → محجوب"
+
+    added = client.post(f"/api/v1/visits/{visit_id}/guidance-items", headers=headers, json={
+        "section_key": "A",
+        "kind": "clinical_dx",
+        "suggestion_text": "Essential hypertension — documented by the clinician",
+        "code_system": "ICD10AM",
+        "code_value": "I10",
+    })
+    assert added.status_code == 200, added.text
+    data = added.json()["data"]
+    assert data["status"] == "accepted", "بند الطبيب محسوم فوراً — فعل واعٍ لا اقتراح"
+    assert data["claim_readiness"]["ready"] is True, "الحجب ارتفع"
+
+    assert client.post(f"/api/v1/visits/{visit_id}/note-approve", headers=headers).status_code == 200
+    approved = client.post(f"/api/v1/visits/{visit_id}/approve", headers=headers)
+    assert approved.status_code == 200, approved.text
+
+
+def test_clinician_added_code_is_registry_checked(client, doctor_token, claim_patient):
+    """كود مُدخل يدوياً يمر بالسجل المرجعي كأي كود آخر (MDF-4233)."""
+    headers = auth(doctor_token)
+    visit_id = _visit_in_review(client, headers, claim_patient)
+    bad = client.post(f"/api/v1/visits/{visit_id}/guidance-items", headers=headers, json={
+        "section_key": "A", "kind": "clinical_dx",
+        "suggestion_text": "كود مخترع", "code_system": "ICD10AM", "code_value": "ZZ99.9",
+    })
+    assert bad.status_code == 422
+    assert bad.json()["error"]["code"] == "MDF-4233"
+
+    bad_section = client.post(f"/api/v1/visits/{visit_id}/guidance-items", headers=headers, json={
+        "section_key": "NOPE", "kind": "clinical_dx",
+        "suggestion_text": "قسم غير موجود", "code_system": "ICD10AM", "code_value": "I10",
+    })
+    assert bad_section.status_code == 404
+
+
 def test_code_composition_rules_evaluate_from_yaml():
     """قاعدة (3) تُقيَّم من البيانات — بلا استدعاء قاعدة بيانات."""
     from types import SimpleNamespace

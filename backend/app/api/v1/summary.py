@@ -310,6 +310,86 @@ def claim_readiness(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB):
     return ok(result)
 
 
+class ClinicianCodeIn(BaseModel):
+    """بند مرمّز يُدخله الطبيب بنفسه — لا اقتراح آلي."""
+
+    section_key: str = Field(min_length=1, max_length=32)
+    kind: str = Field(default="clinical_dx")
+    suggestion_text: str = Field(min_length=1, max_length=500)
+    code_system: str = Field(min_length=1, max_length=32)
+    code_value: str = Field(min_length=1, max_length=32)
+    linked_dx_code: str | None = None
+    justification: str | None = None
+
+
+@router.post("/visits/{visit_id}/guidance-items")
+def add_clinician_code(visit_id: uuid.UUID, body: ClinicianCodeIn, ctx: DoctorAuth, db: DB):
+    """إضافة بند مرمّز بإدخال الطبيب — المخرج الوحيد حين لا يُنتج P3 شيئاً (W-224).
+
+    بلا هذا المسار تصير جاهزية المطالبة (م12) طريقاً مسدوداً: MDS يشترط تشخيصاً
+    أولياً ولا سبيل لإضافته. البند يُنشأ محسوماً (accepted) لأنه فعل واعٍ من
+    الطبيب لا اقتراحاً — والكود يُتحقق من السجل المرجعي كأي كود يُدخله بيده.
+    """
+    if body.kind not in ("clinical_dx", "coding_match", "clinical_rx", "clinical_procedure",
+                         "clinical_service", "clinical_device"):
+        raise MedifyError("MDF-4041", details={"kind": body.kind})
+    if body.kind == "clinical_device" and not body.justification:
+        raise MedifyError("MDF-4225", details={"missing": "justification"})
+
+    visit = get_visit_for_doctor(db, visit_id)
+    _guard_not_approved(db, visit)
+    summary = _get_summary(db, visit)
+    section = db.execute(
+        select(SummarySection).where(
+            SummarySection.summary_id == summary.id,
+            SummarySection.section_key == body.section_key,
+        )
+    ).scalar_one_or_none()
+    if section is None:
+        raise MedifyError("MDF-4041", details={"section_key": body.section_key})
+
+    verdict, entry = check_code(db, body.code_system, body.code_value, registry_systems(db))
+    if verdict in ("unknown", "inactive"):
+        raise MedifyError("MDF-4233", details={
+            "code_system": body.code_system, "code_value": body.code_value,
+            "registry_status": verdict, "replaced_by": entry.replaced_by if entry else None,
+        })
+
+    now = dt.datetime.now(dt.timezone.utc)
+    item = GuidanceItem(
+        section_id=section.id,
+        facility_id=ctx.facility_id,
+        kind=body.kind,
+        suggestion_text=body.suggestion_text,
+        code_system=body.code_system,
+        code_value=entry.code if verdict == "valid" else body.code_value,
+        code_registry_version=entry.registry_version if verdict == "valid" else None,
+        code_effective_date=(entry.effective_date.isoformat()
+                             if verdict == "valid" and entry.effective_date else None),
+        confidence=None,               # مُدخل بشري لا مقترح بثقة
+        requires_doctor_input=False,   # الطبيب أدخله بوعي
+        linked_dx_code=body.linked_dx_code,
+        justification=body.justification,
+        evidence_source="current_visit",
+        evidence_ref={"ref": "clinician-entered", "safety_flag": False},
+        status="accepted",
+        resolved_by=ctx.user_id,
+        resolved_at=now,
+    )
+    db.add(item)
+    db.flush()
+    audit(db, ctx.facility_id, "guidance.clinician_added", "guidance_item", item.id, ctx.user_id,
+          {"kind": body.kind, "code_system": body.code_system, "code_value": item.code_value})
+    return ok({
+        "id": str(item.id),
+        "kind": item.kind,
+        "code_system": item.code_system,
+        "code_value": item.code_value,
+        "status": item.status,
+        "claim_readiness": evaluate_visit(db, visit),
+    })
+
+
 class GuidanceLinkIn(BaseModel):
     linked_dx_code: str = Field(min_length=1, max_length=32)
 
