@@ -4,6 +4,14 @@
 #   staging:    COMPOSE_PROJECT_NAME=medify-staging  HTTP_PORT=8080 HTTPS_PORT=8443
 name: ${COMPOSE_PROJECT_NAME:-medify-prod}
 
+# سقف السجلات: بلا هذا ينمو json-file بلا حد حتى يمتلئ الديسك المشترك مع pickly.
+# يسري على الحاويات المُنشأة بعده فقط — لذلك يلزم `up -d` لا `restart`.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   postgres:
     image: postgres:16
