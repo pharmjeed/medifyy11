@@ -51,6 +51,11 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 include = ["app*"]
 
+# ملفات بيانات تُشحن داخل الحزمة المثبَّتة — بلا هذا تعمل الخدمة من /app فقط
+# ويسقط أي مسار يعمل من site-packages (وقع فعلاً على عامل arq: البرومبتات مفقودة).
+[tool.setuptools.package-data]
+app = ["prompts/*.txt"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 timeout = 120

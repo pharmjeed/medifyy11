@@ -23,7 +23,25 @@ from ..models import Clinic, GuidanceItem, Patient, Summary, SummarySection, Use
 
 logger = logging.getLogger("medify.claim_readiness")
 
-RULES_DIR = Path(__file__).resolve().parents[2] / "rules"
+def _resolve_rules_dir() -> Path:
+    """مجلد القواعد — يعمل من شجرة المصدر ومن الحزمة المثبَّتة (عامل arq) معاً.
+
+    الأولوية: متغيّر البيئة · جوار الحزمة (backend/rules) · مجلد العمل (/app/rules).
+    """
+    import os
+
+    candidates = [
+        Path(os.environ["MEDIFY_RULES_DIR"]) if os.environ.get("MEDIFY_RULES_DIR") else None,
+        Path(__file__).resolve().parents[2] / "rules",
+        Path.cwd() / "rules",
+    ]
+    for candidate in candidates:
+        if candidate is not None and candidate.is_dir():
+            return candidate
+    return Path(__file__).resolve().parents[2] / "rules"  # الافتراضي للرسائل
+
+
+RULES_DIR = _resolve_rules_dir()
 
 DIAGNOSIS_KINDS_DEFAULT = ("clinical_dx", "coding_match")
 
@@ -49,7 +67,7 @@ def _load_rules_cached(signature: tuple) -> list[dict]:
     import yaml
 
     rules: list[dict] = []
-    for path in sorted(RULES_DIR.glob("*.yaml")):
+    for path in sorted(_resolve_rules_dir().glob("*.yaml")):
         try:
             loaded = yaml.safe_load(path.read_text(encoding="utf-8")) or []
         except Exception as exc:  # ملف معطوب لا يُسقط البوابة — يُسجَّل ويُتجاوز
@@ -62,9 +80,10 @@ def _load_rules_cached(signature: tuple) -> list[dict]:
 
 def load_rules() -> list[dict]:
     """يُعاد التحميل تلقائياً عند تغيّر أي ملف (mtime/الحجم) — قاعدة جديدة بلا إعادة تشغيل."""
+    rules_dir = _resolve_rules_dir()  # يُحلّ عند كل نداء — لا يتعلق بمجلد العمل وقت الاستيراد
     signature = tuple(
         (path.name, path.stat().st_mtime_ns, path.stat().st_size)
-        for path in sorted(RULES_DIR.glob("*.yaml"))
+        for path in sorted(rules_dir.glob("*.yaml"))
     )
     return [rule for rule in _load_rules_cached(signature) if rule.get("enabled", True)]
 
