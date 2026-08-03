@@ -10,8 +10,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, api, apiWithHeaders, getToken } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
 import type {
-  ChatPatch, CodeSearchResult, EvidenceSentence, GuidanceItem, SummarySection, TranscriptSegment,
-  UploadStatus, VisitSummary,
+  ChatPatch, ClaimReadiness, CodeSearchResult, EvidenceSentence, GuidanceItem, SummarySection,
+  TranscriptSegment, UploadStatus, VisitSummary,
 } from "@/lib/types";
 import { ProgressBar7 } from "@/components/ProgressBar7";
 import { Shell } from "@/components/Shell";
@@ -121,6 +121,8 @@ export default function ReviewPage() {
     sectionId: string; index: number; startMs: number; endMs: number; segmentIds: string[];
   } | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  // م12: جاهزية المطالبة — تُفحص عند دخول البوابة ② وبعد كل تغيير أكواد
+  const [claim, setClaim] = useState<ClaimReadiness | null>(null);
   const chatRef = useRef<HTMLDivElement | null>(null);
   const dictTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -132,6 +134,13 @@ export default function ReviewPage() {
       if (["approved", "uploaded", "upload_failed"].includes(result.body.data.state)) {
         const status = await api<UploadStatus>(`/visits/${visitId}/upload-status`);
         setUpload({ phase: "done", status: status.data });
+      }
+      // م12: الفحص يعمل تلقائياً مع كل تحميل/تغيير أكواد — البوابة ② تقرأ منه
+      if (result.body.data.state === "in_review") {
+        const readiness = await api<ClaimReadiness>(`/visits/${visitId}/claim-readiness`);
+        setClaim(readiness.data);
+      } else {
+        setClaim(null);
       }
     } catch (err) {
       showError(err);
@@ -161,6 +170,8 @@ export default function ReviewPage() {
   };
   // A5: بند محسوم بكود محجوب دون العتبة يمنع البوابة ②
   const awaitingInput = summary?.awaiting_doctor_input_count ?? 0;
+  // م12: بنود جاهزية المطالبة الحاجبة تمنع البوابة ② كذلك (MDF-4237)
+  const claimBlocked = claim?.blocking_count ?? 0;
   // نص المذكرة يُحرَّر حتى البوابة ① فقط
   const noteEditable = summary !== null && !locked && !noteApproved;
   // تفريغ فارغ = الميكروفون لم يلتقط كلاماً — سببٌ أدق من «فشل التحليل» ويُعرض بدله
@@ -254,6 +265,19 @@ export default function ReviewPage() {
       else if (status === "rejected") toast(L("رُفض الإرشاد — يبقى القرار مسجلاً", "Guidance item rejected — the decision stays on record"));
       else toast(L("حُفظ الإرشاد معدلاً — النص والرمز معاً — وقُبل (FR-704)", "Guidance item saved as modified — text and code together — and accepted (FR-704)"));
       setModifying(null);
+      void load();
+    } catch (err) {
+      handleMutationError(err);
+    }
+  };
+
+  // م12: ربط بند غير تشخيصي بتشخيص مبرِّر — يرفع حجب الضرورة الطبية
+  const linkDiagnosis = async (itemId: string, code: string) => {
+    try {
+      const result = await api<{ claim_readiness: ClaimReadiness }>(
+        `/guidance-items/${itemId}/link-diagnosis`, { method: "PATCH", body: { linked_dx_code: code } });
+      setClaim(result.data.claim_readiness);
+      toast(L("رُبط البند بالتشخيص المبرِّر", "Item linked to its justifying diagnosis"));
       void load();
     } catch (err) {
       handleMutationError(err);
@@ -587,6 +611,64 @@ export default function ReviewPage() {
               {L("الملخص متاح بلا إرشادات — المراجعة والاعتماد متاحان، وسجّلنا إشعاراً بذلك.",
                  "The summary is available without guidance — review and approval remain available, and a notification was logged.")}
             </span>
+          </div>
+        ) : null}
+
+        {/* م12: لوحة جاهزية المطالبة — تظهر عند وجود حجب/تحذير، مع واجهة الربط */}
+        {claim !== null && (claim.blocking_count > 0 || claim.warning_count > 0) ? (
+          <div className="card" style={{ marginTop: 12,
+                                         borderInlineStart: `4px solid ${claim.blocking_count > 0 ? "var(--m-danger)" : "var(--m-info)"}` }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <strong style={{ color: claim.blocking_count > 0 ? "var(--m-danger)" : "var(--m-info)" }}>
+                {claim.blocking_count > 0
+                  ? L(`جاهزية المطالبة: ${claim.blocking_count} بند حاجب`, `Claim readiness: ${claim.blocking_count} blocking finding(s)`)
+                  : L("جاهزية المطالبة: تنبيهات للمراجعة", "Claim readiness: advisory notes")}
+              </strong>
+              <span style={{ fontSize: 12, color: "#5c7096" }}>
+                {L("يُفحص تلقائياً مع كل تغيير في الأكواد (MDF-4237 يمنع الاعتماد حتى الحسم).",
+                   "Checked automatically on every code change (MDF-4237 blocks approval until resolved).")}
+              </span>
+            </div>
+            <ul style={{ margin: "8px 0 0", paddingInlineStart: 18, fontSize: 13 }}>
+              {claim.findings.filter((f) => f.severity !== "pass").map((finding, index) => (
+                <li key={`${finding.rule_id}-${index}`} style={{ marginBottom: 4 }}>
+                  <span className={`badge ${finding.severity === "block" ? "danger" : "warn"}`}
+                        style={{ marginInlineEnd: 6 }}>
+                    {finding.severity === "block" ? L("حاجب", "Block") : L("تنبيه", "Warn")}
+                  </span>
+                  {finding.message_ar}
+                  {finding.related_codes.length > 0 ? (
+                    <span style={{ color: "#5c7096" }}> — <bdi>{finding.related_codes.join(" · ")}</bdi></span>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+            {claim.unlinked_items.length > 0 && claim.diagnosis_options.length > 0 ? (
+              <div style={{ marginTop: 10, borderTop: "1px dashed #c7d1e0", paddingTop: 10 }}>
+                <div style={{ fontSize: 12.5, fontWeight: 700, color: "#5c7096", marginBottom: 6 }}>
+                  {L("اربط كل بند بالتشخيص الذي يبرره", "Link each item to the diagnosis that justifies it")}
+                </div>
+                {claim.unlinked_items.map((item) => (
+                  <div key={item.item_id} style={{ display: "flex", alignItems: "center", gap: 8,
+                                                   flexWrap: "wrap", marginBottom: 6 }}>
+                    <span style={{ flex: 1, fontSize: 13 }}>
+                      <bdi className="tech-badge">{item.code_system} {item.code_value}</bdi> {item.suggestion_text}
+                    </span>
+                    <select className="field" style={{ maxWidth: 320, marginBottom: 0 }}
+                      defaultValue={claim.diagnosis_options.length === 1
+                        ? (claim.diagnosis_options[0]?.code_value ?? "") : ""}
+                      onChange={(event) => { if (event.target.value) void linkDiagnosis(item.item_id, event.target.value); }}>
+                      <option value="">{L("— اختر التشخيص المبرِّر —", "— select justifying diagnosis —")}</option>
+                      {claim.diagnosis_options.map((option) => (
+                        <option key={option.item_id} value={option.code_value ?? ""}>
+                          {option.code_value} — {option.suggestion_text.slice(0, 60)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ))}
+              </div>
+            ) : null}
           </div>
         ) : null}
 
@@ -1020,15 +1102,18 @@ export default function ReviewPage() {
           {/* البوابة ② — اعتماد الأكواد ثم الرفع */}
           {upload.phase === "idle" && !locked && noteApproved ? (
             <>
-              <span style={{ fontSize: 12.5, color: counters.pending === 0 && awaitingInput === 0 ? "#12a594" : "#9c6f00", fontWeight: 700, flex: 1 }}>
+              <span style={{ fontSize: 12.5, color: counters.pending === 0 && awaitingInput === 0 && claimBlocked === 0 ? "#12a594" : "#9c6f00", fontWeight: 700, flex: 1 }}>
                 {counters.pending > 0
                   ? L(`${counters.pending} إرشادات معلقة — احسمها قبل اعتماد الأكواد (MDF-4222)`,
                       `${counters.pending} pending guidance items — resolve them before code approval (MDF-4222)`)
                   : awaitingInput > 0
                     ? L(`${awaitingInput} كود محجوب يتطلب إدخال الطبيب — لا تخمين`,
                         `${awaitingInput} withheld code(s) require clinician input — no guessing`)
-                    : L("جاهزة لاعتماد الأكواد · بالاعتماد تُرفع الزيارة FHIR/NPHIES ويُتاح التصدير (FR-802)",
-                        "Ready for code approval · Approval uploads the visit (FHIR/NPHIES) and unlocks export (FR-802)")}
+                    : claimBlocked > 0
+                      ? L(`${claimBlocked} بند حاجب في جاهزية المطالبة — احسمها أعلاه (MDF-4237)`,
+                          `${claimBlocked} blocking claim-readiness finding(s) — resolve them above (MDF-4237)`)
+                      : L("جاهزة لاعتماد الأكواد · بالاعتماد تُرفع الزيارة FHIR/NPHIES ويُتاح التصدير (FR-802)",
+                          "Ready for code approval · Approval uploads the visit (FHIR/NPHIES) and unlocks export (FR-802)")}
               </span>
               {/* مسار Unlock: متاح فقط في مرحلة ② قبل إتمامها — بعد الاعتماد النهائي المسار Addendum */}
               <button className="btn-secondary" onClick={() => setUnlockOpen(true)}
@@ -1036,7 +1121,9 @@ export default function ReviewPage() {
                          "A code needs a detail the frozen text lacks (laterality, with/without complications…)? Unlock with an audited reason")}>
                 {L("🔓 فتح المذكرة", "🔓 Unlock note")}
               </button>
-              <button className="btn-success btn-approve" disabled={counters.pending > 0 || awaitingInput > 0} onClick={() => void approve()}>
+              <button className="btn-success btn-approve"
+                disabled={counters.pending > 0 || awaitingInput > 0 || claimBlocked > 0}
+                onClick={() => void approve()}>
                 {L("② اعتماد الأكواد والرفع", "② Approve codes & upload")}
               </button>
             </>

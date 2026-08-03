@@ -43,7 +43,13 @@ def _visit_uploaded(client, headers, patient_id: str) -> str:
     summary = client.get(f"/api/v1/visits/{visit_id}/summary", headers=headers).json()["data"]
     for section in summary["sections"]:
         for item in section["guidance"]:
-            if item["status"] == "pending":
+            if item["status"] != "pending":
+                continue
+            # م12: التشخيص يُقبل (MDS يتطلب تشخيصاً أولياً) والباقي يُرفض
+            if item["kind"] in ("clinical_dx", "coding_match") and not item["requires_doctor_input"]:
+                client.patch(f"/api/v1/guidance-items/{item['id']}", headers=headers,
+                             json={"status": "accepted"})
+            else:
                 client.patch(f"/api/v1/guidance-items/{item['id']}", headers=headers,
                              json={"status": "rejected"})
     assert client.post(f"/api/v1/visits/{visit_id}/note-approve", headers=headers).status_code == 200

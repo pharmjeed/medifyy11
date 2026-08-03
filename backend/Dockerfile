@@ -16,6 +16,8 @@ COPY pyproject.toml ./
 COPY app ./app
 COPY alembic.ini ./
 COPY alembic ./alembic
+# قواعد جاهزية المطالبة (م12) — بيانات YAML يقرأها المحرك عند التشغيل
+COPY rules ./rules
 
 RUN pip install --no-cache-dir .
 

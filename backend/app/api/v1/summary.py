@@ -27,6 +27,7 @@ from ...models import (
 )
 from ...pipelines.run import run_edit_chat
 from ...pipelines.stt import get_stt
+from ...services.claim_readiness import diagnosis_options, evaluate_visit, unlinked_items
 from ...services.code_registry import check_code, registry_systems
 from ...services.evidence import refresh_section_evidence
 from ...services.history import previous_visits
@@ -275,6 +276,50 @@ def get_evidence(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB):
             for section in sections
         ],
     })
+
+
+@router.get("/visits/{visit_id}/claim-readiness")
+def claim_readiness(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB):
+    """جاهزية المطالبة (م12) — يُستدعى عند دخول البوابة ② وبعد كل تغيير أكواد.
+
+    القواعد بيانات في backend/rules/*.yaml — إضافة قاعدة لا تتطلب deploy.
+    """
+    visit = get_visit_for_doctor(db, visit_id)
+    result = evaluate_visit(db, visit)
+    result["diagnosis_options"] = diagnosis_options(db, visit)
+    result["unlinked_items"] = unlinked_items(db, visit)
+    return ok(result)
+
+
+class GuidanceLinkIn(BaseModel):
+    linked_dx_code: str = Field(min_length=1, max_length=32)
+
+
+@router.patch("/guidance-items/{item_id}/link-diagnosis")
+def link_diagnosis(item_id: uuid.UUID, body: GuidanceLinkIn, ctx: DoctorAuth, db: DB):
+    """ربط بند غير تشخيصي بتشخيص مبرِّر (واجهة الربط في البوابة ② — م12).
+
+    التشخيص يجب أن يكون من تشخيصات الزيارة المعتمدة نفسها — لا ربط بكود خارجها.
+    """
+    item = db.execute(select(GuidanceItem).where(GuidanceItem.id == item_id)).scalar_one_or_none()
+    if item is None:
+        raise MedifyError("MDF-4041")
+    section = db.execute(select(SummarySection).where(SummarySection.id == item.section_id)).scalar_one()
+    summary = db.execute(select(Summary).where(Summary.id == section.summary_id)).scalar_one()
+    visit = get_visit_for_doctor(db, summary.visit_id)
+    _guard_not_approved(db, visit)
+
+    available = {option["code_value"] for option in diagnosis_options(db, visit)}
+    if body.linked_dx_code not in available:
+        raise MedifyError("MDF-4233", details={
+            "code_value": body.linked_dx_code,
+            "reason": "not_an_approved_diagnosis_of_this_visit",
+            "available": sorted(available),
+        })
+    item.linked_dx_code = body.linked_dx_code
+    db.flush()
+    return ok({"item_id": str(item.id), "linked_dx_code": item.linked_dx_code,
+               "claim_readiness": evaluate_visit(db, visit)})
 
 
 class SectionPatchIn(BaseModel):

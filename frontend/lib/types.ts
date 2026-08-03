@@ -245,6 +245,27 @@ export interface SttConfidence {
   thresholds: { low: number; medium: number };
 }
 
+/** م12: جاهزية المطالبة — القواعد بيانات YAML على الخادم */
+export interface ClaimFinding {
+  rule_id: string;
+  severity: "pass" | "warn" | "block";
+  message_ar: string;
+  related_codes: string[];
+}
+
+export interface ClaimReadiness {
+  findings: ClaimFinding[];
+  blocking_count: number;
+  warning_count: number;
+  ready: boolean;
+  version: number;
+  diagnosis_options: { item_id: string; code_system: string | null; code_value: string | null; suggestion_text: string }[];
+  unlinked_items: {
+    item_id: string; kind: string; code_system: string | null; code_value: string | null;
+    suggestion_text: string; linked_dx_code: string | null;
+  }[];
+}
+
 export interface ApprovalRecord {
   approved_by: string;
   approved_at: string;

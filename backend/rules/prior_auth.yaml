@@ -1,0 +1,11 @@
+# أعلام التفويض المسبق — م12، قاعدة (4): تحذير لا حجب (القرار للطبيب/الإدارة).
+
+- rule_id: PRIOR_AUTH_REQUIRED
+  type: prior_auth
+  severity: warn
+  message_ar: "قد يتطلب تفويضاً مسبقاً من الدافع قبل التنفيذ."
+  params:
+    codes:
+      - 73000-00-60    # Lipid profile — مثال تشغيلي من عيّنة SBS
+    code_prefixes:
+      - "9019"         # صور مقطعية/رنين (بادئة SBS)

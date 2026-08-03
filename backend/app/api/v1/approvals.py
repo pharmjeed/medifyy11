@@ -23,6 +23,7 @@ from ...models import (
     UploadAttempt,
     UploadJob,
 )
+from ...services.claim_readiness import blocking_findings
 from ...services.code_registry import check_code, registry_systems
 from ...services.fhir import build_bundle, store_bundle
 from ...services.uploader import process_upload_job
@@ -212,6 +213,12 @@ def approve_visit(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB):
         if invalid_codes:
             raise MedifyError("MDF-4233", details={"items": invalid_codes})
 
+    # م12: محرك جاهزية المطالبة — أي block غير محسوم يمنع الاعتماد (نمط MDF-4222)
+    blocks = blocking_findings(db, visit)
+    first_pass = not blocks  # نسبة العبور من أول فحص → telemetry
+    if blocks:
+        raise MedifyError("MDF-4237", details={"findings": blocks})
+
     content_hash, codes_hash = summary_hashes(db, visit)
     approval = Approval(
         visit_id=visit.id,
@@ -257,7 +264,8 @@ def approve_visit(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB):
             SummarySection.content_current != SummarySection.content_original,
         )
     ).scalar_one()
-    track("visit.approved", ctx.facility_id, "doctor", visit.id, review_ms=review_ms, edits_count=edits_count)
+    track("visit.approved", ctx.facility_id, "doctor", visit.id, review_ms=review_ms,
+          edits_count=edits_count, claim_readiness_first_pass=1 if first_pass else 0)
 
     # الرفع الفوري (FR-802) — محاولات آلية ثم إشعارات فشل نهائي
     process_upload_job(db, job.id)

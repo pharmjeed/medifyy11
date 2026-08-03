@@ -1,0 +1,17 @@
+# الضرورة الطبية — كل كود غير تشخيصي يرتبط بتشخيص ICD-10-AM (م12، قاعدة (1))
+# رافض NPHIES الأول عملياً: إجراء/خدمة/دواء بلا تشخيص يبرره.
+
+- rule_id: MEDICAL_NECESSITY_LINK
+  type: medical_necessity
+  severity: block
+  message_ar: "بند بلا ربط بتشخيص — اربط كل إجراء/خدمة/دواء/جهاز بتشخيص ICD-10-AM يبرره."
+  params:
+    requires_link_for_kinds:
+      - clinical_procedure
+      - clinical_service
+      - clinical_rx
+      - clinical_device
+    diagnosis_kinds:
+      - clinical_dx
+      - coding_match
+    diagnosis_system: ICD10AM
