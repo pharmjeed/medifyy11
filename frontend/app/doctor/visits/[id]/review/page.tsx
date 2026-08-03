@@ -123,6 +123,9 @@ export default function ReviewPage() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   // م12: جاهزية المطالبة — تُفحص عند دخول البوابة ② وبعد كل تغيير أكواد
   const [claim, setClaim] = useState<ClaimReadiness | null>(null);
+  // م13: رفض المتبقي دفعة واحدة
+  const [rejectAllOpen, setRejectAllOpen] = useState(false);
+  const [rejectAllBusy, setRejectAllBusy] = useState(false);
   const chatRef = useRef<HTMLDivElement | null>(null);
   const dictTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -268,6 +271,23 @@ export default function ReviewPage() {
       void load();
     } catch (err) {
       handleMutationError(err);
+    }
+  };
+
+  // م13: رفض كل المعلّق دفعة واحدة — سطر Audit فردي لكل بند بمعرّف دفعة مشترك
+  const rejectRemaining = async () => {
+    setRejectAllBusy(true);
+    try {
+      const result = await api<{ rejected_count: number }>(
+        `/visits/${visitId}/guidance/reject-remaining`, { method: "POST" });
+      setRejectAllOpen(false);
+      toast(L(`رُفضت ${result.data.rejected_count} إرشادات — كل قرار مسجّل منفرداً في التدقيق`,
+              `${result.data.rejected_count} guidance items rejected — each decision individually audited`));
+      await load();
+    } catch (err) {
+      handleMutationError(err);
+    } finally {
+      setRejectAllBusy(false);
     }
   };
 
@@ -569,6 +589,14 @@ export default function ReviewPage() {
           <span className="badge success">{L("مقبول", "Accepted")} <span className="num">{counters.accepted}</span></span>
           <span className="badge danger">{L("مرفوض", "Rejected")} <span className="num">{counters.rejected}</span></span>
           <button className="btn-row" onClick={() => void openTranscript()}>{L("نص المحادثة الكامل", "Full transcript")}</button>
+          {/* م13: يظهر فقط عند وجود معلّق — وحسم آخر بند يحلّ شرط MDF-4222 فوراً */}
+          {!locked && counters.pending > 0 ? (
+            <button className="btn-row" onClick={() => setRejectAllOpen(true)}
+              title={L("رفض كل الإرشادات المعلّقة — كل قرار يُسجّل منفرداً في سجل التدقيق",
+                       "Reject all pending guidance — each decision is individually recorded in the audit log")}>
+              {L(`رفض كل المتبقي (${counters.pending})`, `Reject all remaining (${counters.pending})`)}
+            </button>
+          ) : null}
           {approvedLocked ? (
             <span className="badge success">{L("🔒 معتمدة — قراءة فقط (MDF-4226)", "🔒 Approved — read-only (MDF-4226)")}</span>
           ) : voided ? (
@@ -1256,6 +1284,34 @@ export default function ReviewPage() {
               {unlockBusy ? L("جارٍ الفتح…", "Unlocking…") : L("🔓 فتح المذكرة وإلغاء اعتماد ①", "🔓 Unlock note & revoke gate ①")}
             </button>
             <button className="btn-neutral" onClick={() => setUnlockOpen(false)}>{L("تراجع", "Back")}</button>
+          </div>
+        </Modal>
+      ) : null}
+
+      {/* مودال رفض المتبقي (م13) — يعرض القائمة قبل التأكيد */}
+      {rejectAllOpen && summary !== null ? (
+        <Modal title={L(`رفض كل الإرشادات المعلّقة (${counters.pending})`, `Reject all pending guidance (${counters.pending})`)}
+               onClose={() => setRejectAllOpen(false)} wide>
+          <p style={{ fontSize: 14, color: "#5c7096", marginTop: 0 }}>
+            {L("سيُرفض كل بند من القائمة أدناه، ويُسجَّل قرار الرفض لكل بند منفرداً في سجل التدقيق (بمعرّف دفعة مشترك). الرفض قرار سريري مسجَّل — لا حذف للاقتراح.",
+               "Every item below will be rejected, and each rejection is recorded individually in the audit log (sharing one bulk action id). Rejection is a recorded clinical decision — the suggestion is not deleted.")}
+          </p>
+          <div style={{ maxHeight: 300, overflowY: "auto", border: "1px solid #c7d1e0", borderRadius: 10, padding: 10 }}>
+            {allGuidance.filter((item) => item.status === "pending").map((item) => (
+              <div key={item.id} style={{ fontSize: 13, padding: "6px 0", borderBottom: "1px dashed #eef2f7" }}>
+                <span className="badge" style={{ background: KIND_META[item.kind].bg, color: KIND_META[item.kind].fg, marginInlineEnd: 6 }}>
+                  {L(KIND_META[item.kind].label.ar, KIND_META[item.kind].label.en)}
+                </span>
+                {item.suggestion_text}
+                {item.code_value ? <bdi className="tech-badge" style={{ marginInlineStart: 6 }}>{item.code_system} {item.code_value}</bdi> : null}
+              </div>
+            ))}
+          </div>
+          <div className="modal-actions">
+            <button className="btn-danger" disabled={rejectAllBusy} onClick={() => void rejectRemaining()}>
+              {rejectAllBusy ? L("جارٍ الرفض…", "Rejecting…") : L(`تأكيد رفض ${counters.pending}`, `Confirm rejecting ${counters.pending}`)}
+            </button>
+            <button className="btn-neutral" onClick={() => setRejectAllOpen(false)}>{L("تراجع", "Back")}</button>
           </div>
         </Modal>
       ) : null}

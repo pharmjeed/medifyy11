@@ -8,8 +8,10 @@ from typing import Any
 from fastapi import APIRouter, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import select
+from uuid6 import uuid7
 
 from ...analytics import track
+from ...audit import audit
 from ...deps import DoctorAuth, DB
 from ...envelope import ok
 from ...errors import MedifyError
@@ -463,6 +465,46 @@ def resolve_guidance(item_id: uuid.UUID, body: GuidancePatchIn, ctx: DoctorAuth,
         "code_value": item.code_value,
         "requires_doctor_input": item.requires_doctor_input,
         "confidence": item.confidence,
+    })
+
+
+@router.post("/visits/{visit_id}/guidance/reject-remaining")
+def reject_remaining_guidance(visit_id: uuid.UUID, ctx: DoctorAuth, db: DB):
+    """رفض كل الإرشادات المعلّقة دفعة واحدة (م13).
+
+    كل إرشاد يُكتب سطر رفض فردي مستقل في Audit مع bulk_action_id مشترك — الفعل
+    الجماعي لا يذيب المسؤولية الفردية عن كل بند (المبدأ 4).
+    """
+    visit = get_visit_for_doctor(db, visit_id)
+    _guard_not_approved(db, visit)
+    summary = _get_summary(db, visit)
+    pending = db.execute(
+        select(GuidanceItem)
+        .join(SummarySection, SummarySection.id == GuidanceItem.section_id)
+        .where(SummarySection.summary_id == summary.id, GuidanceItem.status == "pending")
+        .order_by(GuidanceItem.id)
+    ).scalars().all()
+    if not pending:
+        return ok({"rejected_count": 0, "bulk_action_id": None})
+
+    bulk_action_id = str(uuid7())
+    now = dt.datetime.now(dt.timezone.utc)
+    for item in pending:
+        started = item.created_at
+        item.status = "rejected"
+        item.resolved_by = ctx.user_id
+        item.resolved_at = now
+        audit(db, ctx.facility_id, "guidance.rejected", "guidance_item", item.id, ctx.user_id,
+              {"bulk_action_id": bulk_action_id, "kind": item.kind,
+               "code_system": item.code_system, "code_value": item.code_value})
+        track("guidance.resolved", ctx.facility_id, "doctor", visit.id,
+              kind=item.kind, status="rejected",
+              time_to_resolve_ms=int((now - started).total_seconds() * 1000))
+    db.flush()
+    return ok({
+        "rejected_count": len(pending),
+        "bulk_action_id": bulk_action_id,
+        "claim_readiness": evaluate_visit(db, visit),
     })
 
 
